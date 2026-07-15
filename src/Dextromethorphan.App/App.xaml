@@ -1,0 +1,16 @@
+<Application x:Class="Dextromethorphan.App.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="clr-namespace:Dextromethorphan.App.UI"
+             ShutdownMode="OnMainWindowClose">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ui:StringEqualsConverter x:Key="StringEquals"/>
+            <ui:InverseBooleanToVisibilityConverter x:Key="InverseBoolToVisibility"/>
+            <ui:ArtworkThumbnailConverter x:Key="ArtworkThumbnail"/>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="UI/Styles/Theme.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

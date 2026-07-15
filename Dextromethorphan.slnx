@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Dextromethorphan.Core/Dextromethorphan.Core.csproj" />
+    <Project Path="src/Dextromethorphan.Infrastructure/Dextromethorphan.Infrastructure.csproj" />
+    <Project Path="src/Dextromethorphan.App/Dextromethorphan.App.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Dextromethorphan.Tests/Dextromethorphan.Tests.csproj" />
+  </Folder>
+</Solution>

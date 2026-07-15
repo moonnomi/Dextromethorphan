@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>Dextromethorphan</AssemblyName>
+    <RootNamespace>Dextromethorphan.App</RootNamespace>
+    <StartupObject>Dextromethorphan.App.App</StartupObject>
+    <ApplicationIcon>Assets\Brand\dextromethorphan.ico</ApplicationIcon>
+    <PublishSingleFile>false</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+  </PropertyGroup>
+  <ItemGroup>
+    <Resource Include="Assets\Brand\dextromethorphan-symbol.png" />
+    <Resource Include="Assets\Brand\dextromethorphan-symbol-compact.png" />
+    <Resource Include="Assets\Brand\dextromethorphan-32.png" />
+    <Resource Include="Assets\Brand\dextromethorphan-64.png" />
+    <Resource Include="Assets\Brand\dextromethorphan-128.png" />
+    <Resource Include="Assets\Brand\dextromethorphan-256.png" />
+    <Resource Include="Assets\Brand\dextromethorphan.ico" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Dextromethorphan.Core/Dextromethorphan.Core.csproj" />
+    <ProjectReference Include="../Dextromethorphan.Infrastructure/Dextromethorphan.Infrastructure.csproj" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+  </ItemGroup>
+</Project>
