@@ -1,50 +1,87 @@
-# Dextromethorphan
+<p align="center">
+  <img src="docs/images/dextromethorphan-logo.png" alt="Dextromethorphan Music Player" width="165">
+</p>
 
-Dextromethorphan is an offline-first native Windows music player inspired by Symfonium's depth and desktop audio workflows. The repository contains a buildable WPF/.NET 10 application with a persistent library, real-time scanner, synced lyrics, queue, and event-driven WASAPI audio engine.
+<p align="center">
+  A fast, offline-first music player built for Windows.<br>
+  Native playback, a focused library, synced lyrics, and no telemetry.
+</p>
 
-## Run
+<p align="center">
+  <strong>Windows 10/11</strong> · <strong>WPF</strong> · <strong>.NET 10</strong> · <strong>SQLite</strong> · <strong>WASAPI</strong>
+</p>
 
-Requirements: Windows 10 2004 or later, the .NET 10 SDK, and an audio endpoint.
+> [!NOTE]
+> Dextromethorphan is under active development. The core player is usable, but settings, audio-device behavior, and parts of the interface may still change.
+
+## What it looks like
+
+### Your library
+
+Square artwork, quick navigation, a persistent player, and an editable queue—without a spreadsheet-style track grid.
+
+![Dextromethorphan album library](docs/images/library.png)
+
+### Collections and queue
+
+Open any album, artist, genre, or folder in its own tab, then play individual tracks or send the full collection to the queue.
+
+![Dextromethorphan collection view and playback queue](docs/images/collection-and-queue.png)
+
+## Highlights
+
+- **Windows-native audio** — event-driven WASAPI shared and exclusive modes, per-device profiles, gapless playback, crossfade, ReplayGain, speed control, and DSD over PCM (DoP).
+- **Offline library** — local folders, mounted drives, and SMB/UNC paths are scanned into a fast SQLite library with file watching and cached artwork.
+- **Flexible browsing** — albums, artists, genres, songs, folders, playlists, favorites, and fast full-library search.
+- **Modern playback flow** — temporary queue, drag reordering, undo/redo, shuffle, repeat, bookmarks, sleep timer, and Spotify-style previous-track behavior.
+- **Lyrics that belong in the player** — static, LRC, and enhanced-LRC lyrics with line and word timing, automatic scrolling, and click-to-seek.
+- **Desktop integration** — rebindable shortcuts, media keys, Windows media controls, session restore, and an audio diagnostics panel.
+
+## Run it from source
+
+You need Windows 10 version 2004 or newer and the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 ```powershell
+git clone https://github.com/moonnomi/Dextromethorphan.git
+cd Dextromethorphan
 dotnet restore Dextromethorphan.slnx
 dotnet run --project src/Dextromethorphan.App
 ```
 
-On first launch, choose **Add music folder**. Local folders, mounted drives, UNC/SMB paths, and network drives use the same asynchronous scanner. App data is stored in `%APPDATA%\Dextromethorphan`.
+On first launch, select **Add music folder**. Your library, settings, and cache live in `%APPDATA%\Dextromethorphan`.
 
-## Implemented
+## Audio support
 
-- Event-driven WASAPI with endpoint probing, shared/exclusive profiles, exact-format fallback policy, configurable buffers, device recovery, and direct/DSP diagnostics.
-- Byte-preserving direct playback with same-format gapless preloading.
-- Normalized DSP playback with cross-format gapless transitions, 0-10 second equal-power crossfade, ReplayGain, tagged-peak clipping prevention, fades, software volume, and pitch-preserving speed from 0.5x to 1.5x.
-- Native DSF-to-DoP 1.1 streaming. The one-bit DSD payload is framed, not converted to PCM.
-- SQLite WAL library with transactional scan batches, FTS5 prefix/diacritic search, ratings/love/play state, bookmarks, manual and rule-based smart playlists, and atomic JSON settings.
-- Recursive concurrent scanning with a bounded database writer and debounced file watchers. Tags, embedded lyrics, `.lrc`, and `.txt` sidecars are supported; embedded artwork is held in a deterministic, size-limited on-disk cache instead of bloating the library database.
-- Ordered playlist persistence plus UTF-8 M3U8, PLS v2, and XSPF import/export.
-- Rebindable in-app and system-wide shortcuts with conflict reporting, media-key routing, and Windows System Media Transport Controls for play/pause/next/previous/stop, seeking, timeline state, and track metadata.
-- Managed Ogg Vorbis decoding; WAV, AIFF, MP3, and Media Foundation decoder paths.
-- Queue replace/play-next/add/move/remove, repeat/shuffle, 50-level undo/redo, automatic next-track preloading, sleep-timer backend, and bookmark resume/save.
-- LRC and enhanced-LRC parsing with millisecond, multi-timestamp, line, and word timing.
-- Native custom-chrome WPF shell with functional Albums, Artists, Genres, Songs, Folders, Playlists, Favorites, and Now Playing views; cached artwork cards; a lightweight virtualized track list; persistent transport controls; and a collapsible queue inspector.
+Dextromethorphan has separate direct and DSP playback paths. Exclusive WASAPI without DSP can bypass the Windows shared mixer; enabling software volume, ReplayGain, crossfade, fades, or speed processing intentionally uses the DSP path instead.
 
-## Audio-mode contract
+Managed decoders handle FLAC and Ogg Vorbis. WAV, AIFF, and MP3 use native NAudio paths, while AAC, ALAC, M4A, WMA, and Opus use Windows Media Foundation where a platform decoder is available. Uncompressed DSF and DFF can be streamed as DoP to compatible hardware.
 
-"Bit-perfect" and DSP are separate modes. Exclusive WASAPI with event sync and no DSP avoids the Windows shared-mode mixer and resampler. Software volume, ReplayGain, crossfade, fades, or speed/pitch processing deliberately selects the DSP path and is reported as non-bit-perfect. Hardware volume can retain the direct path, but diagnostics conservatively do not certify the final DAC result as bit-perfect.
+For the exact mode and fallback rules, see [Audio](docs/AUDIO.md).
 
-Direct gapless playback is byte-continuous when adjacent decoded formats match. The DSP path normalizes differing sample rates for sample-continuous transitions. FLAC/AAC/ALAC/M4A/WMA/Opus currently use installed Windows Media Foundation codecs. Ogg Vorbis uses bundled NVorbis. Uncompressed DSF and DFF support DoP; DST compression and native-ASIO DSD remain pending.
-
-See [docs/AUDIO.md](docs/AUDIO.md) for the mode matrix, [docs/LIBRARY.md](docs/LIBRARY.md) for library and playlist behavior, [docs/UI.md](docs/UI.md) for navigation and shell behavior, [docs/WINDOWS-INTEGRATION.md](docs/WINDOWS-INTEGRATION.md) for shortcuts and media controls, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for subsystem boundaries.
-
-## Test and package
+## Build and test
 
 ```powershell
 dotnet test Dextromethorphan.slnx
-.\scripts\build-release.ps1 -Runtime win-x64 -SelfContained
-# With Inno Setup 6 installed:
-.\scripts\build-release.ps1 -Runtime win-x64 -SelfContained -Installer
+./scripts/build-release.ps1 -Runtime win-x64 -SelfContained
 ```
 
-## License notes
+Add `-Installer` when [Inno Setup 6](https://jrsoftware.org/isinfo.php) is installed.
 
-NAudio and NVorbis are MIT, BunLabs.NAudio.Flac is MS-PL, Microsoft.Data.Sqlite is MIT, SQLitePCLRaw is Apache-2.0, and TagLibSharp is LGPL-2.1. Replace `ITrackMetadataReader` and the managed FLAC adapter if a permissive-only distribution policy is mandatory.
+## Documentation
+
+- [Audio engine and playback modes](docs/AUDIO.md)
+- [Library, scanning, and playlists](docs/LIBRARY.md)
+- [Interface and navigation](docs/UI.md)
+- [Windows shortcuts and media controls](docs/WINDOWS-INTEGRATION.md)
+- [Project architecture](docs/ARCHITECTURE.md)
+
+## Project status
+
+The current focus is playback reliability, audio diagnostics, and interaction polish. Bug reports and focused pull requests are welcome through [GitHub Issues](https://github.com/moonnomi/Dextromethorphan/issues).
+
+<details>
+<summary>Third-party software and licenses</summary>
+
+NAudio and NVorbis are MIT licensed; BunLabs.NAudio.Flac is MS-PL; Microsoft.Data.Sqlite is MIT; SQLitePCLRaw is Apache-2.0; and TagLibSharp is LGPL-2.1. Replace `ITrackMetadataReader` and the managed FLAC adapter if a permissive-only distribution policy is required.
+
+</details>
