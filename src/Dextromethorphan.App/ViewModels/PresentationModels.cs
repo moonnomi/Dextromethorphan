@@ -21,10 +21,33 @@ public sealed class LibraryCardViewModel : ObservableObject
     public bool IsSelected { get => _isSelected; set => Set(ref _isSelected, value); }
 }
 
-public sealed class LyricLineViewModel(LyricLine line) : ObservableObject
+public sealed class QueueEntryViewModel(QueueEntry entry, string? artworkPath) : ObservableObject
+{
+    private string? _artworkPath = artworkPath;
+    public QueueEntry Entry { get; } = entry;
+    public Track Track => Entry.Track;
+    public bool IsPlaying => Entry.IsPlaying;
+    public string? ArtworkPath { get => _artworkPath; set => Set(ref _artworkPath, value); }
+}
+
+public sealed class LyricLineViewModel(LyricLine line, bool isSynced = true) : ObservableObject
 {
     private bool _isActive;
+    private bool _isPast;
     public LyricLine Line { get; } = line;
     public string Text => Line.Text;
+    public bool IsSynced { get; } = isSynced;
+    public bool CanSeek => IsSynced;
+    public string TimestampText => IsSynced ? FormatTime(Line.Start) : "";
     public bool IsActive { get => _isActive; set => Set(ref _isActive, value); }
+    public bool IsPast { get => _isPast; private set => Set(ref _isPast, value); }
+
+    public void UpdatePosition(TimeSpan position)
+    {
+        if (!IsSynced) return;
+        IsActive = Line.IsActive(position);
+        IsPast = !IsActive && Line.Start < position;
+    }
+
+    private static string FormatTime(TimeSpan time) => time.ToString(time.TotalHours >= 1 ? @"h\:mm\:ss" : @"m\:ss");
 }

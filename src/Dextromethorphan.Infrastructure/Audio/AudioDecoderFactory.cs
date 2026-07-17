@@ -1,4 +1,5 @@
 using Dextromethorphan.Core.Models;
+using NAudio.Flac;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
 using NAudio.Vorbis;
@@ -15,12 +16,13 @@ internal static class AudioDecoderFactory
             ".wav" or ".wave" => new WaveFileReader(track.Path),
             ".aif" or ".aiff" => new AiffFileReader(track.Path),
             ".mp3" => new Mp3FileReader(track.Path),
+            ".flac" => new FlacReader(track.Path),
             ".ogg" => new VorbisWaveReader(track.Path),
             ".dsf" => new DsfDopWaveStream(track.Path),
             ".dff" => new DffDopWaveStream(track.Path),
             _ => new MediaFoundationReader(track.Path)
         };
-        var decoder = extension switch { ".dsf" => "Native DSF → DoP 1.1", ".dff" => "Native DSDIFF → DoP 1.1", ".ogg" => "NVorbis managed decoder", ".wav" or ".wave" or ".aif" or ".aiff" or ".mp3" => "NAudio native", _ => "Windows Media Foundation" };
+        var decoder = extension switch { ".dsf" => "Native DSF → DoP 1.1", ".dff" => "Native DSDIFF → DoP 1.1", ".flac" => "Managed FLAC decoder", ".ogg" => "NVorbis managed decoder", ".wav" or ".wave" or ".aif" or ".aiff" or ".mp3" => "NAudio native", _ => "Windows Media Foundation" };
         return new DecodedAudio(track, reader, decoder);
     }
 

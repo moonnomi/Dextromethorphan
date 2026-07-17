@@ -47,4 +47,4 @@ dotnet test Dextromethorphan.slnx
 
 ## License notes
 
-NAudio and NVorbis are MIT, Microsoft.Data.Sqlite is MIT, SQLitePCLRaw is Apache-2.0, and TagLibSharp is LGPL-2.1. Replace `ITrackMetadataReader` if a permissive-only distribution policy is mandatory.
+NAudio and NVorbis are MIT, BunLabs.NAudio.Flac is MS-PL, Microsoft.Data.Sqlite is MIT, SQLitePCLRaw is Apache-2.0, and TagLibSharp is LGPL-2.1. Replace `ITrackMetadataReader` and the managed FLAC adapter if a permissive-only distribution policy is mandatory.

@@ -2,7 +2,7 @@ namespace Dextromethorphan.Core.Models;
 
 public sealed class AppSettings
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public string Theme { get; set; } = "Dark";
     public string AccentColor { get; set; } = "#FF8A3D";
@@ -33,6 +33,7 @@ public sealed class AppSettings
     public double VolumeStep { get; set; } = 0.05;
     public List<ShortcutBinding> Shortcuts { get; set; } = DefaultShortcuts();
     public Dictionary<string, string>? KeyBindings { get; set; }
+    public PlaybackSessionSettings PlaybackSession { get; set; } = new();
 
     public static Dictionary<string, string> DefaultKeyBindings() => new(StringComparer.OrdinalIgnoreCase)
     {
@@ -66,6 +67,17 @@ public sealed class AppSettings
         new() { Action = ShortcutActions.VolumeUp, Gesture = "Ctrl+Alt+Up", Global = true },
         new() { Action = ShortcutActions.VolumeDown, Gesture = "Ctrl+Alt+Down", Global = true }
     ];
+}
+
+public sealed class PlaybackSessionSettings
+{
+    public List<string> QueuePaths { get; set; } = [];
+    public int CurrentIndex { get; set; }
+    public double PositionSeconds { get; set; }
+    public bool WasPlaying { get; set; }
+    public bool Shuffle { get; set; }
+    public RepeatMode RepeatMode { get; set; }
+    public string LastView { get; set; } = "Albums";
 }
 
 public sealed record ScanProgress(int Discovered, int Processed, int Added, int Updated, int Failed, string? CurrentPath, bool IsComplete);

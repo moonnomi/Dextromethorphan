@@ -109,6 +109,7 @@ public interface IPlaybackQueue
     void Move(int fromIndex, int toIndex);
     bool Remove(Guid id);
     Track? Current { get; }
+    Track? Select(Guid id);
     Track? Advance();
     Track? Previous();
     bool Undo();

@@ -94,6 +94,11 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
         settings.LibraryFolders = settings.LibraryFolders.Where(Directory.Exists).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         settings.ExcludedFolders = settings.ExcludedFolders.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         settings.OutputProfiles ??= [new AudioOutputProfile()];
+        settings.PlaybackSession ??= new PlaybackSessionSettings();
+        settings.PlaybackSession.QueuePaths ??= [];
+        settings.PlaybackSession.QueuePaths = settings.PlaybackSession.QueuePaths.Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
+        settings.PlaybackSession.CurrentIndex = Math.Max(0, settings.PlaybackSession.CurrentIndex);
+        settings.PlaybackSession.PositionSeconds = Math.Max(0, settings.PlaybackSession.PositionSeconds);
         if (previousSchema < 2)
         {
             var migrated = (settings.KeyBindings ?? AppSettings.DefaultKeyBindings())

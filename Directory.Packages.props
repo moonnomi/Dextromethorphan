@@ -7,6 +7,7 @@
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
     <PackageVersion Include="NAudio" Version="2.3.0" />
+    <PackageVersion Include="BunLabs.NAudio.Flac" Version="2.0.1" />
     <PackageVersion Include="NAudio.Vorbis" Version="1.5.0" />
     <PackageVersion Include="TagLibSharp" Version="2.3.0" />
     <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />

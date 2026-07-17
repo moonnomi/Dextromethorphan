@@ -38,6 +38,18 @@ public sealed class AudioPipelineTests
     }
 
     [Fact]
+    public void DspPositionCounterPreservesAnAbsoluteSeekOffset()
+    {
+        var source = new ArraySampleProvider(Enumerable.Repeat(1f, 12).ToArray(), 4, 1);
+        using var provider = new TransitionSampleProvider(source, 20, initialPositionSamples: 8);
+        var output = new float[4];
+
+        Assert.Equal(8, provider.PositionSamples);
+        Assert.Equal(4, provider.Read(output, 0, output.Length));
+        Assert.Equal(12, provider.PositionSamples);
+    }
+
+    [Fact]
     public void CrossfadeUsesEqualPowerAndDoesNotInsertSilence()
     {
         var first = new ArraySampleProvider(Enumerable.Repeat(1f, 8).ToArray(), 4, 1);

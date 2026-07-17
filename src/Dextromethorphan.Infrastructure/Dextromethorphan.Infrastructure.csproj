@@ -2,6 +2,7 @@
   <ItemGroup>
     <ProjectReference Include="../Dextromethorphan.Core/Dextromethorphan.Core.csproj" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="BunLabs.NAudio.Flac" />
     <PackageReference Include="NAudio" />
     <PackageReference Include="NAudio.Vorbis" />
     <PackageReference Include="TagLibSharp" />

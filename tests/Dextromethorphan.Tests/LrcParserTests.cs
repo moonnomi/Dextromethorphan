@@ -23,4 +23,21 @@ public sealed class LrcParserTests
         Assert.Equal("Blue in Green", lyrics.Lines[0].Text);
         Assert.Equal("Second line", lyrics.At(TimeSpan.FromSeconds(8))?.Text);
     }
+
+    [Fact]
+    public void ActivatesAStandardLrcLineOnlyInsideItsTimestampWindow()
+    {
+        const string source = """
+            [00:15.63] First line
+            [00:21.61] Second line
+            [00:26.88] Third line
+            """;
+
+        var lyrics = LrcParser.Parse(source);
+
+        Assert.Null(lyrics.At(TimeSpan.FromSeconds(6)));
+        Assert.True(lyrics.Lines[0].IsActive(TimeSpan.FromSeconds(16)));
+        Assert.False(lyrics.Lines[0].IsActive(TimeSpan.FromSeconds(22)));
+        Assert.Equal("Second line", lyrics.At(TimeSpan.FromSeconds(22))?.Text);
+    }
 }

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
@@ -20,6 +21,10 @@ public partial class MainWindow : Window
     private bool _isSeekDragging;
     private bool _isVolumeDragging;
     private SettingsWindow? _settingsWindow;
+    private CancellationTokenSource? _lyricScrollCancellation;
+    private Point _queueDragStart;
+    private QueueEntryViewModel? _queuePointerEntry;
+    private bool _queueDragStarted;
     private DateTime _startupStartedAt;
     private readonly IShortcutService _shortcuts;
     private readonly ISystemMediaTransportService _systemMedia;
@@ -100,8 +105,84 @@ public partial class MainWindow : Window
 
     private void ViewModelOnPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is not (nameof(MainViewModel.CurrentView) or nameof(MainViewModel.IsCollectionDetailOpen))) return;
-        Dispatcher.BeginInvoke(AnimateViewTransition, DispatcherPriority.Render);
+        if (e.PropertyName == nameof(MainViewModel.HasLyrics))
+        {
+            Dispatcher.BeginInvoke(ResetLyricsView, DispatcherPriority.Loaded);
+            return;
+        }
+        if (e.PropertyName == nameof(MainViewModel.ActiveLyricLine))
+        {
+            Dispatcher.BeginInvoke(() => ScrollToActiveLyric(ViewModel.ActiveLyricLine), DispatcherPriority.Loaded);
+            return;
+        }
+        if (e.PropertyName is nameof(MainViewModel.CurrentView) or nameof(MainViewModel.IsCollectionDetailOpen))
+            Dispatcher.BeginInvoke(AnimateViewTransition, DispatcherPriority.Render);
+    }
+
+    private void ResetLyricsView()
+    {
+        _lyricScrollCancellation?.Cancel();
+        if (ViewModel.Lyrics.FirstOrDefault() is { } first) LyricsList.ScrollIntoView(first);
+        LyricsList.UpdateLayout();
+        FindVisualChild<ScrollViewer>(LyricsList)?.ScrollToTop();
+    }
+
+    private async void ScrollToActiveLyric(LyricLineViewModel? line)
+    {
+        if (line is null || !IsLoaded) return;
+        _lyricScrollCancellation?.Cancel();
+        _lyricScrollCancellation?.Dispose();
+        _lyricScrollCancellation = new CancellationTokenSource();
+        var token = _lyricScrollCancellation.Token;
+        try
+        {
+            LyricsList.ScrollIntoView(line);
+            await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Loaded, token);
+            if (LyricsList.ItemContainerGenerator.ContainerFromItem(line) is not FrameworkElement container) return;
+            var scroller = FindVisualChild<ScrollViewer>(LyricsList);
+            if (scroller is null || scroller.ViewportHeight <= 0) return;
+            var center = container.TranslatePoint(new Point(0, container.ActualHeight / 2), scroller).Y;
+            var start = scroller.VerticalOffset;
+            var target = Math.Clamp(start + center - (scroller.ViewportHeight / 2), 0, scroller.ScrollableHeight);
+            if (!ViewModel.AnimationsEnabled)
+            {
+                scroller.ScrollToVerticalOffset(target);
+                return;
+            }
+            var clock = Stopwatch.StartNew();
+            const double duration = 220;
+            while (clock.Elapsed.TotalMilliseconds < duration)
+            {
+                token.ThrowIfCancellationRequested();
+                var progress = Math.Clamp(clock.Elapsed.TotalMilliseconds / duration, 0, 1);
+                var eased = 1 - Math.Pow(1 - progress, 3);
+                scroller.ScrollToVerticalOffset(start + ((target - start) * eased));
+                await Task.Delay(16, token);
+            }
+            scroller.ScrollToVerticalOffset(target);
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T result) return result;
+            if (FindVisualChild<T>(child) is { } nested) return nested;
+        }
+        return null;
+    }
+
+    private static T? FindVisualParent<T>(DependencyObject? child) where T : DependencyObject
+    {
+        while (child is not null)
+        {
+            if (child is T result) return result;
+            child = VisualTreeHelper.GetParent(child);
+        }
+        return null;
     }
 
     private void AnimateViewTransition()
@@ -133,6 +214,48 @@ public partial class MainWindow : Window
     private void TrackList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
     {
         if (ViewModel.PlaySelectedCommand.CanExecute(null)) ViewModel.PlaySelectedCommand.Execute(null);
+    }
+
+    private void QueueList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        _queueDragStart = e.GetPosition(QueueList);
+        _queueDragStarted = false;
+        _queuePointerEntry = FindVisualParent<ListBoxItem>(e.OriginalSource as DependencyObject)?.DataContext as QueueEntryViewModel;
+    }
+
+    private void QueueList_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (_queuePointerEntry is null || e.LeftButton != MouseButtonState.Pressed || _queueDragStarted) return;
+        var position = e.GetPosition(QueueList);
+        if (Math.Abs(position.X - _queueDragStart.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(position.Y - _queueDragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+        _queueDragStarted = true;
+        var entry = _queuePointerEntry;
+        DragDrop.DoDragDrop(QueueList, new DataObject(typeof(QueueEntryViewModel), entry), DragDropEffects.Move);
+        _queuePointerEntry = null;
+    }
+
+    private void QueueList_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        var entry = _queuePointerEntry;
+        _queuePointerEntry = null;
+        if (_queueDragStarted || entry is null) return;
+        if (ViewModel.PlayQueueEntryCommand.CanExecute(entry)) ViewModel.PlayQueueEntryCommand.Execute(entry);
+        e.Handled = true;
+    }
+
+    private void QueueList_DragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent(typeof(QueueEntryViewModel)) ? DragDropEffects.Move : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void QueueList_Drop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData(typeof(QueueEntryViewModel)) is not QueueEntryViewModel source) return;
+        var hit = QueueList.InputHitTest(e.GetPosition(QueueList)) as DependencyObject;
+        if (FindVisualParent<ListBoxItem>(hit)?.DataContext is QueueEntryViewModel target)
+            ViewModel.MoveQueueEntry(source.Entry.Id, target.Entry.Id);
+        e.Handled = true;
     }
 
     private void Gallery_ScrollChanged(object sender, ScrollChangedEventArgs e)
@@ -294,6 +417,8 @@ public partial class MainWindow : Window
         if (_allowClose) return;
         e.Cancel = true;
         await ViewModel.ShutdownAsync();
+        _lyricScrollCancellation?.Cancel();
+        _lyricScrollCancellation?.Dispose();
         ViewModel.PropertyChanged -= ViewModelOnPropertyChanged;
         _allowClose = true;
         Close();

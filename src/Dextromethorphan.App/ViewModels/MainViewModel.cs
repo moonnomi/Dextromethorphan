@@ -27,6 +27,8 @@ public sealed class MainViewModel : ObservableObject
     private readonly Stack<NavigationEntry> _forwardHistory = new();
     private CancellationTokenSource? _searchCancellation;
     private CancellationTokenSource? _artworkCancellation;
+    private CancellationTokenSource? _queueArtworkCancellation;
+    private CancellationTokenSource? _sessionSaveCancellation;
     private CancellationTokenSource? _volumeCancellation;
     private IReadOnlyList<Track> _allTracks = [];
     private IReadOnlyList<LibraryCardViewModel> _activeGroups = [];
@@ -52,8 +54,12 @@ public sealed class MainViewModel : ObservableObject
     private bool _isCollectionDetailOpen;
     private bool _isUserSeeking;
     private bool _animationsEnabled = true;
+    private bool _diagnosticsVisible;
+    private bool _restoringSession;
     private int _albumTileSize = 172;
     private string _activeLyric = "Lyrics will appear here when available.";
+    private LyricLineViewModel? _activeLyricLine;
+    private bool _hasSyncedLyrics;
 
     public MainViewModel(
         ISettingsService settings,
@@ -76,16 +82,26 @@ public sealed class MainViewModel : ObservableObject
         PlaySelectedCommand = new AsyncRelayCommand(_ => PlaySelectedAsync(), _ => SelectedTrack is not null);
         TogglePlaybackCommand = new AsyncRelayCommand(_ => TogglePlaybackAsync());
         NextCommand = new AsyncRelayCommand(_ => ChangeTrackAsync(_queue.Advance()));
-        PreviousCommand = new AsyncRelayCommand(_ => ChangeTrackAsync(_queue.Previous()));
+        PreviousCommand = new AsyncRelayCommand(_ => HandlePreviousAsync());
         AddToQueueCommand = new RelayCommand(p => { if (p is Track track) _queue.Add([track]); });
         PlayNextCommand = new RelayCommand(p => { if (p is Track track) _queue.PlayNext([track]); });
         ToggleQueueCommand = new RelayCommand(_ => QueueVisible = !QueueVisible);
-        ToggleShuffleCommand = new RelayCommand(_ => { _queue.Shuffle = !_queue.Shuffle; Raise(nameof(IsShuffleEnabled)); });
-        CycleRepeatCommand = new RelayCommand(_ => { _queue.RepeatMode = _queue.RepeatMode switch { RepeatMode.Off => RepeatMode.All, RepeatMode.All => RepeatMode.One, _ => RepeatMode.Off }; Raise(nameof(RepeatText)); Raise(nameof(IsRepeatEnabled)); });
+        ToggleShuffleCommand = new RelayCommand(_ => { _queue.Shuffle = !_queue.Shuffle; Raise(nameof(IsShuffleEnabled)); Raise(nameof(ShuffleText)); ScheduleSessionSave(); });
+        CycleRepeatCommand = new RelayCommand(_ =>
+        {
+            _queue.RepeatMode = _queue.RepeatMode switch { RepeatMode.Off => RepeatMode.All, RepeatMode.All => RepeatMode.One, _ => RepeatMode.Off };
+            Raise(nameof(RepeatText)); Raise(nameof(IsRepeatEnabled)); Raise(nameof(IsRepeatOne));
+            ScheduleSessionSave();
+        });
         ScanCommand = new AsyncRelayCommand(_ => ScanAsync(), _ => !_scanner.IsScanning && _settings.Current.LibraryFolders.Count > 0);
         UndoQueueCommand = new RelayCommand(_ => _queue.Undo());
         ClearQueueCommand = new RelayCommand(_ => _queue.Replace([]));
         LoveCommand = new AsyncRelayCommand(_ => ToggleLoveAsync(), _ => CurrentTrack is not null);
+        SeekLyricCommand = new AsyncRelayCommand(p => SeekLyricAsync(p as LyricLineViewModel));
+        PlayQueueEntryCommand = new AsyncRelayCommand(p => PlayQueueEntryAsync(p as QueueEntryViewModel));
+        RemoveQueueEntryCommand = new AsyncRelayCommand(p => RemoveQueueEntryAsync(p as QueueEntryViewModel));
+        PlayQueueEntryNextCommand = new RelayCommand(p => MoveQueueEntryNext(p as QueueEntryViewModel));
+        ToggleDiagnosticsCommand = new RelayCommand(_ => DiagnosticsVisible = !DiagnosticsVisible);
         _audio.StateChanged += AudioOnStateChanged;
         _audio.TrackTransitioned += AudioOnTrackTransitioned;
         _audio.PlaybackEnded += AudioOnPlaybackEnded;
@@ -105,7 +121,7 @@ public sealed class MainViewModel : ObservableObject
     public ObservableCollection<LibraryCardViewModel> Genres { get; } = [];
     public ObservableCollection<LibraryCardViewModel> Folders { get; } = [];
     public ObservableCollection<LibraryCardViewModel> Playlists { get; } = [];
-    public ObservableCollection<QueueEntry> Queue { get; } = [];
+    public ObservableCollection<QueueEntryViewModel> Queue { get; } = [];
     public ObservableCollection<LyricLineViewModel> Lyrics { get; } = [];
     public ObservableCollection<AudioDeviceInfo> OutputDevices { get; } = [];
 
@@ -161,11 +177,27 @@ public sealed class MainViewModel : ObservableObject
     public bool IsScanning { get => _isScanning; private set => Set(ref _isScanning, value); }
     public bool QueueVisible { get => _queueVisible; set { if (Set(ref _queueVisible, value)) _ = _settings.UpdateAsync(x => x.QueuePanelVisible = value); } }
     public bool AnimationsEnabled { get => _animationsEnabled; set { if (Set(ref _animationsEnabled, value)) _ = _settings.UpdateAsync(x => x.AnimationsEnabled = value); } }
+    public bool DiagnosticsVisible { get => _diagnosticsVisible; set => Set(ref _diagnosticsVisible, value); }
+    public bool HasAudioDiagnostics => _audio.Diagnostics is not null;
+    public string DiagnosticHeadline => _audio.Diagnostics is { IsBitPerfect: true } ? "Bit-perfect signal path" : _audio.Diagnostics is null ? "No active audio pipeline" : "Processed signal path";
+    public string DiagnosticMode => _audio.Diagnostics is { } d ? $"{d.EffectiveMode} WASAPI · {d.PipelineMode}" : "Play a track to inspect the signal path";
+    public string DiagnosticSource => _audio.Diagnostics?.SourceFormat?.ToString() ?? "—";
+    public string DiagnosticOutput => _audio.Diagnostics?.OutputFormat?.ToString() ?? "—";
+    public string DiagnosticDecoder => _audio.Diagnostics?.Decoder ?? "—";
+    public string DiagnosticBuffer => $"{(_settings.Current.OutputProfiles.FirstOrDefault(x => x.DeviceId == _settings.Current.ActiveOutputDeviceId)?.BufferMilliseconds ?? 100)} ms · event-driven";
+    public string DiagnosticReason => _audio.Diagnostics?.Reason ?? "Start playback to see decoder, format conversion, WASAPI mode, and bit-perfect status.";
     public bool IsShuffleEnabled => _queue.Shuffle;
+    public string ShuffleText => IsShuffleEnabled ? "Shuffle on" : "Shuffle off";
     public bool IsRepeatEnabled => _queue.RepeatMode != RepeatMode.Off;
+    public bool IsRepeatOne => _queue.RepeatMode == RepeatMode.One;
     public string RepeatText => _queue.RepeatMode switch { RepeatMode.One => "Repeat one", RepeatMode.All => "Repeat all", _ => "Repeat off" };
     public int AlbumTileSize { get => _albumTileSize; set { if (Set(ref _albumTileSize, value)) _ = _settings.UpdateAsync(x => x.AlbumTileSize = value); } }
     public string ActiveLyric { get => _activeLyric; private set => Set(ref _activeLyric, value); }
+    public LyricLineViewModel? ActiveLyricLine { get => _activeLyricLine; private set => Set(ref _activeLyricLine, value); }
+    public bool HasLyrics => Lyrics.Count > 0;
+    public bool HasSyncedLyrics { get => _hasSyncedLyrics; private set { if (Set(ref _hasSyncedLyrics, value)) { Raise(nameof(LyricsModeText)); Raise(nameof(LyricsHintText)); } } }
+    public string LyricsModeText => HasSyncedLyrics ? "SYNCED" : "FULL LYRICS";
+    public string LyricsHintText => HasSyncedLyrics ? "Click any line to jump to that moment" : "No timing data available";
 
     public RelayCommand NavigateCommand { get; }
     public RelayCommand SelectGroupCommand { get; }
@@ -184,6 +216,11 @@ public sealed class MainViewModel : ObservableObject
     public RelayCommand UndoQueueCommand { get; }
     public RelayCommand ClearQueueCommand { get; }
     public AsyncRelayCommand LoveCommand { get; }
+    public AsyncRelayCommand SeekLyricCommand { get; }
+    public AsyncRelayCommand PlayQueueEntryCommand { get; }
+    public AsyncRelayCommand RemoveQueueEntryCommand { get; }
+    public RelayCommand PlayQueueEntryNextCommand { get; }
+    public RelayCommand ToggleDiagnosticsCommand { get; }
 
     public async Task InitializeAsync()
     {
@@ -213,6 +250,7 @@ public sealed class MainViewModel : ObservableObject
         await _audio.SetVolumeAsync(_volume, _lifetime.Token);
         _shortcuts.Refresh(_settings.Current.Shortcuts);
         _scanner.StartWatching(_settings.Current.LibraryFolders);
+        await RestoreSessionAsync();
     }
 
     public async Task AddLibraryFolderAsync(string folder)
@@ -548,6 +586,56 @@ public sealed class MainViewModel : ObservableObject
         else if (SelectedTrack is not null) await PlaySelectedAsync();
     }
 
+    private async Task HandlePreviousAsync()
+    {
+        if (_audio.Snapshot.Track is null) return;
+        if (_audio.Snapshot.Position > TimeSpan.FromSeconds(3))
+        {
+            await CommitSeekAsync(0);
+            return;
+        }
+        var previous = _queue.Previous();
+        if (previous is null) return;
+        if (_queue.CurrentIndex == 0 && CurrentTrack?.Path.Equals(previous.Path, StringComparison.OrdinalIgnoreCase) == true)
+        {
+            await CommitSeekAsync(0);
+            return;
+        }
+        await ChangeTrackAsync(previous);
+    }
+
+    private async Task PlayQueueEntryAsync(QueueEntryViewModel? entry)
+    {
+        if (entry is null) return;
+        await ChangeTrackAsync(_queue.Select(entry.Entry.Id));
+    }
+
+    private async Task RemoveQueueEntryAsync(QueueEntryViewModel? entry)
+    {
+        if (entry is null) return;
+        var wasPlaying = entry.IsPlaying;
+        if (!_queue.Remove(entry.Entry.Id)) return;
+        if (!wasPlaying) return;
+        if (_queue.Current is { } replacement) await ChangeTrackAsync(replacement);
+        else await _audio.StopAsync(_lifetime.Token);
+    }
+
+    private void MoveQueueEntryNext(QueueEntryViewModel? entry)
+    {
+        if (entry is null || _queue.Items.Count < 2) return;
+        var from = _queue.Items.ToList().FindIndex(x => x.Id == entry.Entry.Id);
+        var target = Math.Min(_queue.Items.Count - 1, _queue.CurrentIndex + 1);
+        if (from >= 0 && from != target) _queue.Move(from, target);
+    }
+
+    public void MoveQueueEntry(Guid sourceId, Guid targetId)
+    {
+        var items = _queue.Items.ToList();
+        var from = items.FindIndex(x => x.Id == sourceId);
+        var to = items.FindIndex(x => x.Id == targetId);
+        if (from >= 0 && to >= 0) _queue.Move(from, to);
+    }
+
     private async Task ToggleLoveAsync()
     {
         if (CurrentTrack is null) return;
@@ -601,11 +689,48 @@ public sealed class MainViewModel : ObservableObject
     private void LoadLyrics(Track track)
     {
         Lyrics.Clear();
-        if (string.IsNullOrWhiteSpace(track.Lyrics)) { ActiveLyric = "No lyrics found. Place an .lrc file beside the track."; return; }
+        ActiveLyricLine = null;
+        HasSyncedLyrics = false;
+        if (string.IsNullOrWhiteSpace(track.Lyrics))
+        {
+            ActiveLyric = "No lyrics found. Place an .lrc file beside the track.";
+            Raise(nameof(HasLyrics));
+            return;
+        }
         var synced = LrcParser.Parse(track.Lyrics);
-        if (synced.Lines.Count == 0) foreach (var text in track.Lyrics.Split('\n')) Lyrics.Add(new LyricLineViewModel(new LyricLine(TimeSpan.Zero, null, text, [])));
-        else foreach (var line in synced.Lines) Lyrics.Add(new LyricLineViewModel(line));
+        HasSyncedLyrics = synced.Lines.Count > 0;
+        if (!HasSyncedLyrics)
+        {
+            foreach (var text in track.Lyrics.Replace("\r\n", "\n").Split('\n').Where(x => !string.IsNullOrWhiteSpace(x)))
+                Lyrics.Add(new LyricLineViewModel(new LyricLine(TimeSpan.Zero, null, text.Trim(), []), false));
+        }
+        else
+        {
+            foreach (var line in synced.Lines.Where(x => !string.IsNullOrWhiteSpace(x.Text))) Lyrics.Add(new LyricLineViewModel(line));
+        }
         ActiveLyric = Lyrics.FirstOrDefault()?.Text ?? "No lyrics";
+        Raise(nameof(HasLyrics));
+        UpdateLyricsPosition(_audio.Snapshot.Position);
+    }
+
+    private async Task SeekLyricAsync(LyricLineViewModel? line)
+    {
+        if (line is not { CanSeek: true } || CurrentTrack is null) return;
+        await CommitSeekAsync(line.Line.Start.TotalSeconds);
+        UpdateLyricsPosition(line.Line.Start);
+    }
+
+    private void UpdateLyricsPosition(TimeSpan position)
+    {
+        LyricLineViewModel? active = null;
+        foreach (var line in Lyrics)
+        {
+            line.UpdatePosition(position);
+            if (line.IsActive) active = line;
+        }
+        ActiveLyricLine = active;
+        if (active is null) return;
+        ActiveLyric = active.Text;
     }
 
     private void AudioOnStateChanged(object? sender, PlaybackSnapshot snapshot) => RunOnUi(() =>
@@ -622,9 +747,8 @@ public sealed class MainViewModel : ObservableObject
             PositionText = FormatTime(snapshot.Position);
         }
         if (!string.IsNullOrWhiteSpace(snapshot.Error)) StatusText = snapshot.Error;
-        LyricLineViewModel? active = null;
-        foreach (var line in Lyrics) { line.IsActive = line.Line.IsActive(snapshot.Position); if (line.IsActive) active = line; }
-        if (active is not null) ActiveLyric = active.Text;
+        Raise(nameof(HasAudioDiagnostics)); Raise(nameof(DiagnosticHeadline)); Raise(nameof(DiagnosticMode)); Raise(nameof(DiagnosticSource)); Raise(nameof(DiagnosticOutput)); Raise(nameof(DiagnosticDecoder)); Raise(nameof(DiagnosticBuffer)); Raise(nameof(DiagnosticReason));
+        UpdateLyricsPosition(snapshot.Position);
         _systemMedia.Update(snapshot with { Track = track }, HasPreviousTrack(), HasNextTrack());
         if (CurrentView == "Now Playing") { ViewSubtitle = CurrentArtist; Raise(nameof(ViewTitle)); }
     });
@@ -652,11 +776,121 @@ public sealed class MainViewModel : ObservableObject
 
     private void QueueOnChanged(object? sender, EventArgs e) => RunOnUi(() =>
     {
-        Queue.Clear(); foreach (var item in _queue.Items) Queue.Add(item);
+        Queue.Clear();
+        foreach (var item in _queue.Items)
+        {
+            var artwork = ExistingArtwork(item.Track);
+            if (artwork is null && _resolvedArtwork.TryGetValue(item.Track.Path, out var cached)) artwork = cached;
+            Queue.Add(new QueueEntryViewModel(item, artwork));
+        }
         Raise(nameof(HasQueue));
-        Raise(nameof(IsShuffleEnabled)); Raise(nameof(IsRepeatEnabled)); Raise(nameof(RepeatText));
+        Raise(nameof(IsShuffleEnabled)); Raise(nameof(ShuffleText)); Raise(nameof(IsRepeatEnabled)); Raise(nameof(IsRepeatOne)); Raise(nameof(RepeatText));
         _systemMedia.Update(_audio.Snapshot, HasPreviousTrack(), HasNextTrack());
+        StartQueueArtworkResolution();
+        if (!_restoringSession) ScheduleSessionSave();
     });
+
+    private async Task RestoreSessionAsync()
+    {
+        var session = _settings.Current.PlaybackSession;
+        if (Views.Contains(session.LastView, StringComparer.OrdinalIgnoreCase))
+        {
+            CurrentView = session.LastView;
+            IsCollectionDetailOpen = false;
+            ApplyCurrentView(true);
+        }
+        var byPath = _allTracks.GroupBy(x => x.Path, StringComparer.OrdinalIgnoreCase).ToDictionary(x => x.Key, x => x.First(), StringComparer.OrdinalIgnoreCase);
+        var restored = session.QueuePaths.Where(byPath.ContainsKey).Select(x => byPath[x]).ToArray();
+        if (restored.Length == 0) return;
+        _restoringSession = true;
+        try
+        {
+            _queue.Shuffle = session.Shuffle;
+            _queue.RepeatMode = session.RepeatMode;
+            _queue.Replace(restored, Math.Clamp(session.CurrentIndex, 0, restored.Length - 1));
+            if (!_settings.Current.ResumeOnStartup || _queue.Current is not { } track) return;
+            var artwork = await ResolveArtworkAsync(track, _lifetime.Token);
+            if (artwork is not null) track = track with { ArtworkPath = artwork };
+            await _audio.LoadAsync(track, _lifetime.Token);
+            if (session.PositionSeconds > 0 && session.PositionSeconds < track.Duration.TotalSeconds)
+                await _audio.SeekAsync(TimeSpan.FromSeconds(session.PositionSeconds), _lifetime.Token);
+            await _audio.QueueNextAsync(PeekUpcomingTrack(), _lifetime.Token);
+            LoadLyrics(track);
+            if (session.WasPlaying) await _audio.PlayAsync(_lifetime.Token);
+        }
+        finally { _restoringSession = false; }
+    }
+
+    private void ScheduleSessionSave()
+    {
+        _sessionSaveCancellation?.Cancel();
+        _sessionSaveCancellation?.Dispose();
+        _sessionSaveCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        var token = _sessionSaveCancellation.Token;
+        _ = Task.Run(async () =>
+        {
+            try { await Task.Delay(500, token); await SaveSessionAsync(token); }
+            catch (OperationCanceledException) { }
+        }, token);
+    }
+
+    private Task SaveSessionAsync(CancellationToken cancellationToken)
+    {
+        var paths = _queue.Items.Select(x => x.Track.Path).ToList();
+        var index = Math.Max(0, _queue.CurrentIndex);
+        var snapshot = _audio.Snapshot;
+        var position = snapshot.Position.TotalSeconds;
+        var playing = snapshot.State == PlaybackState.Playing;
+        var shuffle = _queue.Shuffle;
+        var repeat = _queue.RepeatMode;
+        var view = CurrentView;
+        return _settings.UpdateAsync(settings =>
+        {
+            settings.PlaybackSession.QueuePaths = paths;
+            settings.PlaybackSession.CurrentIndex = index;
+            settings.PlaybackSession.PositionSeconds = position;
+            settings.PlaybackSession.WasPlaying = playing;
+            settings.PlaybackSession.Shuffle = shuffle;
+            settings.PlaybackSession.RepeatMode = repeat;
+            settings.PlaybackSession.LastView = view;
+        }, cancellationToken);
+    }
+
+    private void StartQueueArtworkResolution()
+    {
+        _queueArtworkCancellation?.Cancel();
+        _queueArtworkCancellation?.Dispose();
+        _queueArtworkCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        var token = _queueArtworkCancellation.Token;
+        var groups = Queue.Where(x => x.ArtworkPath is null).GroupBy(x => QueueArtworkKey(x.Track), StringComparer.OrdinalIgnoreCase).Select(x => x.ToArray()).ToArray();
+        if (groups.Length > 0) _ = ResolveQueueArtworkAsync(groups, token);
+    }
+
+    private async Task ResolveQueueArtworkAsync(IReadOnlyList<QueueEntryViewModel[]> groups, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Parallel.ForEachAsync(groups, new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = cancellationToken }, async (entries, ct) =>
+            {
+                string? artwork = null;
+                foreach (var entry in entries)
+                {
+                    artwork = await ResolveArtworkAsync(entry.Track, ct);
+                    if (artwork is not null) break;
+                }
+                if (artwork is not null) RunOnUi(() => { foreach (var entry in entries) entry.ArtworkPath = artwork; });
+            });
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception) { RunOnUi(() => StatusText = exception.Message); }
+    }
+
+    private static string QueueArtworkKey(Track track)
+    {
+        if (string.IsNullOrWhiteSpace(track.Album)) return track.Path;
+        var artist = string.IsNullOrWhiteSpace(track.AlbumArtist) ? track.DisplayArtist : track.AlbumArtist;
+        return artist + "\0" + track.DisplayAlbum;
+    }
 
     private bool HasPreviousTrack() => _queue.CurrentIndex > 0 || (_queue.RepeatMode == RepeatMode.All && _queue.Items.Count > 1);
     private bool HasNextTrack() => _queue.CurrentIndex >= 0 && (_queue.CurrentIndex + 1 < _queue.Items.Count || (_queue.RepeatMode == RepeatMode.All && _queue.Items.Count > 1));
@@ -714,10 +948,12 @@ public sealed class MainViewModel : ObservableObject
 
     public async Task ShutdownAsync()
     {
-        _lifetime.Cancel(); _searchCancellation?.Cancel(); _artworkCancellation?.Cancel(); _volumeCancellation?.Cancel(); _scanner.StopWatching();
+        _sessionSaveCancellation?.Cancel();
+        await SaveSessionAsync(CancellationToken.None);
+        _lifetime.Cancel(); _searchCancellation?.Cancel(); _artworkCancellation?.Cancel(); _queueArtworkCancellation?.Cancel(); _volumeCancellation?.Cancel(); _scanner.StopWatching();
         _shortcuts.ActionInvoked -= ShortcutsOnActionInvoked; _systemMedia.CommandReceived -= SystemMediaOnCommandReceived;
         await _settings.UpdateAsync(x => { x.Volume = Volume; x.QueuePanelVisible = QueueVisible; }, CancellationToken.None);
-        _searchCancellation?.Dispose(); _artworkCancellation?.Dispose(); _volumeCancellation?.Dispose(); _lifetime.Dispose();
+        _searchCancellation?.Dispose(); _artworkCancellation?.Dispose(); _queueArtworkCancellation?.Dispose(); _sessionSaveCancellation?.Dispose(); _volumeCancellation?.Dispose(); _lifetime.Dispose();
     }
 
     private sealed record LibraryGroups(IReadOnlyList<LibraryCardViewModel> Albums, IReadOnlyList<LibraryCardViewModel> Artists, IReadOnlyList<LibraryCardViewModel> Genres, IReadOnlyList<LibraryCardViewModel> Folders);

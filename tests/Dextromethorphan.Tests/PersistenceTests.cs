@@ -16,7 +16,16 @@ public sealed class PersistenceTests : IDisposable
         var paths = new AppPaths(_root);
         var service = new JsonSettingsService(paths);
         await service.InitializeAsync(cancellationToken);
-        await service.UpdateAsync(x => { x.AccentColor = "#123456"; x.Volume = 4; x.AlbumTileSize = 10; x.ArtworkCacheMegabytes = 1; }, cancellationToken);
+        await service.UpdateAsync(x =>
+        {
+            x.AccentColor = "#123456"; x.Volume = 4; x.AlbumTileSize = 10; x.ArtworkCacheMegabytes = 1;
+            x.PlaybackSession.QueuePaths = [@"C:\music\one.flac", @"C:\music\one.flac", @"C:\music\two.flac"];
+            x.PlaybackSession.CurrentIndex = 2;
+            x.PlaybackSession.PositionSeconds = 42.5;
+            x.PlaybackSession.Shuffle = true;
+            x.PlaybackSession.RepeatMode = RepeatMode.All;
+            x.PlaybackSession.LastView = "Songs";
+        }, cancellationToken);
 
         var reloaded = new JsonSettingsService(paths);
         await reloaded.InitializeAsync(cancellationToken);
@@ -24,6 +33,12 @@ public sealed class PersistenceTests : IDisposable
         Assert.Equal(1, reloaded.Current.Volume);
         Assert.Equal(80, reloaded.Current.AlbumTileSize);
         Assert.Equal(64, reloaded.Current.ArtworkCacheMegabytes);
+        Assert.Equal(3, reloaded.Current.PlaybackSession.QueuePaths.Count);
+        Assert.Equal(2, reloaded.Current.PlaybackSession.CurrentIndex);
+        Assert.Equal(42.5, reloaded.Current.PlaybackSession.PositionSeconds);
+        Assert.True(reloaded.Current.PlaybackSession.Shuffle);
+        Assert.Equal(RepeatMode.All, reloaded.Current.PlaybackSession.RepeatMode);
+        Assert.Equal("Songs", reloaded.Current.PlaybackSession.LastView);
     }
 
     [Fact]

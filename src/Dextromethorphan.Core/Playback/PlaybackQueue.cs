@@ -18,6 +18,16 @@ public sealed class PlaybackQueue : IPlaybackQueue
     public Track? Current => _currentIndex >= 0 && _currentIndex < _items.Count ? _items[_currentIndex].Track : null;
     public event EventHandler? Changed;
 
+    public Track? Select(Guid id)
+    {
+        var index = _items.FindIndex(x => x.Id == id);
+        if (index < 0) return null;
+        _currentIndex = index;
+        NormalizePlayingFlag();
+        OnChanged(false);
+        return Current;
+    }
+
     public void Replace(IEnumerable<Track> tracks, int startIndex = 0)
     {
         SaveUndo();

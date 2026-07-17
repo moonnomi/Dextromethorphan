@@ -235,7 +235,8 @@ public sealed class WasapiAudioEngine : IAudioEngine
             var rate = _profile.PreferredSampleRate > 0 ? _profile.PreferredSampleRate : decoded.Reader.WaveFormat.SampleRate;
             var target = WaveFormat.CreateIeeeFloatWaveFormat(rate, decoded.Reader.WaveFormat.Channels);
             var normalized = AudioDecoderFactory.Normalize(decoded, target);
-            _transition = new TransitionSampleProvider(normalized, AudioDecoderFactory.TotalSamples(decoded, target), _options.TransitionMode == TransitionMode.Crossfade ? _options.CrossfadeSeconds : 0, decoded);
+            var initialPositionSamples = (long)Math.Round(decoded.Reader.CurrentTime.TotalSeconds * target.SampleRate * target.Channels);
+            _transition = new TransitionSampleProvider(normalized, AudioDecoderFactory.TotalSamples(decoded, target), _options.TransitionMode == TransitionMode.Crossfade ? _options.CrossfadeSeconds : 0, decoded, initialPositionSamples);
             _transition.SourceChanged += OnPipelineSourceChanged;
             _transition.Completed += OnPipelineCompleted;
             _rate = new VariableRateSampleProvider(_transition);
@@ -396,6 +397,7 @@ public sealed class WasapiAudioEngine : IAudioEngine
         unchecked((int)0x88890008) => "The output device does not support this exact format in exclusive mode.",
         unchecked((int)0x88890004) => "The output device was disconnected or became unavailable.",
         unchecked((int)0x8889000A) => "The audio service changed the device; reopening the endpoint.",
+        unchecked((int)0xC00D36C4) => "Windows could not decode this audio format.",
         _ => error.Message
     };
 

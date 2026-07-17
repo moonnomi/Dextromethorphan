@@ -14,10 +14,12 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
     private float[] _currentBuffer = [];
     private float[] _nextBuffer = [];
 
-    public TransitionSampleProvider(ISampleProvider initial, long totalSamples, double crossfadeSeconds = 0, IDisposable? owner = null)
+    public TransitionSampleProvider(ISampleProvider initial, long totalSamples, double crossfadeSeconds = 0, IDisposable? owner = null, long initialPositionSamples = 0)
     {
         ArgumentNullException.ThrowIfNull(initial);
-        _current = new Source(initial, Align(totalSamples, initial.WaveFormat.Channels), owner);
+        var alignedTotal = Align(totalSamples, initial.WaveFormat.Channels);
+        var alignedPosition = Align(Math.Clamp(initialPositionSamples, 0, alignedTotal), initial.WaveFormat.Channels);
+        _current = new Source(initial, alignedTotal, owner) { SamplesRead = alignedPosition };
         WaveFormat = initial.WaveFormat;
         CrossfadeSeconds = crossfadeSeconds;
     }
