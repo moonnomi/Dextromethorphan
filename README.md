@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/dextromethorphan-logo.png" alt="Dextromethorphan Music Player" width="165">
+  <img src="docs/images/dextromethorphan-logo.png" alt="Dextromethorphan Music Player" width="360">
 </p>
 
 <p align="center">
