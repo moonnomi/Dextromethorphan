@@ -26,6 +26,7 @@ public partial class App : Application
         {
             services.AddSingleton<DeveloperDiagnostics>();
             services.AddSingleton<ArtworkImageService>();
+            services.AddSingleton<PerformanceOverlayViewModel>();
             services.AddSingleton<AppPaths>();
             services.AddSingleton<ISettingsService, JsonSettingsService>();
             services.AddSingleton<SqliteLibraryRepository>();
@@ -95,6 +96,8 @@ public partial class App : Application
                 diagnostics.RecordDuration("startup", "process-to-first-render", renderedAt - new DateTimeOffset(Process.GetCurrentProcess().StartTime.ToUniversalTime(), TimeSpan.Zero));
         };
         window.Show();
+        if (PerformanceOverlayViewModel.IsRequested(e.Args))
+            window.PerformanceOverlay.IsVisible = true;
         var windowShownAt = DateTimeOffset.UtcNow;
         window.BeginStartupPresentation();
         var processStartedAt = new DateTimeOffset(Process.GetCurrentProcess().StartTime.ToUniversalTime(), TimeSpan.Zero);

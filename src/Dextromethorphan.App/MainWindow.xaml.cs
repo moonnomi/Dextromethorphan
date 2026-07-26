@@ -34,7 +34,13 @@ public partial class MainWindow : Window
     private readonly ISystemMediaTransportService _systemMedia;
     private readonly DeveloperDiagnostics _diagnostics;
 
-    public MainWindow(MainViewModel viewModel, IShortcutService shortcuts, ISystemMediaTransportService systemMedia, DeveloperDiagnostics diagnostics, ArtworkImageService artworkImages)
+    public MainWindow(
+        MainViewModel viewModel,
+        IShortcutService shortcuts,
+        ISystemMediaTransportService systemMedia,
+        DeveloperDiagnostics diagnostics,
+        ArtworkImageService artworkImages,
+        PerformanceOverlayViewModel performanceOverlay)
     {
         InitializeComponent();
         ViewModel = viewModel;
@@ -42,11 +48,14 @@ public partial class MainWindow : Window
         _systemMedia = systemMedia;
         _diagnostics = diagnostics;
         _ = artworkImages;
+        PerformanceOverlay = performanceOverlay;
+        PerformanceOverlay.Attach(this);
         DataContext = viewModel;
         ViewModel.PropertyChanged += ViewModelOnPropertyChanged;
     }
 
     public MainViewModel ViewModel { get; }
+    public PerformanceOverlayViewModel PerformanceOverlay { get; }
     internal DateTimeOffset? FirstGalleryArtworkRenderedAt => _firstGalleryArtworkRenderedAt;
 
     public void BeginStartupPresentation()
@@ -506,6 +515,14 @@ public partial class MainWindow : Window
     private void Window_KeyDown(object sender, KeyEventArgs e)
     {
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (key == Key.F12 &&
+            Keyboard.Modifiers.HasFlag(ModifierKeys.Control) &&
+            Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
+        {
+            PerformanceOverlay.ToggleCommand.Execute(null);
+            e.Handled = true;
+            return;
+        }
         var modifiers = ShortcutModifiers.None;
         if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) modifiers |= ShortcutModifiers.Control;
         if (Keyboard.Modifiers.HasFlag(ModifierKeys.Alt)) modifiers |= ShortcutModifiers.Alt;
@@ -546,6 +563,7 @@ public partial class MainWindow : Window
         await _diagnostics.CompleteAsync();
         _lyricScrollCancellation?.Cancel();
         _lyricScrollCancellation?.Dispose();
+        PerformanceOverlay.Dispose();
         ViewModel.PropertyChanged -= ViewModelOnPropertyChanged;
         _allowClose = true;
         Close();
@@ -558,6 +576,7 @@ public partial class MainWindow : Window
         await _diagnostics.CompleteAsync();
         _lyricScrollCancellation?.Cancel();
         _lyricScrollCancellation?.Dispose();
+        PerformanceOverlay.Dispose();
         ViewModel.PropertyChanged -= ViewModelOnPropertyChanged;
         _allowClose = true;
         Close();

@@ -19,6 +19,12 @@ public sealed class ArtworkImageService
     private readonly ConcurrentDictionary<string, DateTimeOffset> _failures = new(StringComparer.OrdinalIgnoreCase);
     private readonly DeveloperDiagnostics _diagnostics;
     private long _cacheBytes;
+    private long _requests;
+    private long _cacheHits;
+    private long _cacheMisses;
+    private long _deduplicatedRequests;
+    private long _decodes;
+    private long _decodeFailures;
 
     public ArtworkImageService(DeveloperDiagnostics diagnostics)
     {
@@ -31,14 +37,17 @@ public sealed class ArtworkImageService
     internal async Task<BitmapSource?> GetAsync(string path, int decodePixelWidth, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(path)) return null;
+        Interlocked.Increment(ref _requests);
         var size = Math.Clamp(decodePixelWidth, 32, 1200);
         var key = $"{Path.GetFullPath(path)}|{size}";
         if (TryGet(key, out var cached))
         {
+            Interlocked.Increment(ref _cacheHits);
             if (_diagnostics.Verbose)
                 _diagnostics.Mark("artwork", "thumbnail.strong-cache-hit", Data(path, size));
             return cached;
         }
+        Interlocked.Increment(ref _cacheMisses);
         if (_failures.TryGetValue(key, out var failedAt) && failedAt >= DateTimeOffset.UtcNow.AddMinutes(-5))
             return null;
 
@@ -46,8 +55,12 @@ public sealed class ArtworkImageService
             () => DecodeAsync(key, path, size),
             LazyThreadSafetyMode.ExecutionAndPublication);
         var pending = _inflight.GetOrAdd(key, candidate);
-        if (!ReferenceEquals(candidate, pending) && _diagnostics.Enabled)
-            _diagnostics.Mark("artwork", "thumbnail.request-deduplicated", Data(path, size));
+        if (!ReferenceEquals(candidate, pending))
+        {
+            Interlocked.Increment(ref _deduplicatedRequests);
+            if (_diagnostics.Enabled)
+                _diagnostics.Mark("artwork", "thumbnail.request-deduplicated", Data(path, size));
+        }
         try
         {
             return await pending.Value.WaitAsync(cancellationToken);
@@ -62,12 +75,14 @@ public sealed class ArtworkImageService
     private Task<BitmapSource?> DecodeAsync(string key, string path, int size) =>
         Task.Run<BitmapSource?>(() =>
         {
+            Interlocked.Increment(ref _decodes);
             var timer = Stopwatch.StartNew();
             Exception? error = null;
             try
             {
                 if (!File.Exists(path))
                 {
+                    Interlocked.Increment(ref _decodeFailures);
                     _failures[key] = DateTimeOffset.UtcNow;
                     return null;
                 }
@@ -87,6 +102,7 @@ public sealed class ArtworkImageService
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException or InvalidOperationException or FileFormatException)
             {
                 error = exception;
+                Interlocked.Increment(ref _decodeFailures);
                 _failures[key] = DateTimeOffset.UtcNow;
                 _diagnostics.Error("artwork", "thumbnail.decode", exception, Data(path, size));
                 return null;
@@ -96,6 +112,27 @@ public sealed class ArtworkImageService
                 _diagnostics.RecordDuration("artwork", "thumbnail.decode-off-thread", timer.Elapsed, Data(path, size), error);
             }
         });
+
+    internal ArtworkRuntimeMetrics GetRuntimeMetrics()
+    {
+        int cacheEntries;
+        long cacheBytes;
+        lock (_cacheGate)
+        {
+            cacheEntries = _cache.Count;
+            cacheBytes = _cacheBytes;
+        }
+        return new ArtworkRuntimeMetrics(
+            _inflight.Count,
+            cacheEntries,
+            cacheBytes,
+            Interlocked.Read(ref _requests),
+            Interlocked.Read(ref _cacheHits),
+            Interlocked.Read(ref _cacheMisses),
+            Interlocked.Read(ref _deduplicatedRequests),
+            Interlocked.Read(ref _decodes),
+            Interlocked.Read(ref _decodeFailures));
+    }
 
     private bool TryGet(string key, out BitmapSource? value)
     {
@@ -144,6 +181,22 @@ public sealed class ArtworkImageService
     };
 
     private sealed record CacheEntry(BitmapSource Value, long Bytes, LinkedListNode<string> Node);
+}
+
+internal readonly record struct ArtworkRuntimeMetrics(
+    int QueueDepth,
+    int CacheEntries,
+    long CacheBytes,
+    long Requests,
+    long CacheHits,
+    long CacheMisses,
+    long DeduplicatedRequests,
+    long Decodes,
+    long DecodeFailures)
+{
+    public double CacheHitRate => CacheHits + CacheMisses == 0
+        ? 0
+        : CacheHits * 100d / (CacheHits + CacheMisses);
 }
 
 public static class AsyncArtwork

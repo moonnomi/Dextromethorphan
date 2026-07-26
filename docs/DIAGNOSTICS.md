@@ -33,8 +33,9 @@ The Release executable supports:
 | `--diagnostics-verbose` | Include fast operations and cache-hit breadcrumbs. |
 | `--diagnostics-output <directory>` | Choose the output directory. |
 | `--diagnostics-session <name>` | Add a recognizable name to output files. |
+| `--performance-overlay` | Open the local live performance overlay at startup. |
 
-Equivalent environment variables are `DEXTROMETHORPHAN_DIAGNOSTICS`, `DEXTROMETHORPHAN_DIAGNOSTICS_VERBOSE`, `DEXTROMETHORPHAN_DIAGNOSTICS_OUTPUT`, and `DEXTROMETHORPHAN_DIAGNOSTICS_SESSION`.
+Equivalent environment variables are `DEXTROMETHORPHAN_DIAGNOSTICS`, `DEXTROMETHORPHAN_DIAGNOSTICS_VERBOSE`, `DEXTROMETHORPHAN_DIAGNOSTICS_OUTPUT`, `DEXTROMETHORPHAN_DIAGNOSTICS_SESSION`, and `DEXTROMETHORPHAN_PERFORMANCE_OVERLAY`.
 
 Performance benchmark runs enable normal diagnostics automatically and place them beside the benchmark results.
 
@@ -51,6 +52,27 @@ Performance benchmark runs enable normal diagnostics automatically and place the
 Logging is performed by a bounded background channel. If a session produces events faster than they can be written, the summary reports `droppedEvents` instead of allowing diagnostics to stall the UI.
 
 The first PERF-003 trace and its conclusions are recorded in [PERF-003 trace analysis](performance/PERF-003-TRACE-2026-07-25.md).
+
+## Live performance overlay
+
+PERF-004 adds an opt-in overlay for investigating visible stutter without leaving the app. Open it with the **FPS** button beside Audio diagnostics or press `Ctrl+Shift+F12`. The overlay subscribes to WPF frame events only while it is visible and shows:
+
+- current and recent-average frame time plus effective FPS;
+- UI-thread frames over 50 ms, including the worst frame;
+- active artwork requests and deduplicated requests;
+- decoded artwork cache entries, memory use, and hit rate;
+- process working set and managed heap;
+- generation 0, 1, and 2 garbage-collection counts.
+
+The overlay is local-only and does not enable telemetry. When a diagnostic session is already active, detected UI stalls are also written to the JSONL trace as `render.ui-thread-stall`.
+
+To show it immediately at startup:
+
+```powershell
+.\src\Dextromethorphan.App\bin\latest\Dextromethorphan.exe --performance-overlay
+```
+
+The equivalent environment variable is `DEXTROMETHORPHAN_PERFORMANCE_OVERLAY=1`. Close the overlay when it is not needed so frame sampling is fully detached.
 
 ## Create a support bundle
 
