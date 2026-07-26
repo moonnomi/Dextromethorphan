@@ -59,7 +59,7 @@ PERF-004 adds an opt-in overlay for investigating visible stutter without leavin
 
 - current and recent-average frame time plus effective FPS;
 - UI-thread frames over 50 ms, including the worst frame;
-- active artwork requests and deduplicated requests;
+- active and queued artwork decodes plus stale requests dropped before decode;
 - decoded artwork cache entries, memory use, and hit rate;
 - process working set and managed heap;
 - generation 0, 1, and 2 garbage-collection counts.

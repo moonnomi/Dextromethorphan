@@ -161,7 +161,7 @@ public sealed class PerformanceOverlayViewModel : ObservableObject, IDisposable
         UiStalls = $"{_uiStallCount:N0} over {StallThresholdMs:0} ms · worst {_worstFrameMs:0.0} ms";
 
         var artwork = _artwork.GetRuntimeMetrics();
-        ArtworkQueue = $"{artwork.QueueDepth:N0} active · {artwork.DeduplicatedRequests:N0} requests joined";
+        ArtworkQueue = $"{artwork.Active:N0} decoding · {artwork.Queued:N0} queued · {artwork.DroppedBeforeDecode:N0} stale dropped";
         ArtworkCache = $"{artwork.CacheEntries:N0} items · {FormatMegabytes(artwork.CacheBytes)} · {artwork.CacheHitRate:0}% hit";
 
         using var process = Process.GetCurrentProcess();

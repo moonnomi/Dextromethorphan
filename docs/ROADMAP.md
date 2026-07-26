@@ -47,7 +47,7 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 - [x] **P0 ART-002** Decode images off the UI thread, freeze the resulting `BitmapSource`, and marshal only the final property update to the dispatcher.
 - [x] **P0 ART-003** Deduplicate concurrent requests for the same artwork path and requested size.
 - [x] **P0 ART-004** Use a size-bounded strong LRU memory cache instead of weak references that allow decode/GC/decode churn.
-- [ ] **P0 ART-005** Prioritize visible cards, the playing track, and queue entries; defer off-screen work.
+- [x] **P0 ART-005** Prioritize visible cards, the playing track, and queue entries; defer off-screen work. See [the prioritized artwork queue result](performance/ARTWORK-PRIORITY-2026-07-26.md).
 - [x] **P0 ART-006** Cancel stale artwork requests immediately when the query, tab, collection, or library generation changes.
 - [ ] **P0 ART-007** Resolve artwork only for the active view instead of starting work for albums, artists, genres, folders, and playlists together.
 - [ ] **P0 ART-008** Coalesce artwork property changes into small dispatcher batches rather than one UI dispatch per card.

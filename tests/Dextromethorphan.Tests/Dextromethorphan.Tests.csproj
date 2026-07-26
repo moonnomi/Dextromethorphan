@@ -4,6 +4,7 @@
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../../src/Dextromethorphan.App/Dextromethorphan.App.csproj" />
     <ProjectReference Include="../../src/Dextromethorphan.Core/Dextromethorphan.Core.csproj" />
     <ProjectReference Include="../../src/Dextromethorphan.Infrastructure/Dextromethorphan.Infrastructure.csproj" />
     <ProjectReference Include="../../tools/Dextromethorphan.PerformanceFixtures/Dextromethorphan.PerformanceFixtures.csproj" />
