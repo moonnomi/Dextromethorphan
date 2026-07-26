@@ -10,7 +10,11 @@ param(
     [string]$Configuration = 'Release',
     [string]$Fixture,
     [string]$Output,
-    [switch]$NoBuild
+    [switch]$NoBuild,
+    [switch]$CompareBaseline,
+    [string]$RegressionPolicy,
+    [string]$RegressionBaseline,
+    [switch]$RegressionReportOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -155,3 +159,27 @@ Write-Host "Baseline complete: $summaryPath"
 Write-Host "Cold interactive: $($summary.coldStartInteractiveMs) ms"
 Write-Host "Cached tab median/max: $($summary.cachedTabSwitchMedianMs) / $($summary.cachedTabSwitchMaximumMs) ms"
 Write-Host "Scroll p95/worst: $($summary.scrollP95FrameMedianMs) / $($summary.scrollMaximumFrameMs) ms"
+
+if ($CompareBaseline) {
+    $comparisonScript = Join-Path $PSScriptRoot 'Compare-PerformanceBaseline.ps1'
+    $comparisonArguments = @(
+        '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', $comparisonScript,
+        '-Summary', $summaryPath,
+        '-Output', (Join-Path $Output 'regression.json')
+    )
+    if (-not [string]::IsNullOrWhiteSpace($RegressionPolicy)) {
+        $comparisonArguments += @('-Policy', [System.IO.Path]::GetFullPath($RegressionPolicy))
+    }
+    if (-not [string]::IsNullOrWhiteSpace($RegressionBaseline)) {
+        $comparisonArguments += @('-Baseline', [System.IO.Path]::GetFullPath($RegressionBaseline))
+    }
+    if ($RegressionReportOnly) {
+        $comparisonArguments += '-ReportOnly'
+    }
+    & powershell @comparisonArguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Performance regression comparison failed with exit code $LASTEXITCODE. See $Output."
+    }
+}

@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-07-26T05:02:51.7424719Z",
+  "fixture": {
+    "kind": "library-10k",
+    "tracks": 10000,
+    "albums": 500,
+    "artwork": 500,
+    "contentSha256": "48556f38583d1fdbf2b125153842c9fa4ddcd577ca7ac93199cd3809eae9f3bc"
+  },
+  "machine": {
+    "os": "Microsoft Windows 10.0.26200",
+    "runtime": ".NET 10.0.5",
+    "architecture": "X64",
+    "processor": "AMD64 Family 25 Model 116 Stepping 1, AuthenticAMD",
+    "logicalProcessors": 16,
+    "availableMemoryBytes": 16309932032,
+    "commit": "cb1192a"
+  },
+  "runs": 4,
+  "coldStartInteractiveMs": 1750.155,
+  "warmStartInteractiveMedianMs": 1517.396,
+  "firstArtworkMedianMs": 1418.965,
+  "cachedTabSwitchMedianMs": 64.49,
+  "cachedTabSwitchMaximumMs": 146.479,
+  "cachedTabByView": {
+    "Albums": { "medianMs": 57.04, "maximumMs": 64.359 },
+    "Artists": { "medianMs": 58.182, "maximumMs": 63.831 },
+    "Genres": { "medianMs": 50.196, "maximumMs": 57.23 },
+    "Songs": { "medianMs": 137.445, "maximumMs": 146.479 },
+    "Folders": { "medianMs": 66.622, "maximumMs": 74.523 },
+    "Playlists": { "medianMs": 77.886, "maximumMs": 84.296 }
+  },
+  "scrollP95FrameMedianMs": 19.636,
+  "scrollMaximumFrameMs": 36.02,
+  "scrollFramesOver50Ms": 0,
+  "maximumWorkingSetBytes": 325726208,
+  "idleCpuMedianPercent": 5.351,
+  "playbackCpuPercent": 2.691,
+  "playbackStatus": "Measured with generated 44.1 kHz 16-bit stereo silence",
+  "scanFilesPerSecond": 5216.17,
+  "scanImported": 1000,
+  "scanFailed": 0
+}

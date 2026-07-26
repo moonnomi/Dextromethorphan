@@ -88,3 +88,14 @@ Each sequence records:
 The first process is labeled cold and subsequent fresh processes are labeled warm. The runner does not purge the Windows standby list, so use the first run after reboot when a true filesystem-cold number is required.
 
 The initial captured results and bottleneck analysis are stored in [the 2026-07-25 baseline](performance/BASELINE-2026-07-25.md).
+
+## Detect regressions
+
+Add `-CompareBaseline` to run the automated PERF-006 comparison after measurement:
+
+```powershell
+.\scripts\Measure-PerformanceBaseline.ps1 -Tracks 10000 -CompareBaseline
+.\scripts\Measure-PerformanceBaseline.ps1 -Tracks 50000 -CompareBaseline
+```
+
+The comparison uses versioned fixture-specific references and explicit tolerances, writes `regression.json`, and returns a failing exit code for material regressions. See [automated performance regression testing](performance/REGRESSION-TESTING.md) for the policy and baseline-update rules.

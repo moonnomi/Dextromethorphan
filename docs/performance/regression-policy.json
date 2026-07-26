@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "minimumRuns": 4,
+  "baselines": {
+    "10000": "baselines/reference-10k-windows-x64.json",
+    "50000": "baselines/reference-50k-windows-x64.json"
+  },
+  "metrics": [
+    { "path": "coldStartInteractiveMs", "name": "Cold interactive", "direction": "lower", "relativeTolerancePercent": 25, "absoluteTolerance": 300, "unit": "ms" },
+    { "path": "warmStartInteractiveMedianMs", "name": "Warm interactive median", "direction": "lower", "relativeTolerancePercent": 15, "absoluteTolerance": 150, "unit": "ms" },
+    { "path": "firstArtworkMedianMs", "name": "First artwork median", "direction": "lower", "relativeTolerancePercent": 15, "absoluteTolerance": 150, "unit": "ms" },
+    { "path": "cachedTabSwitchMedianMs", "name": "Cached tab median", "direction": "lower", "relativeTolerancePercent": 20, "absoluteTolerance": 10, "unit": "ms" },
+    { "path": "cachedTabSwitchMaximumMs", "name": "Cached tab maximum", "direction": "lower", "relativeTolerancePercent": 25, "absoluteTolerance": 25, "unit": "ms" },
+    { "path": "cachedTabByView.Albums.medianMs", "name": "Albums tab median", "direction": "lower", "relativeTolerancePercent": 20, "absoluteTolerance": 10, "unit": "ms" },
+    { "path": "cachedTabByView.Artists.medianMs", "name": "Artists tab median", "direction": "lower", "relativeTolerancePercent": 20, "absoluteTolerance": 10, "unit": "ms" },
+    { "path": "cachedTabByView.Genres.medianMs", "name": "Genres tab median", "direction": "lower", "relativeTolerancePercent": 20, "absoluteTolerance": 10, "unit": "ms" },
+    { "path": "cachedTabByView.Songs.medianMs", "name": "Songs tab median", "direction": "lower", "relativeTolerancePercent": 20, "absoluteTolerance": 20, "unit": "ms" },
+    { "path": "cachedTabByView.Folders.medianMs", "name": "Folders tab median", "direction": "lower", "relativeTolerancePercent": 20, "absoluteTolerance": 10, "unit": "ms" },
+    { "path": "cachedTabByView.Playlists.medianMs", "name": "Playlists tab median", "direction": "lower", "relativeTolerancePercent": 20, "absoluteTolerance": 10, "unit": "ms" },
+    { "path": "scrollP95FrameMedianMs", "name": "Scroll p95 frame", "direction": "lower", "relativeTolerancePercent": 20, "absoluteTolerance": 2, "unit": "ms" },
+    { "path": "scrollMaximumFrameMs", "name": "Scroll worst frame", "direction": "lower", "relativeTolerancePercent": 20, "absoluteTolerance": 5, "unit": "ms" },
+    { "path": "scrollFramesOver50Ms", "name": "Scroll frames over 50 ms", "direction": "lower", "relativeTolerancePercent": 0, "absoluteTolerance": 0, "unit": "frames" },
+    { "path": "maximumWorkingSetBytes", "name": "Peak working set", "direction": "lower", "relativeTolerancePercent": 15, "absoluteTolerance": 33554432, "unit": "bytes" },
+    { "path": "idleCpuMedianPercent", "name": "Idle CPU median", "direction": "lower", "relativeTolerancePercent": 30, "absoluteTolerance": 1, "unit": "%" },
+    { "path": "playbackCpuPercent", "name": "Playback CPU", "direction": "lower", "relativeTolerancePercent": 30, "absoluteTolerance": 0.75, "unit": "%" },
+    { "path": "scanFilesPerSecond", "name": "Scan throughput", "direction": "higher", "relativeTolerancePercent": 40, "absoluteTolerance": 1500, "unit": "files/s" }
+  ]
+}

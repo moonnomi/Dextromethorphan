@@ -39,7 +39,7 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 - [x] **P0 PERF-003** Add local timing instrumentation around repository queries, group construction, tab application, artwork lookup/decode, and first render. See [Developer diagnostics](DIAGNOSTICS.md).
 - [x] **P0 PERF-004** Add an opt-in developer performance overlay showing UI-thread stalls, image queue depth, cache hit rate, working set, GC counts, and current frame time. See [Developer diagnostics](DIAGNOSTICS.md#live-performance-overlay).
 - [x] **P0 PERF-005** Define release gates: cold start under 3 seconds at 10k tracks, cached tab switch under 100 ms, no routine UI stall over 50 ms, smooth 60 Hz scrolling on the target machine, idle CPU under 5%, and memory under 300 MB at 50k tracks without full-size art preloading. See [Performance release gates](performance/RELEASE-GATES.md).
-- [ ] **P1 PERF-006** Add automated performance regression runs that compare results against a stored baseline with an explicit tolerance.
+- [x] **P1 PERF-006** Add automated performance regression runs that compare results against a stored baseline with an explicit tolerance. See [Automated performance regression testing](performance/REGRESSION-TESTING.md).
 
 ### Artwork pipeline
 
