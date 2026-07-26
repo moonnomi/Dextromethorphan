@@ -7,4 +7,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/Dextromethorphan.Tests/Dextromethorphan.Tests.csproj" />
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/Dextromethorphan.PerformanceFixtures/Dextromethorphan.PerformanceFixtures.csproj" />
+  </Folder>
 </Solution>

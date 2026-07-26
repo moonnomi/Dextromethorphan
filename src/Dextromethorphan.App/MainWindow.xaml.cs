@@ -8,6 +8,9 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
+using Dextromethorphan.App.Performance;
+using Dextromethorphan.App.Diagnostics;
+using Dextromethorphan.App.UI;
 using Dextromethorphan.Core.Abstractions;
 using Dextromethorphan.App.ViewModels;
 using Dextromethorphan.Core.Models;
@@ -26,20 +29,25 @@ public partial class MainWindow : Window
     private QueueEntryViewModel? _queuePointerEntry;
     private bool _queueDragStarted;
     private DateTime _startupStartedAt;
+    private DateTimeOffset? _firstGalleryArtworkRenderedAt;
     private readonly IShortcutService _shortcuts;
     private readonly ISystemMediaTransportService _systemMedia;
+    private readonly DeveloperDiagnostics _diagnostics;
 
-    public MainWindow(MainViewModel viewModel, IShortcutService shortcuts, ISystemMediaTransportService systemMedia)
+    public MainWindow(MainViewModel viewModel, IShortcutService shortcuts, ISystemMediaTransportService systemMedia, DeveloperDiagnostics diagnostics, ArtworkImageService artworkImages)
     {
         InitializeComponent();
         ViewModel = viewModel;
         _shortcuts = shortcuts;
         _systemMedia = systemMedia;
+        _diagnostics = diagnostics;
+        _ = artworkImages;
         DataContext = viewModel;
         ViewModel.PropertyChanged += ViewModelOnPropertyChanged;
     }
 
     public MainViewModel ViewModel { get; }
+    internal DateTimeOffset? FirstGalleryArtworkRenderedAt => _firstGalleryArtworkRenderedAt;
 
     public void BeginStartupPresentation()
     {
@@ -116,7 +124,11 @@ public partial class MainWindow : Window
             return;
         }
         if (e.PropertyName is nameof(MainViewModel.CurrentView) or nameof(MainViewModel.IsCollectionDetailOpen))
+        {
             Dispatcher.BeginInvoke(AnimateViewTransition, DispatcherPriority.Render);
+            if (_diagnostics.Enabled)
+                _ = RecordViewRenderAsync(Stopwatch.GetTimestamp(), ViewModel.CurrentView, ViewModel.IsCollectionDetailOpen);
+        }
     }
 
     private void ResetLyricsView()
@@ -262,6 +274,120 @@ public partial class MainWindow : Window
     {
         if (e.ExtentHeight <= 0 || e.VerticalOffset + e.ViewportHeight < e.ExtentHeight - 260) return;
         ViewModel.LoadMoreGalleryGroups();
+    }
+
+    private void GalleryArtwork_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (_firstGalleryArtworkRenderedAt is null && sender is Image { Source: not null })
+        {
+            _firstGalleryArtworkRenderedAt = DateTimeOffset.UtcNow;
+            if (_diagnostics.Enabled)
+                _diagnostics.Mark("render", "first-gallery-artwork", new Dictionary<string, object?> { ["view"] = ViewModel.CurrentView });
+        }
+    }
+
+    private async Task RecordViewRenderAsync(long started, string view, bool detailOpen)
+    {
+        try
+        {
+            var rendered = await NextRenderedFrameTimestampAsync(CancellationToken.None);
+            _diagnostics.RecordDuration("render", "view-first-frame", Stopwatch.GetElapsedTime(started, rendered),
+                new Dictionary<string, object?> { ["view"] = view, ["detailOpen"] = detailOpen });
+        }
+        catch (Exception exception)
+        {
+            _diagnostics.Error("render", "view-first-frame", exception,
+                new Dictionary<string, object?> { ["view"] = view, ["detailOpen"] = detailOpen });
+        }
+    }
+
+    internal async Task<IReadOnlyList<TabSwitchPerformanceSample>> MeasureTabSwitchPerformanceAsync(CancellationToken cancellationToken)
+    {
+        var samples = new List<TabSwitchPerformanceSample>();
+        var views = new[] { "Artists", "Genres", "Songs", "Folders", "Playlists", "Albums" };
+        for (var pass = 0; pass < 2; pass++)
+        {
+            foreach (var view in views)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var timer = Stopwatch.StartNew();
+                ViewModel.NavigateCommand.Execute(view);
+                await NextRenderedFrameTimestampAsync(cancellationToken);
+                timer.Stop();
+                samples.Add(new TabSwitchPerformanceSample(view, pass == 0 ? "first" : "cached", Math.Round(timer.Elapsed.TotalMilliseconds, 3)));
+            }
+        }
+        return samples;
+    }
+
+    internal async Task<FramePerformanceMetrics> MeasureAlbumScrollPerformanceAsync(CancellationToken cancellationToken)
+    {
+        ViewModel.NavigateCommand.Execute("Albums");
+        await NextRenderedFrameTimestampAsync(cancellationToken);
+        GalleryList.UpdateLayout();
+        var viewer = FindVisualChild<ScrollViewer>(GalleryList)
+            ?? throw new InvalidOperationException("The album gallery scroll viewer is unavailable.");
+        viewer.ScrollToTop();
+        await NextRenderedFrameTimestampAsync(cancellationToken);
+
+        const int sampleFrames = 180;
+        var intervals = new List<double>(sampleFrames);
+        var previous = Stopwatch.GetTimestamp();
+        for (var frame = 0; frame < sampleFrames; frame++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (frame % 15 == 0) ViewModel.LoadMoreGalleryGroups();
+            var step = Math.Max(32, viewer.ViewportHeight / 10);
+            var target = Math.Min(viewer.ScrollableHeight, viewer.VerticalOffset + step);
+            if (target >= viewer.ScrollableHeight - 1 && ViewModel.GalleryGroups.Count < ViewModel.ActiveGroups.Count)
+            {
+                ViewModel.LoadMoreGalleryGroups();
+                target = viewer.ScrollableHeight;
+            }
+            viewer.ScrollToVerticalOffset(target);
+            var rendered = await NextRenderedFrameTimestampAsync(cancellationToken);
+            intervals.Add(Stopwatch.GetElapsedTime(previous, rendered).TotalMilliseconds);
+            previous = rendered;
+        }
+        viewer.ScrollToTop();
+        await NextRenderedFrameTimestampAsync(cancellationToken);
+        GalleryList.UpdateLayout();
+        ValidateGalleryReturnToTop();
+        return PerformanceStatistics.Frames(intervals, ViewModel.GalleryGroups.Count);
+    }
+
+    private void ValidateGalleryReturnToTop()
+    {
+        var expected = Math.Min(ViewModel.GalleryGroups.Count, 16);
+        for (var index = 0; index < expected; index++)
+        {
+            if (GalleryList.ItemContainerGenerator.ContainerFromIndex(index) is not ListBoxItem container)
+                throw new InvalidOperationException($"Gallery virtualization failed to restore item {index} after scrolling.");
+            if (!ReferenceEquals(container.DataContext, ViewModel.GalleryGroups[index]))
+                throw new InvalidOperationException($"Gallery virtualization restored the wrong card at index {index}.");
+        }
+    }
+
+    private static async Task<long> NextRenderedFrameTimestampAsync(CancellationToken cancellationToken)
+    {
+        var completion = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
+        EventHandler? handler = null;
+        handler = (_, _) =>
+        {
+            CompositionTarget.Rendering -= handler;
+            completion.TrySetResult(Stopwatch.GetTimestamp());
+        };
+        CompositionTarget.Rendering += handler;
+        try
+        {
+            // Large pre-optimization fixtures can block the UI for several seconds.
+            // Keep the timeout high enough to record that stall instead of hiding it.
+            return await completion.Task.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+        }
+        finally
+        {
+            CompositionTarget.Rendering -= handler;
+        }
     }
 
     private async void AddFolder_Click(object sender, RoutedEventArgs e)
@@ -417,6 +543,19 @@ public partial class MainWindow : Window
         if (_allowClose) return;
         e.Cancel = true;
         await ViewModel.ShutdownAsync();
+        await _diagnostics.CompleteAsync();
+        _lyricScrollCancellation?.Cancel();
+        _lyricScrollCancellation?.Dispose();
+        ViewModel.PropertyChanged -= ViewModelOnPropertyChanged;
+        _allowClose = true;
+        Close();
+    }
+
+    internal async Task CloseAfterBenchmarkAsync()
+    {
+        if (_allowClose) return;
+        await ViewModel.ShutdownAsync();
+        await _diagnostics.CompleteAsync();
         _lyricScrollCancellation?.Cancel();
         _lyricScrollCancellation?.Dispose();
         ViewModel.PropertyChanged -= ViewModelOnPropertyChanged;

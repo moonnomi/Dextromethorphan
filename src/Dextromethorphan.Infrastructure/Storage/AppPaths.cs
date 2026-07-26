@@ -2,9 +2,16 @@ namespace Dextromethorphan.Infrastructure.Storage;
 
 public sealed class AppPaths
 {
+    public const string DataRootEnvironmentVariable = "DEXTROMETHORPHAN_DATA_ROOT";
+
     public AppPaths(string? root = null)
     {
-        Root = root ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Dextromethorphan");
+        var configuredRoot = string.IsNullOrWhiteSpace(root)
+            ? Environment.GetEnvironmentVariable(DataRootEnvironmentVariable)
+            : root;
+        Root = Path.GetFullPath(string.IsNullOrWhiteSpace(configuredRoot)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Dextromethorphan")
+            : configuredRoot);
         SettingsFile = Path.Combine(Root, "settings.json");
         DatabaseFile = Path.Combine(Root, "library.db");
         ArtworkCache = Path.Combine(Root, "artwork");

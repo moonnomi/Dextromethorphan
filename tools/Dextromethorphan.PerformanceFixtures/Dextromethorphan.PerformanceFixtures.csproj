@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>Dextromethorphan.PerformanceFixtures</AssemblyName>
+    <RootNamespace>Dextromethorphan.PerformanceFixtures</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Dextromethorphan.Core/Dextromethorphan.Core.csproj" />
+    <ProjectReference Include="../../src/Dextromethorphan.Infrastructure/Dextromethorphan.Infrastructure.csproj" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+  </ItemGroup>
+</Project>

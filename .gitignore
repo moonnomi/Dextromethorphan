@@ -4,6 +4,8 @@ obj/
 .idea/
 TestResults/
 artifacts/
+performance-fixtures/
+performance-results/
 *.user
 *.suo
 *.db

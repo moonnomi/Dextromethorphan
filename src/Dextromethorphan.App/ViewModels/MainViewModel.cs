@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
+using Dextromethorphan.App.Diagnostics;
 using Dextromethorphan.Core.Abstractions;
 using Dextromethorphan.Core.Lyrics;
 using Dextromethorphan.Core.Models;
@@ -21,6 +22,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly ISleepTimerService _sleepTimer;
     private readonly IShortcutService _shortcuts;
     private readonly ISystemMediaTransportService _systemMedia;
+    private readonly DeveloperDiagnostics _diagnostics;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly ConcurrentDictionary<string, string?> _resolvedArtwork = new(StringComparer.OrdinalIgnoreCase);
     private readonly Stack<NavigationEntry> _backHistory = new();
@@ -32,7 +34,6 @@ public sealed class MainViewModel : ObservableObject
     private CancellationTokenSource? _volumeCancellation;
     private IReadOnlyList<Track> _allTracks = [];
     private IReadOnlyList<LibraryCardViewModel> _activeGroups = [];
-    private IReadOnlyList<LibraryCardViewModel> _galleryGroups = [];
     private IReadOnlyList<LibraryCardViewModel> _sidebarCards = [];
     private Track? _selectedTrack;
     private Track? _currentTrack;
@@ -71,10 +72,12 @@ public sealed class MainViewModel : ObservableObject
         IPlaybackQueue queue,
         ISleepTimerService sleepTimer,
         IShortcutService shortcuts,
-        ISystemMediaTransportService systemMedia)
+        ISystemMediaTransportService systemMedia,
+        DeveloperDiagnostics diagnostics)
     {
         _settings = settings; _repository = repository; _playlists = playlists; _scanner = scanner; _artwork = artwork;
         _audio = audio; _queue = queue; _sleepTimer = sleepTimer; _shortcuts = shortcuts; _systemMedia = systemMedia;
+        _diagnostics = diagnostics;
         NavigateCommand = new RelayCommand(p => Navigate(p?.ToString()));
         SelectGroupCommand = new RelayCommand(p => SelectGroup(p as LibraryCardViewModel));
         CloseCollectionCommand = new RelayCommand(_ => CloseCollectionDetail());
@@ -113,7 +116,7 @@ public sealed class MainViewModel : ObservableObject
     }
 
     public ObservableCollection<Track> BrowseTracks { get; } = [];
-    public IReadOnlyList<LibraryCardViewModel> GalleryGroups { get => _galleryGroups; private set => Set(ref _galleryGroups, value); }
+    public ObservableCollection<LibraryCardViewModel> GalleryGroups { get; } = [];
     public IReadOnlyList<LibraryCardViewModel> ActiveGroups { get => _activeGroups; private set => Set(ref _activeGroups, value); }
     public IReadOnlyList<LibraryCardViewModel> SidebarCards { get => _sidebarCards; private set => Set(ref _sidebarCards, value); }
     public ObservableCollection<LibraryCardViewModel> Albums { get; } = [];
@@ -191,7 +194,19 @@ public sealed class MainViewModel : ObservableObject
     public bool IsRepeatEnabled => _queue.RepeatMode != RepeatMode.Off;
     public bool IsRepeatOne => _queue.RepeatMode == RepeatMode.One;
     public string RepeatText => _queue.RepeatMode switch { RepeatMode.One => "Repeat one", RepeatMode.All => "Repeat all", _ => "Repeat off" };
-    public int AlbumTileSize { get => _albumTileSize; set { if (Set(ref _albumTileSize, value)) _ = _settings.UpdateAsync(x => x.AlbumTileSize = value); } }
+    public int AlbumTileSize
+    {
+        get => _albumTileSize;
+        set
+        {
+            if (!Set(ref _albumTileSize, value)) return;
+            Raise(nameof(GalleryItemWidth));
+            Raise(nameof(GalleryItemHeight));
+            _ = _settings.UpdateAsync(x => x.AlbumTileSize = value);
+        }
+    }
+    public double GalleryItemWidth => AlbumTileSize + 14;
+    public double GalleryItemHeight => AlbumTileSize + 94;
     public string ActiveLyric { get => _activeLyric; private set => Set(ref _activeLyric, value); }
     public LyricLineViewModel? ActiveLyricLine { get => _activeLyricLine; private set => Set(ref _activeLyricLine, value); }
     public bool HasLyrics => Lyrics.Count > 0;
@@ -222,13 +237,16 @@ public sealed class MainViewModel : ObservableObject
     public RelayCommand PlayQueueEntryNextCommand { get; }
     public RelayCommand ToggleDiagnosticsCommand { get; }
 
-    public async Task InitializeAsync()
+    public Task InitializeAsync() =>
+        _diagnostics.MeasureAsync("startup", "view-model.initialize", InitializeCoreAsync);
+
+    private async Task InitializeCoreAsync()
     {
         await _settings.InitializeAsync(_lifetime.Token);
         await _repository.InitializeAsync(_lifetime.Token);
         _volume = _settings.Current.Volume; Raise(nameof(Volume));
         _queueVisible = _settings.Current.QueuePanelVisible; Raise(nameof(QueueVisible));
-        _albumTileSize = _settings.Current.AlbumTileSize; Raise(nameof(AlbumTileSize));
+        _albumTileSize = _settings.Current.AlbumTileSize; Raise(nameof(AlbumTileSize)); Raise(nameof(GalleryItemWidth)); Raise(nameof(GalleryItemHeight));
         _animationsEnabled = _settings.Current.AnimationsEnabled; Raise(nameof(AnimationsEnabled));
         await RefreshLibraryAsync(cancellationToken: _lifetime.Token);
         foreach (var device in await _audio.GetOutputDevicesAsync(_lifetime.Token)) OutputDevices.Add(device);
@@ -280,13 +298,31 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task RefreshLibraryAsync(string query = "", CancellationToken cancellationToken = default)
     {
+        using var refreshScope = _diagnostics.Measure("library", "refresh",
+            _diagnostics.Enabled ? new Dictionary<string, object?> { ["queryLength"] = query.Length } : null);
         var tracks = string.IsNullOrWhiteSpace(query)
             ? await _repository.GetAllAsync(cancellationToken)
             : await _repository.SearchAsync(query, 5000, cancellationToken);
-        var groups = await Task.Run(() => BuildGroups(tracks), cancellationToken);
-        var playlistCards = await BuildPlaylistCardsAsync(query, cancellationToken);
+        var groups = await Task.Run(() =>
+        {
+            using var scope = _diagnostics.Measure("library", "group-construction",
+                _diagnostics.Enabled ? new Dictionary<string, object?> { ["tracks"] = tracks.Count } : null);
+            return BuildGroups(tracks);
+        }, cancellationToken);
+        IReadOnlyList<LibraryCardViewModel> playlistCards;
+        using (_diagnostics.Measure("library", "playlist-card-construction"))
+            playlistCards = await BuildPlaylistCardsAsync(query, cancellationToken);
         RunOnUi(() =>
         {
+            using var scope = _diagnostics.Measure("view", "library-result-application",
+                _diagnostics.Enabled ? new Dictionary<string, object?>
+                {
+                    ["tracks"] = tracks.Count,
+                    ["albums"] = groups.Albums.Count,
+                    ["artists"] = groups.Artists.Count,
+                    ["folders"] = groups.Folders.Count,
+                    ["playlists"] = playlistCards.Count
+                } : null);
             _allTracks = tracks;
             Replace(Albums, groups.Albums); Replace(Artists, groups.Artists); Replace(Genres, groups.Genres); Replace(Folders, groups.Folders); Replace(Playlists, playlistCards);
             StatusText = tracks.Count == 0 ? (_settings.Current.LibraryFolders.Count == 0 ? "Add a music folder to begin" : "No matching tracks") : $"{tracks.Count:N0} tracks · {groups.Albums.Count:N0} albums · {groups.Artists.Count:N0} artists";
@@ -356,10 +392,13 @@ public sealed class MainViewModel : ObservableObject
 
     private void StartArtworkResolution(IEnumerable<LibraryCardViewModel> source)
     {
+        using var scope = _diagnostics.Measure("artwork", "resolution-queue-build");
         _artworkCancellation?.Cancel(); _artworkCancellation?.Dispose();
         _artworkCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         var token = _artworkCancellation.Token;
         var cards = source.Where(x => x.ArtworkPath is null && x.RepresentativeTrack is not null).ToArray();
+        if (_diagnostics.Enabled)
+            _diagnostics.Mark("artwork", "resolution-started", new Dictionary<string, object?> { ["cards"] = cards.Length });
         _ = ResolveCardArtworkAsync(cards, token);
     }
 
@@ -389,6 +428,8 @@ public sealed class MainViewModel : ObservableObject
     private void Navigate(string? view)
     {
         if (view is null || !Views.Contains(view, StringComparer.OrdinalIgnoreCase)) return;
+        using var scope = _diagnostics.Measure("navigation", "command-application",
+            _diagnostics.Enabled ? new Dictionary<string, object?> { ["from"] = CurrentView, ["to"] = view } : null);
         var previous = CaptureNavigation();
         IsCollectionDetailOpen = false;
         CurrentView = Views.First(x => x.Equals(view, StringComparison.OrdinalIgnoreCase));
@@ -399,6 +440,8 @@ public sealed class MainViewModel : ObservableObject
 
     private void ApplyCurrentView(bool resetSelection)
     {
+        using var scope = _diagnostics.Measure("view", "tab-application",
+            _diagnostics.Enabled ? new Dictionary<string, object?> { ["view"] = CurrentView, ["resetSelection"] = resetSelection } : null);
         if (resetSelection && IsCollectionDetailOpen) IsCollectionDetailOpen = false;
         switch (CurrentView)
         {
@@ -509,14 +552,20 @@ public sealed class MainViewModel : ObservableObject
 
     private void SetActiveGroups(IReadOnlyList<LibraryCardViewModel> groups)
     {
+        using var scope = _diagnostics.Measure("view", "gallery-application",
+            _diagnostics.Enabled ? new Dictionary<string, object?> { ["groups"] = groups.Count } : null);
         ActiveGroups = groups;
-        GalleryGroups = groups.Take(28).ToArray();
+        GalleryGroups.Clear();
+        foreach (var group in groups.Take(28)) GalleryGroups.Add(group);
     }
 
     public void LoadMoreGalleryGroups()
     {
         if (GalleryGroups.Count >= ActiveGroups.Count) return;
-        GalleryGroups = ActiveGroups.Take(Math.Min(GalleryGroups.Count + 28, ActiveGroups.Count)).ToArray();
+        using var scope = _diagnostics.Measure("view", "gallery-page-application",
+            _diagnostics.Enabled ? new Dictionary<string, object?> { ["before"] = GalleryGroups.Count, ["total"] = ActiveGroups.Count } : null);
+        var end = Math.Min(GalleryGroups.Count + 28, ActiveGroups.Count);
+        for (var index = GalleryGroups.Count; index < end; index++) GalleryGroups.Add(ActiveGroups[index]);
     }
 
     private void ClearCollectionSelection()
@@ -530,7 +579,10 @@ public sealed class MainViewModel : ObservableObject
 
     private void SetBrowseTracks(IEnumerable<Track> tracks, string title, string subtitle)
     {
-        BrowseTracks.Clear(); foreach (var track in tracks) BrowseTracks.Add(track);
+        var materialized = tracks as IReadOnlyCollection<Track> ?? tracks.ToArray();
+        using var scope = _diagnostics.Measure("view", "track-list-application",
+            _diagnostics.Enabled ? new Dictionary<string, object?> { ["tracks"] = materialized.Count } : null);
+        BrowseTracks.Clear(); foreach (var track in materialized) BrowseTracks.Add(track);
         SelectedGroupTitle = title; SelectedGroupSubtitle = subtitle;
         SelectedTrack = BrowseTracks.FirstOrDefault();
         Raise(nameof(HasBrowseTracks));

@@ -74,6 +74,9 @@ Add `-Installer` when [Inno Setup 6](https://jrsoftware.org/isinfo.php) is insta
 - [Interface and navigation](docs/UI.md)
 - [Windows shortcuts and media controls](docs/WINDOWS-INTEGRATION.md)
 - [Project architecture](docs/ARCHITECTURE.md)
+- [Consumer-readiness roadmap](docs/ROADMAP.md)
+- [Performance fixtures and benchmark setup](docs/PERFORMANCE.md)
+- [Developer diagnostics and support bundles](docs/DIAGNOSTICS.md)
 
 ## Project status
 

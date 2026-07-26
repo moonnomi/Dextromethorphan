@@ -7,7 +7,6 @@
         <ResourceDictionary>
             <ui:StringEqualsConverter x:Key="StringEquals"/>
             <ui:InverseBooleanToVisibilityConverter x:Key="InverseBoolToVisibility"/>
-            <ui:ArtworkThumbnailConverter x:Key="ArtworkThumbnail"/>
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="UI/Styles/Theme.xaml"/>
             </ResourceDictionary.MergedDictionaries>
