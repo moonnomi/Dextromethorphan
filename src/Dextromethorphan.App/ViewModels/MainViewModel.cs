@@ -329,7 +329,6 @@ public sealed class MainViewModel : ObservableObject
             Raise(nameof(HasLibrary));
             ApplyCurrentView(true);
         });
-        StartArtworkResolution(groups.Albums.Concat(groups.Artists).Concat(groups.Genres).Concat(groups.Folders).Concat(playlistCards));
     }
 
     private static LibraryGroups BuildGroups(IReadOnlyList<Track> tracks)
@@ -390,15 +389,29 @@ public sealed class MainViewModel : ObservableObject
         return values.Length == 0 ? [fallback] : values;
     }
 
-    private void StartArtworkResolution(IEnumerable<LibraryCardViewModel> source)
+    private void RestartActiveArtworkResolution()
     {
         using var scope = _diagnostics.Measure("artwork", "resolution-queue-build");
         _artworkCancellation?.Cancel(); _artworkCancellation?.Dispose();
         _artworkCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         var token = _artworkCancellation.Token;
-        var cards = source.Where(x => x.ArtworkPath is null && x.RepresentativeTrack is not null).ToArray();
+        var planned = ArtworkResolutionPlanner.ForActiveView(
+            CurrentView,
+            IsCollectionDetailOpen,
+            SelectedCard,
+            GalleryGroups,
+            SidebarCards);
+        var cards = planned
+            .Where(x => x.ArtworkPath is null && x.RepresentativeTrack is not null)
+            .ToArray();
         if (_diagnostics.Enabled)
-            _diagnostics.Mark("artwork", "resolution-started", new Dictionary<string, object?> { ["cards"] = cards.Length });
+            _diagnostics.Mark("artwork", "resolution-started", new Dictionary<string, object?>
+            {
+                ["view"] = CurrentView,
+                ["detailOpen"] = IsCollectionDetailOpen,
+                ["plannedCards"] = planned.Count,
+                ["unresolvedCards"] = cards.Length
+            });
         _ = ResolveCardArtworkAsync(cards, token);
     }
 
@@ -460,6 +473,7 @@ public sealed class MainViewModel : ObservableObject
                 break;
             case "Now Playing": ViewSubtitle = CurrentTrack is null ? "Choose a track to begin" : CurrentArtist; break;
         }
+        RestartActiveArtworkResolution();
     }
 
     private void SelectDefault(IReadOnlyList<LibraryCardViewModel> cards, bool reset)
@@ -474,6 +488,7 @@ public sealed class MainViewModel : ObservableObject
         if (card is null) return;
         var previous = CaptureNavigation();
         SelectGroupCore(card, CurrentView is "Albums" or "Artists" or "Genres");
+        RestartActiveArtworkResolution();
         RecordNavigation(previous);
     }
 
@@ -538,6 +553,7 @@ public sealed class MainViewModel : ObservableObject
         if (entry.CardKey is null) return;
         var card = CardsForView(entry.View).FirstOrDefault(x => x.Kind == entry.CardKind && x.Key == entry.CardKey);
         SelectGroupCore(card, entry.IsCollectionDetail);
+        RestartActiveArtworkResolution();
     }
 
     private IReadOnlyList<LibraryCardViewModel> CardsForView(string view) => view switch
@@ -566,6 +582,7 @@ public sealed class MainViewModel : ObservableObject
             _diagnostics.Enabled ? new Dictionary<string, object?> { ["before"] = GalleryGroups.Count, ["total"] = ActiveGroups.Count } : null);
         var end = Math.Min(GalleryGroups.Count + 28, ActiveGroups.Count);
         for (var index = GalleryGroups.Count; index < end; index++) GalleryGroups.Add(ActiveGroups[index]);
+        RestartActiveArtworkResolution();
     }
 
     private void ClearCollectionSelection()

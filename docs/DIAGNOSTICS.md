@@ -45,6 +45,7 @@ Performance benchmark runs enable normal diagnostics automatically and place the
 - Library refresh, group construction, and playlist-card construction.
 - Tab, gallery, gallery-page, and track-list application.
 - Artwork cache lookup/store/prune, file checks, memory-cache hits, and bitmap decode.
+- Active-view artwork resolution scopes, including planned and unresolved card counts.
 - Navigation command application and command-to-first-render latency.
 - Process-to-first-render, library-ready, first-artwork, and interactive startup timing.
 - Dispatcher exceptions, unobserved task exceptions, and fatal runtime errors.
