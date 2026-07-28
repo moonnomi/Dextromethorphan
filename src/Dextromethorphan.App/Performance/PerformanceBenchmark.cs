@@ -137,7 +137,8 @@ internal sealed record CpuPerformanceMetrics(
     double IdlePercent,
     double? PlaybackPercent,
     string? PlaybackStatus,
-    IReadOnlyList<ThreadCpuPerformanceSample> IdleThreads);
+    IReadOnlyList<ThreadCpuPerformanceSample> IdleThreads,
+    IReadOnlyList<string> IdleAnimations);
 internal sealed record ThreadCpuPerformanceSample(
     int ThreadId,
     double CpuMs,
@@ -211,6 +212,7 @@ internal static class PerformanceBenchmarkRunner
         var scrollPeakWorkingSet = process.PeakWorkingSet64;
         var scrollArtworkSources = window.ArtworkMetrics.ActiveImageSources;
         await window.WaitForBackgroundIdleAsync(cancellationToken);
+        var idleAnimations = window.CaptureActiveAnimationState();
         var idleCpu = await MeasureCpuDetailedAsync(
             TimeSpan.FromSeconds(2),
             cancellationToken);
@@ -279,7 +281,8 @@ internal static class PerformanceBenchmarkRunner
                 idleCpu.Percent,
                 playbackCpu,
                 playbackStatus,
-                idleCpu.Threads),
+                idleCpu.Threads,
+                idleAnimations),
             Scan = scan,
             ConcurrentWorkload = concurrentWorkload,
             WorkloadError = workloadError

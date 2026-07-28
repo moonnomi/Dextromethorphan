@@ -8,7 +8,7 @@ SYS-005 closes the retained-resource paths found across the artwork, navigation,
 - View changes cancel and dispose superseded artwork and paging token sources.
 - Gallery, track, and playlist presentation state is cached in bounded/lazy forms rather than retaining duplicate full-library projections.
 - Render-frame measurement and smooth-scroll callbacks detach at completion, unload, or visibility loss.
-- Top-tab transitions use explicit base states and `FillBehavior=Stop`.
+- Top-tab transitions use explicit base states and versioned code-behind clocks that remove themselves on completion; resource-dictionary storyboards no longer retain six indicator clocks.
 - View transitions and artwork fades explicitly detach their clocks in their `Completed` callbacks, guarded by request/transition versions so an older completion cannot cancel a newer animation.
 - Startup replaces the animated orbit and scale `Freezable` objects after the overlay collapses. This prevents WPF's composition timing manager from retaining the infinite startup clock.
 - The audio position timer publishes only while playing or buffering, avoiding ten full UI snapshot updates per second while paused or stopped.
@@ -16,6 +16,8 @@ SYS-005 closes the retained-resource paths found across the artwork, navigation,
 ## Diagnostics
 
 Performance report schema 4 includes the highest-CPU process threads for the idle window and identifies the UI thread. This exposed the WPF composition thread rather than the dispatcher as the remaining idle consumer.
+
+The report also snapshots every visual-tree object that still implements `IAnimatable` with animated properties. The final focused run records zero active animation objects before sampling CPU.
 
 ## Result
 

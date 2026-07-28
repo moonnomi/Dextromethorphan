@@ -34,7 +34,9 @@ public partial class MainWindow : Window
     private readonly ISystemMediaTransportService _systemMedia;
     private readonly DeveloperDiagnostics _diagnostics;
     private readonly ArtworkImageService _artworkImages;
+    private readonly ArtworkPropertyUpdateBatcher _artworkUpdates;
     private readonly NavigationViewStateStore _viewStates = new();
+    private readonly Dictionary<RadioButton, int> _topTabAnimationVersions = [];
     private bool _scrollRestorePending;
     private bool _restoringScrollState;
     private CancellationTokenSource? _galleryPageCancellation;
@@ -47,6 +49,7 @@ public partial class MainWindow : Window
         ISystemMediaTransportService systemMedia,
         DeveloperDiagnostics diagnostics,
         ArtworkImageService artworkImages,
+        ArtworkPropertyUpdateBatcher artworkUpdates,
         PerformanceOverlayViewModel performanceOverlay)
     {
         InitializeComponent();
@@ -55,6 +58,7 @@ public partial class MainWindow : Window
         _systemMedia = systemMedia;
         _diagnostics = diagnostics;
         _artworkImages = artworkImages;
+        _artworkUpdates = artworkUpdates;
         PerformanceOverlay = performanceOverlay;
         PerformanceOverlay.Attach(this);
         DataContext = viewModel;
@@ -260,6 +264,45 @@ public partial class MainWindow : Window
         else
             opacityAnimation.Completed += (_, _) =>
                 ReleaseViewTransitionAnimations(animationVersion);
+    }
+
+    private void TopTab_Checked(object sender, RoutedEventArgs e) =>
+        AnimateTopTab(sender as RadioButton, selected: true);
+
+    private void TopTab_Unchecked(object sender, RoutedEventArgs e) =>
+        AnimateTopTab(sender as RadioButton, selected: false);
+
+    private void AnimateTopTab(RadioButton? tab, bool selected)
+    {
+        if (tab is null) return;
+        tab.ApplyTemplate();
+        if (tab.Template.FindName("Indicator", tab) is not Border indicator)
+            return;
+        var version = _topTabAnimationVersions.GetValueOrDefault(tab) + 1;
+        _topTabAnimationVersions[tab] = version;
+        indicator.BeginAnimation(OpacityProperty, null);
+        if (DataContext is not MainViewModel { AnimationsEnabled: true }
+            || !SystemParameters.ClientAreaAnimation)
+            return;
+
+        var animation = new DoubleAnimation(
+            selected ? 0 : 1,
+            selected ? 1 : 0,
+            TimeSpan.FromMilliseconds(selected ? 140 : 100))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+            FillBehavior = FillBehavior.Stop
+        };
+        animation.Completed += (_, _) =>
+        {
+            if (_topTabAnimationVersions.GetValueOrDefault(tab) != version)
+                return;
+            indicator.BeginAnimation(OpacityProperty, null);
+        };
+        indicator.BeginAnimation(
+            OpacityProperty,
+            animation,
+            HandoffBehavior.SnapshotAndReplace);
     }
 
     private void ReleaseViewTransitionAnimations(int animationVersion)
@@ -590,11 +633,39 @@ public partial class MainWindow : Window
     {
         await ViewModel.WaitForBackgroundWorkAsync(cancellationToken);
         var timeout = Stopwatch.StartNew();
-        while (ArtworkMetrics.QueueDepth > 0 && timeout.Elapsed < TimeSpan.FromSeconds(5))
+        while ((ArtworkMetrics.QueueDepth > 0
+                || _artworkUpdates.GetMetrics().Pending > 0)
+               && timeout.Elapsed < TimeSpan.FromSeconds(5))
             await Task.Delay(25, cancellationToken);
         await _diagnostics.WaitForIdleAsync(cancellationToken);
         await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ContextIdle, cancellationToken);
         await Task.Delay(250, cancellationToken);
+    }
+
+    internal IReadOnlyList<string> CaptureActiveAnimationState()
+    {
+        var animated = new List<string>();
+        CaptureAnimations(this, animated);
+        return animated;
+    }
+
+    private static void CaptureAnimations(
+        DependencyObject value,
+        ICollection<string> animated)
+    {
+        if (value is IAnimatable { HasAnimatedProperties: true })
+        {
+            var name = value is FrameworkElement element
+                && !string.IsNullOrWhiteSpace(element.Name)
+                    ? $"#{element.Name}"
+                    : "";
+            var visibility = value is UIElement visual
+                ? $" ({visual.Visibility})"
+                : "";
+            animated.Add($"{value.GetType().Name}{name}{visibility}");
+        }
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(value); index++)
+            CaptureAnimations(VisualTreeHelper.GetChild(value, index), animated);
     }
 
     internal async Task<FramePerformanceMetrics> MeasureAlbumScrollPerformanceAsync(CancellationToken cancellationToken)
