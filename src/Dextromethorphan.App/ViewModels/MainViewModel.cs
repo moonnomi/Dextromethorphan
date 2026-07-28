@@ -46,6 +46,7 @@ public sealed class MainViewModel : ObservableObject
     private ObservableCollection<Track> _browseTracks = [];
     private ObservableCollection<LibraryCardViewModel> _galleryGroups = [];
     private PresentationCollection<LibraryCardViewModel>? _activeGalleryPresentation;
+    private PresentationCollection<Track>? _activeTrackPresentation;
     private Track? _selectedTrack;
     private Track? _currentTrack;
     private LibraryCardViewModel? _selectedCard;
@@ -176,6 +177,7 @@ public sealed class MainViewModel : ObservableObject
     public bool HasCurrentTrack => CurrentTrack is not null;
     public bool HasLibrary => _allTracks.Count > 0;
     public bool HasBrowseTracks => BrowseTracks.Count > 0;
+    public int BrowseTrackSourceCount => _activeTrackPresentation?.Source.Count ?? BrowseTracks.Count;
     public bool HasQueue => Queue.Count > 0;
     public bool IsGroupView => !IsCollectionDetailOpen && CurrentView is "Albums" or "Artists" or "Genres";
     public bool IsCollectionDetailView => IsCollectionDetailOpen && CurrentView is "Albums" or "Artists" or "Genres";
@@ -482,6 +484,7 @@ public sealed class MainViewModel : ObservableObject
             _trackViews.Clear();
             _playlistTrackLoads.Clear();
             _activeGalleryPresentation = null;
+            _activeTrackPresentation = null;
             Replace(Albums, groups.Albums); Replace(Artists, groups.Artists); Replace(Genres, groups.Genres); Replace(Folders, groups.Folders); Replace(Playlists, playlistCards);
             StatusText = tracks.Count == 0 ? (_settings.Current.LibraryFolders.Count == 0 ? "Add a music folder to begin" : "No matching tracks") : $"{tracks.Count:N0} tracks · {groups.Albums.Count:N0} albums · {groups.Artists.Count:N0} artists";
             Raise(nameof(HasLibrary));
@@ -664,7 +667,7 @@ public sealed class MainViewModel : ObservableObject
                 break;
             case "Songs":
                 ViewSubtitle = $"{_allTracks.Count:N0} tracks, stored offline";
-                SetBrowseTracks(_allTracks, "All songs", StatusText, PrimaryViewStateKey);
+                SetBrowseTracks(_allTracks, "All songs", StatusText, PrimaryViewStateKey, initialCount: 500);
                 break;
             case "Now Playing":
                 SetContentViewStateKey(PrimaryViewStateKey);
@@ -711,6 +714,7 @@ public sealed class MainViewModel : ObservableObject
         if (tracks is null)
         {
             SetContentViewStateKey(CollectionViewStateKey(CurrentView, card));
+            _activeTrackPresentation = null;
             BrowseTracks = [];
             SetSelectedTrackForView(null);
             SelectedGroupTitle = card.Title;
@@ -836,11 +840,12 @@ public sealed class MainViewModel : ObservableObject
             : cards.FirstOrDefault(x => x.Kind == remembered.Kind && x.Key == remembered.Key);
         if (SelectedCard is not null) SelectedCard.IsSelected = true;
         SetContentViewStateKey(PrimaryViewStateKey);
-        BrowseTracks = _trackViews.GetOrCreate(
+        _activeTrackPresentation = _trackViews.GetOrCreate(
             PrimaryViewStateKey,
             static () => Array.Empty<Track>(),
             int.MaxValue,
-            out _).Items;
+            out _);
+        BrowseTracks = _activeTrackPresentation.Items;
         SetSelectedTrackForView(null);
         Raise(nameof(HasBrowseTracks));
     }
@@ -852,12 +857,17 @@ public sealed class MainViewModel : ObservableObject
             subtitle,
             SelectedCard is null ? PrimaryViewStateKey : CollectionViewStateKey(CurrentView, SelectedCard));
 
-    private void SetBrowseTracks(IEnumerable<Track> tracks, string title, string subtitle, string contentStateKey)
+    private void SetBrowseTracks(
+        IEnumerable<Track> tracks,
+        string title,
+        string subtitle,
+        string contentStateKey,
+        int initialCount = int.MaxValue)
     {
         var presentation = _trackViews.GetOrCreate(
             contentStateKey,
             () => tracks as IReadOnlyList<Track> ?? tracks.ToArray(),
-            int.MaxValue,
+            initialCount,
             out var cacheHit);
         using var scope = _diagnostics.Measure("view", "track-list-application",
             _diagnostics.Enabled ? new Dictionary<string, object?>
@@ -866,6 +876,7 @@ public sealed class MainViewModel : ObservableObject
                 ["cacheHit"] = cacheHit
             } : null);
         SetContentViewStateKey(contentStateKey);
+        _activeTrackPresentation = presentation;
         BrowseTracks = presentation.Items;
         SelectedGroupTitle = title; SelectedGroupSubtitle = subtitle;
         _trackSelections.TryGetValue(contentStateKey, out var selectedPath);
@@ -873,6 +884,24 @@ public sealed class MainViewModel : ObservableObject
             selectedPath is null
                 ? BrowseTracks.FirstOrDefault()
                 : BrowseTracks.FirstOrDefault(x => x.Path.Equals(selectedPath, StringComparison.OrdinalIgnoreCase)) ?? BrowseTracks.FirstOrDefault());
+        Raise(nameof(HasBrowseTracks));
+    }
+
+    public void LoadMoreBrowseTracks()
+    {
+        if (_activeTrackPresentation is null
+            || !PresentationCollectionCache<Track>.EnsureMaterialized(
+                _activeTrackPresentation,
+                BrowseTracks.Count + 500))
+            return;
+        Raise(nameof(HasBrowseTracks));
+    }
+
+    public void EnsureBrowseTracksLoaded(int count)
+    {
+        if (_activeTrackPresentation is null
+            || !PresentationCollectionCache<Track>.EnsureMaterialized(_activeTrackPresentation, count))
+            return;
         Raise(nameof(HasBrowseTracks));
     }
 
@@ -960,8 +989,12 @@ public sealed class MainViewModel : ObservableObject
     private async Task PlaySelectedAsync()
     {
         if (SelectedTrack is null) return;
-        var source = BrowseTracks.Count > 0 ? BrowseTracks.ToArray() : _allTracks;
-        _queue.Replace(source, Math.Max(0, Array.IndexOf(source.ToArray(), SelectedTrack)));
+        var source = _activeTrackPresentation?.Source
+            ?? (BrowseTracks.Count > 0 ? BrowseTracks.ToArray() : _allTracks);
+        var selectedIndex = Enumerable.Range(0, source.Count)
+            .FirstOrDefault(index => ReferenceEquals(source[index], SelectedTrack)
+                || source[index].Path.Equals(SelectedTrack.Path, StringComparison.OrdinalIgnoreCase));
+        _queue.Replace(source, selectedIndex);
         await ChangeTrackAsync(SelectedTrack);
     }
 

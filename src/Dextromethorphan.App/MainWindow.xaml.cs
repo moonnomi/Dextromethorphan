@@ -310,7 +310,9 @@ public partial class MainWindow : Window
     private void TrackList_ScrollChanged(object sender, ScrollChangedEventArgs e)
     {
         if (_restoringScrollState || sender is not ListBox list || !list.IsVisible || e.OriginalSource is not ScrollViewer) return;
-        _viewStates.Capture(ViewModel.ContentViewStateKey, e.VerticalOffset);
+        _viewStates.Capture(ViewModel.ContentViewStateKey, e.VerticalOffset, ViewModel.BrowseTracks.Count);
+        if (e.ExtentHeight > 0 && e.VerticalOffset + e.ViewportHeight >= e.ExtentHeight - 360)
+            ViewModel.LoadMoreBrowseTracks();
     }
 
     private void ScheduleScrollStateRestore()
@@ -352,6 +354,7 @@ public partial class MainWindow : Window
                              && !ReferenceEquals(x, LyricsList)))
             {
                 var state = _viewStates.Get(ViewModel.ContentViewStateKey);
+                ViewModel.EnsureBrowseTracksLoaded(state.MaterializedItemCount);
                 list.UpdateLayout();
                 FindVisualChild<ScrollViewer>(list)?.ScrollToVerticalOffset(state.VerticalOffset);
             }
@@ -495,6 +498,17 @@ public partial class MainWindow : Window
         await NextRenderedFrameTimestampAsync(cancellationToken);
         await Task.Delay(32, cancellationToken);
         return new HiddenViewReleaseMetrics(beforeHide, ArtworkMetrics.ActiveImageSources);
+    }
+
+    internal async Task<PagedSongsPerformanceMetrics> MeasurePagedSongsPerformanceAsync(CancellationToken cancellationToken)
+    {
+        ViewModel.NavigateCommand.Execute("Songs");
+        await NextRenderedFrameTimestampAsync(cancellationToken);
+        var sourceCount = ViewModel.BrowseTrackSourceCount;
+        var initialCount = ViewModel.BrowseTracks.Count;
+        ViewModel.LoadMoreBrowseTracks();
+        await NextRenderedFrameTimestampAsync(cancellationToken);
+        return new PagedSongsPerformanceMetrics(sourceCount, initialCount, ViewModel.BrowseTracks.Count);
     }
 
     internal async Task<FramePerformanceMetrics> MeasureAlbumScrollPerformanceAsync(CancellationToken cancellationToken)

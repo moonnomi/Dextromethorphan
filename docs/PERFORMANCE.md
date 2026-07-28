@@ -81,6 +81,7 @@ Each sequence records:
 - first and cached switches through Albums, Artists, Genres, Songs, Folders, and Playlists;
 - Mouse4/Mouse5 history latency plus collection identity, selection, materialized-page, and scroll-offset restoration;
 - hidden-view artwork-source release after a loaded gallery is collapsed;
+- initial and next-page Songs materialization versus the full source count;
 - 180 real WPF rendering intervals while the album gallery loads and scrolls;
 - working set, peak working set, managed heap, and GC counts;
 - normalized idle CPU;

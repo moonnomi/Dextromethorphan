@@ -120,6 +120,8 @@ $summary = [ordered]@{
     navigationForwardMaximumMs = [math]::Round(($reports | ForEach-Object { $_.navigationHistory.forwardLatencyMs } | Measure-Object -Maximum).Maximum, 3)
     hiddenViewReleasePassed = @($reports | Where-Object { -not $_.hiddenViewRelease.passed }).Count -eq 0
     hiddenArtworkSourcesMaximum = ($reports | ForEach-Object { $_.hiddenViewRelease.sourcesAfterHide } | Measure-Object -Maximum).Maximum
+    pagedSongsPassed = @($reports | Where-Object { -not $_.pagedSongs.passed }).Count -eq 0
+    songsInitialMaterializedMaximum = ($reports | ForEach-Object { $_.pagedSongs.initialMaterializedTracks } | Measure-Object -Maximum).Maximum
     scrollP95FrameMedianMs = Get-Median @($reports | ForEach-Object { [double]$_.albumScroll.p95Ms })
     scrollMaximumFrameMs = [math]::Round(($reports | ForEach-Object { $_.albumScroll.maximumMs } | Measure-Object -Maximum).Maximum, 3)
     scrollFramesOver50Ms = ($reports | ForEach-Object { $_.albumScroll.over50Ms } | Measure-Object -Sum).Sum
@@ -152,6 +154,8 @@ Captured: $($summary.capturedAt)
 | Mouse5/Forward maximum | $($summary.navigationForwardMaximumMs) ms |
 | Hidden views release artwork | $($summary.hiddenViewReleasePassed) |
 | Hidden artwork sources, maximum | $($summary.hiddenArtworkSourcesMaximum) |
+| Songs presentation is paged | $($summary.pagedSongsPassed) |
+| Songs initially materialized, maximum | $($summary.songsInitialMaterializedMaximum) |
 | Album scroll p95 frame, median | $($summary.scrollP95FrameMedianMs) ms |
 | Album scroll worst frame | $($summary.scrollMaximumFrameMs) ms |
 | Album scroll frames over 50 ms | $($summary.scrollFramesOver50Ms) |

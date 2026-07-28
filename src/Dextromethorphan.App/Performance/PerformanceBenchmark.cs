@@ -76,6 +76,7 @@ internal sealed class PerformanceBenchmarkReport
     public required IReadOnlyList<TabSwitchPerformanceSample> TabSwitches { get; init; }
     public required NavigationHistoryPerformanceMetrics NavigationHistory { get; init; }
     public required HiddenViewReleaseMetrics HiddenViewRelease { get; init; }
+    public required PagedSongsPerformanceMetrics PagedSongs { get; init; }
     public required FramePerformanceMetrics AlbumScroll { get; init; }
     public required ResourcePerformanceMetrics Resources { get; init; }
     public required CpuPerformanceMetrics Cpu { get; init; }
@@ -104,6 +105,16 @@ internal sealed record NavigationHistoryPerformanceMetrics(
 internal sealed record HiddenViewReleaseMetrics(int SourcesBeforeHide, int SourcesAfterHide)
 {
     public bool Passed => SourcesBeforeHide > 0 && SourcesAfterHide == 0;
+}
+internal sealed record PagedSongsPerformanceMetrics(
+    int SourceTracks,
+    int InitialMaterializedTracks,
+    int MaterializedTracksAfterNextPage)
+{
+    public bool Passed =>
+        SourceTracks > 500
+        && InitialMaterializedTracks == 500
+        && MaterializedTracksAfterNextPage == 1_000;
 }
 internal sealed record FramePerformanceMetrics(int Samples, double AverageMs, double P50Ms, double P95Ms, double P99Ms, double MaximumMs, int Over16_67Ms, int Over33_33Ms, int Over50Ms, int GalleryCardsLoaded);
 internal sealed record ResourcePerformanceMetrics(
@@ -151,6 +162,7 @@ internal static class PerformanceBenchmarkRunner
         var tabSwitches = await window.MeasureTabSwitchPerformanceAsync(cancellationToken);
         var navigationHistory = await window.MeasureNavigationHistoryPerformanceAsync(cancellationToken);
         var hiddenViewRelease = await window.MeasureHiddenViewReleaseAsync(cancellationToken);
+        var pagedSongs = await window.MeasurePagedSongsPerformanceAsync(cancellationToken);
         process.Refresh();
         var navigationWorkingSet = process.WorkingSet64;
         var navigationArtworkSources = window.ArtworkMetrics.ActiveImageSources;
@@ -197,6 +209,7 @@ internal static class PerformanceBenchmarkRunner
             TabSwitches = tabSwitches,
             NavigationHistory = navigationHistory,
             HiddenViewRelease = hiddenViewRelease,
+            PagedSongs = pagedSongs,
             AlbumScroll = scroll,
             Resources = new ResourcePerformanceMetrics(
                 startupWorkingSet,
