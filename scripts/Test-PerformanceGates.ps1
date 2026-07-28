@@ -65,6 +65,16 @@ if ($null -ne $summaryData.navigationHistoryPassed) {
         Passed = $historyPassed
     })
 }
+if ($null -ne $summaryData.hiddenViewReleasePassed) {
+    $hiddenPassed = [bool]$summaryData.hiddenViewReleasePassed
+    $checks.Add([pscustomobject]@{
+        Gate = 'Hidden view artwork release'
+        Actual = $hiddenPassed
+        Limit = 'True'
+        Result = $(if ($hiddenPassed) { 'PASS' } else { 'FAIL' })
+        Passed = $hiddenPassed
+    })
+}
 Add-MaximumCheck 'Album scroll p95 frame' ([double]$summaryData.scrollP95FrameMedianMs) ([double]$gateData.scrollP95FrameMaximumMs) 'ms'
 Add-MaximumCheck 'Album scroll worst frame' ([double]$summaryData.scrollMaximumFrameMs) ([double]$gateData.scrollFrameMaximumMs) 'ms'
 Add-MaximumCheck 'Album scroll frames over 50 ms' ([double]$summaryData.scrollFramesOver50Ms) ([double]$gateData.scrollFramesOver50Maximum) 'frames'

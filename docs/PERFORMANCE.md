@@ -80,6 +80,7 @@ Each sequence records:
 - process-to-window, first-render, first-artwork, library-ready, and interactive startup timing;
 - first and cached switches through Albums, Artists, Genres, Songs, Folders, and Playlists;
 - Mouse4/Mouse5 history latency plus collection identity, selection, materialized-page, and scroll-offset restoration;
+- hidden-view artwork-source release after a loaded gallery is collapsed;
 - 180 real WPF rendering intervals while the album gallery loads and scrolls;
 - working set, peak working set, managed heap, and GC counts;
 - normalized idle CPU;

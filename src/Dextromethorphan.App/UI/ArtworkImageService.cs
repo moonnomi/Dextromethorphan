@@ -185,6 +185,7 @@ public sealed class ArtworkImageService : IDisposable
             queue.Queued + queue.Active,
             queue.Queued,
             queue.Active,
+            AsyncArtwork.ActiveSourceCount,
             cacheEntries,
             cacheBytes,
             Interlocked.Read(ref _requests),
@@ -366,6 +367,7 @@ internal readonly record struct ArtworkRuntimeMetrics(
     int QueueDepth,
     int Queued,
     int Active,
+    int ActiveImageSources,
     int CacheEntries,
     long CacheBytes,
     long Requests,
@@ -394,6 +396,7 @@ internal readonly record struct ArtworkRuntimeMetrics(
 public static class AsyncArtwork
 {
     private static readonly ConditionalWeakTable<Image, RequestState> States = new();
+    private static int _activeSourceCount;
     private static readonly DependencyPropertyKey StatePropertyKey = DependencyProperty.RegisterAttachedReadOnly(
         "State",
         typeof(ArtworkLoadState),
@@ -420,6 +423,8 @@ public static class AsyncArtwork
 
     public static readonly RoutedEvent ArtworkLoadedEvent = EventManager.RegisterRoutedEvent(
         "ArtworkLoaded", RoutingStrategy.Bubble, typeof(RoutedEventHandler), typeof(AsyncArtwork));
+
+    internal static int ActiveSourceCount => Math.Max(0, Volatile.Read(ref _activeSourceCount));
 
     public static string? GetPath(DependencyObject element) => (string?)element.GetValue(PathProperty);
     public static void SetPath(DependencyObject element, string? value) => element.SetValue(PathProperty, value);
@@ -452,12 +457,17 @@ public static class AsyncArtwork
     {
         private CancellationTokenSource? _cancellation;
         private int _version;
+        private bool _hasSource;
 
         public void OnLoaded(object sender, RoutedEventArgs args) => Restart();
         public void OnIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs args)
         {
             if (args.NewValue is true) Restart();
-            else Cancel(clearSource: false);
+            else
+            {
+                ArtworkImageService.SourceInvalidated -= OnSourceInvalidated;
+                Cancel(clearSource: true);
+            }
         }
 
         public void OnUnloaded(object sender, RoutedEventArgs args)
@@ -474,7 +484,7 @@ public static class AsyncArtwork
             if (clearSource)
             {
                 image.BeginAnimation(UIElement.OpacityProperty, null);
-                image.Source = null;
+                ClearSource();
                 image.Opacity = 0;
                 SetVisualState(ArtworkLoadState.Empty);
             }
@@ -487,7 +497,7 @@ public static class AsyncArtwork
             _cancellation?.Dispose();
             _cancellation = null;
             image.BeginAnimation(UIElement.OpacityProperty, null);
-            image.Source = null;
+            ClearSource();
             image.Opacity = 0;
             SetVisualState(ArtworkLoadState.Empty);
             var path = GetPath(image);
@@ -535,7 +545,7 @@ public static class AsyncArtwork
                             () =>
                             {
                                 if (version != _version || !image.IsLoaded || !image.IsVisible) return;
-                                image.Source = bitmap;
+                                SetSource(bitmap);
                                 SetVisualState(ArtworkLoadState.Loaded);
                                 Reveal();
                                 image.RaiseEvent(new RoutedEventArgs(ArtworkLoadedEvent, image));
@@ -582,6 +592,22 @@ public static class AsyncArtwork
         {
             image.SetValue(StatePropertyKey, state);
             image.SetValue(FailureReasonPropertyKey, reason);
+        }
+
+        private void SetSource(BitmapSource source)
+        {
+            image.Source = source;
+            if (_hasSource) return;
+            _hasSource = true;
+            Interlocked.Increment(ref _activeSourceCount);
+        }
+
+        private void ClearSource()
+        {
+            image.Source = null;
+            if (!_hasSource) return;
+            _hasSource = false;
+            Interlocked.Decrement(ref _activeSourceCount);
         }
 
         private void Reveal()

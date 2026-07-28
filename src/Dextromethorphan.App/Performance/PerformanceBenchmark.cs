@@ -66,7 +66,7 @@ internal sealed record StartupPerformanceTimestamps(
 
 internal sealed class PerformanceBenchmarkReport
 {
-    public int SchemaVersion { get; init; } = 2;
+    public int SchemaVersion { get; init; } = 3;
     public required string RunKind { get; init; }
     public required DateTimeOffset CapturedAt { get; init; }
     public required string FixtureRoot { get; init; }
@@ -75,6 +75,7 @@ internal sealed class PerformanceBenchmarkReport
     public required StartupPerformanceMetrics Startup { get; init; }
     public required IReadOnlyList<TabSwitchPerformanceSample> TabSwitches { get; init; }
     public required NavigationHistoryPerformanceMetrics NavigationHistory { get; init; }
+    public required HiddenViewReleaseMetrics HiddenViewRelease { get; init; }
     public required FramePerformanceMetrics AlbumScroll { get; init; }
     public required ResourcePerformanceMetrics Resources { get; init; }
     public required CpuPerformanceMetrics Cpu { get; init; }
@@ -100,8 +101,23 @@ internal sealed record NavigationHistoryPerformanceMetrics(
 {
     public bool Passed => CollectionReused && ScrollOffsetRestored && SelectionRestored && MaterializedCountRestored;
 }
+internal sealed record HiddenViewReleaseMetrics(int SourcesBeforeHide, int SourcesAfterHide)
+{
+    public bool Passed => SourcesBeforeHide > 0 && SourcesAfterHide == 0;
+}
 internal sealed record FramePerformanceMetrics(int Samples, double AverageMs, double P50Ms, double P95Ms, double P99Ms, double MaximumMs, int Over16_67Ms, int Over33_33Ms, int Over50Ms, int GalleryCardsLoaded);
-internal sealed record ResourcePerformanceMetrics(long WorkingSetAfterStartupBytes, long WorkingSetAfterNavigationBytes, long WorkingSetAfterScrollBytes, long PeakWorkingSetBytes, long ManagedHeapBytes, int Gen0Collections, int Gen1Collections, int Gen2Collections);
+internal sealed record ResourcePerformanceMetrics(
+    long WorkingSetAfterStartupBytes,
+    long WorkingSetAfterNavigationBytes,
+    long WorkingSetAfterScrollBytes,
+    long PeakWorkingSetBytes,
+    long ManagedHeapBytes,
+    int Gen0Collections,
+    int Gen1Collections,
+    int Gen2Collections,
+    int ActiveArtworkSourcesAfterStartup,
+    int ActiveArtworkSourcesAfterNavigation,
+    int ActiveArtworkSourcesAfterScroll);
 internal sealed record CpuPerformanceMetrics(double IdlePercent, double? PlaybackPercent, string? PlaybackStatus);
 internal sealed record ScanPerformanceMetrics(int Files, int Imported, int Failed, double ElapsedMs, double FilesPerSecond);
 
@@ -130,15 +146,19 @@ internal static class PerformanceBenchmarkRunner
         var process = Process.GetCurrentProcess();
         process.Refresh();
         var startupWorkingSet = process.WorkingSet64;
+        var startupArtworkSources = window.ArtworkMetrics.ActiveImageSources;
 
         var tabSwitches = await window.MeasureTabSwitchPerformanceAsync(cancellationToken);
         var navigationHistory = await window.MeasureNavigationHistoryPerformanceAsync(cancellationToken);
+        var hiddenViewRelease = await window.MeasureHiddenViewReleaseAsync(cancellationToken);
         process.Refresh();
         var navigationWorkingSet = process.WorkingSet64;
+        var navigationArtworkSources = window.ArtworkMetrics.ActiveImageSources;
 
         var scroll = await window.MeasureAlbumScrollPerformanceAsync(cancellationToken);
         process.Refresh();
         var scrollWorkingSet = process.WorkingSet64;
+        var scrollArtworkSources = window.ArtworkMetrics.ActiveImageSources;
         var idleCpu = await MeasureCpuAsync(TimeSpan.FromSeconds(2), cancellationToken);
 
         ScanPerformanceMetrics? scan = null;
@@ -176,6 +196,7 @@ internal static class PerformanceBenchmarkRunner
                 Elapsed(timestamps.ProcessStartedAt, timestamps.InteractiveAt)),
             TabSwitches = tabSwitches,
             NavigationHistory = navigationHistory,
+            HiddenViewRelease = hiddenViewRelease,
             AlbumScroll = scroll,
             Resources = new ResourcePerformanceMetrics(
                 startupWorkingSet,
@@ -185,7 +206,10 @@ internal static class PerformanceBenchmarkRunner
                 GC.GetTotalMemory(false),
                 GC.CollectionCount(0),
                 GC.CollectionCount(1),
-                GC.CollectionCount(2)),
+                GC.CollectionCount(2),
+                startupArtworkSources,
+                navigationArtworkSources,
+                scrollArtworkSources),
             Cpu = new CpuPerformanceMetrics(idleCpu, playbackCpu, playbackStatus),
             Scan = scan,
             WorkloadError = workloadError

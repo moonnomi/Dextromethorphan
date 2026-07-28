@@ -168,7 +168,7 @@ public sealed class PerformanceOverlayViewModel : ObservableObject, IDisposable
         var artwork = _artwork.GetRuntimeMetrics();
         var updates = _artworkUpdates.GetMetrics();
         ArtworkQueue = $"{artwork.Active:N0} decoding · {artwork.Queued:N0} queued · {updates.Pending:N0} UI pending · {updates.Batches:N0} batches";
-        ArtworkCache = $"{artwork.CacheEntries:N0} memory · {FormatMegabytes(artwork.CacheBytes)} · {artwork.CacheHitRate:0}% RAM hit\n" +
+        ArtworkCache = $"{artwork.ActiveImageSources:N0} visible sources · {artwork.CacheEntries:N0} memory · {FormatMegabytes(artwork.CacheBytes)} · {artwork.CacheHitRate:0}% RAM hit\n" +
             $"{artwork.PersistentVariantsGenerated:N0} variants · {artwork.PersistentHitRate:0}% disk hit · " +
             $"{artwork.PersistentSourceDecodes:N0} original decodes · {artwork.PersistentFailures:N0} rejected";
 

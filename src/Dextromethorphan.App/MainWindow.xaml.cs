@@ -33,6 +33,7 @@ public partial class MainWindow : Window
     private readonly IShortcutService _shortcuts;
     private readonly ISystemMediaTransportService _systemMedia;
     private readonly DeveloperDiagnostics _diagnostics;
+    private readonly ArtworkImageService _artworkImages;
     private readonly NavigationViewStateStore _viewStates = new();
     private bool _scrollRestorePending;
     private bool _restoringScrollState;
@@ -50,7 +51,7 @@ public partial class MainWindow : Window
         _shortcuts = shortcuts;
         _systemMedia = systemMedia;
         _diagnostics = diagnostics;
-        _ = artworkImages;
+        _artworkImages = artworkImages;
         PerformanceOverlay = performanceOverlay;
         PerformanceOverlay.Attach(this);
         DataContext = viewModel;
@@ -60,6 +61,7 @@ public partial class MainWindow : Window
     public MainViewModel ViewModel { get; }
     public PerformanceOverlayViewModel PerformanceOverlay { get; }
     internal DateTimeOffset? FirstGalleryArtworkRenderedAt => _firstGalleryArtworkRenderedAt;
+    internal ArtworkRuntimeMetrics ArtworkMetrics => _artworkImages.GetRuntimeMetrics();
 
     public void BeginStartupPresentation()
     {
@@ -475,6 +477,24 @@ public partial class MainWindow : Window
             Math.Round(restoredOffset, 3),
             expectedCount,
             restoredCount);
+    }
+
+    internal async Task<HiddenViewReleaseMetrics> MeasureHiddenViewReleaseAsync(CancellationToken cancellationToken)
+    {
+        ViewModel.NavigateCommand.Execute("Albums");
+        ViewModel.EnsureGalleryGroupsLoaded(Math.Min(56, ViewModel.ActiveGroups.Count));
+        await NextRenderedFrameTimestampAsync(cancellationToken);
+
+        var timeout = Stopwatch.StartNew();
+        while (ArtworkMetrics.ActiveImageSources == 0 && timeout.Elapsed < TimeSpan.FromSeconds(2))
+            await Task.Delay(16, cancellationToken);
+        var beforeHide = ArtworkMetrics.ActiveImageSources;
+
+        ViewModel.NavigateCommand.Execute("Songs");
+        await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ContextIdle, cancellationToken);
+        await NextRenderedFrameTimestampAsync(cancellationToken);
+        await Task.Delay(32, cancellationToken);
+        return new HiddenViewReleaseMetrics(beforeHide, ArtworkMetrics.ActiveImageSources);
     }
 
     internal async Task<FramePerformanceMetrics> MeasureAlbumScrollPerformanceAsync(CancellationToken cancellationToken)
