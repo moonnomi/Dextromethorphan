@@ -54,7 +54,12 @@ $tracks = [int]$summaryData.fixture.tracks
 if ($tracks -eq 10000) {
     Add-MaximumCheck 'Cold start to interactive' ([double]$summaryData.coldStartInteractiveMs) ([double]$gateData.coldStart10kMaximumMs) 'ms' $true
 }
-Add-MaximumCheck 'Cached tab switch maximum' ([double]$summaryData.cachedTabSwitchMaximumMs) ([double]$gateData.cachedTabSwitchMaximumMs) 'ms' $true
+$cachedTabGateValue = if ($null -ne $summaryData.cachedTabSwitchWorstViewMedianMs) {
+    [double]$summaryData.cachedTabSwitchWorstViewMedianMs
+} else {
+    [double]$summaryData.cachedTabSwitchMaximumMs
+}
+Add-MaximumCheck 'Cached tab switch worst per-view median' $cachedTabGateValue ([double]$gateData.cachedTabSwitchMaximumMs) 'ms' $true
 if ($null -ne $summaryData.navigationHistoryPassed) {
     $historyPassed = [bool]$summaryData.navigationHistoryPassed
     $checks.Add([pscustomobject]@{

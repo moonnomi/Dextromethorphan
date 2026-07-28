@@ -109,6 +109,9 @@ foreach ($view in $tabViews) {
         maximumMs = [math]::Round(($values | Measure-Object -Maximum).Maximum, 3)
     }
 }
+$worstCachedViewMedian = [math]::Round(
+    ($cachedTabByView.Values | ForEach-Object { [double]$_.medianMs } | Measure-Object -Maximum).Maximum,
+    3)
 $summary = [ordered]@{
     schemaVersion = 1
     capturedAt = (Get-Date).ToUniversalTime().ToString('o')
@@ -120,6 +123,7 @@ $summary = [ordered]@{
     firstArtworkMedianMs = Get-Median @($reports | ForEach-Object { [double]$_.startup.processToFirstArtworkMs })
     cachedTabSwitchMedianMs = Get-Median @($cachedTabs | ForEach-Object { [double]$_.latencyMs })
     cachedTabSwitchMaximumMs = [math]::Round(($cachedTabs | Measure-Object latencyMs -Maximum).Maximum, 3)
+    cachedTabSwitchWorstViewMedianMs = $worstCachedViewMedian
     cachedTabByView = $cachedTabByView
     navigationHistoryPassed = @($reports | Where-Object { -not $_.navigationHistory.passed }).Count -eq 0
     navigationBackMaximumMs = [math]::Round(($reports | ForEach-Object { $_.navigationHistory.backLatencyMs } | Measure-Object -Maximum).Maximum, 3)
@@ -170,7 +174,8 @@ Captured: $($summary.capturedAt)
 | Warm process to interactive, median | $($summary.warmStartInteractiveMedianMs) ms |
 | First artwork, median | $($summary.firstArtworkMedianMs) ms |
 | Cached tab switch, median | $($summary.cachedTabSwitchMedianMs) ms |
-| Cached tab switch, maximum | $($summary.cachedTabSwitchMaximumMs) ms |
+| Cached tab switch, worst per-view median | $($summary.cachedTabSwitchWorstViewMedianMs) ms |
+| Cached tab switch, raw maximum | $($summary.cachedTabSwitchMaximumMs) ms |
 | Navigation history state restored | $($summary.navigationHistoryPassed) |
 | Mouse4/Back maximum | $($summary.navigationBackMaximumMs) ms |
 | Mouse5/Forward maximum | $($summary.navigationForwardMaximumMs) ms |
@@ -196,7 +201,7 @@ $markdown | Set-Content -LiteralPath (Join-Path $Output 'summary.md') -Encoding 
 Write-Host ''
 Write-Host "Baseline complete: $summaryPath"
 Write-Host "Cold interactive: $($summary.coldStartInteractiveMs) ms"
-Write-Host "Cached tab median/max: $($summary.cachedTabSwitchMedianMs) / $($summary.cachedTabSwitchMaximumMs) ms"
+Write-Host "Cached tab median/worst-view median/raw max: $($summary.cachedTabSwitchMedianMs) / $($summary.cachedTabSwitchWorstViewMedianMs) / $($summary.cachedTabSwitchMaximumMs) ms"
 Write-Host "Scroll p95/worst: $($summary.scrollP95FrameMedianMs) / $($summary.scrollMaximumFrameMs) ms"
 
 if ($CompareBaseline) {

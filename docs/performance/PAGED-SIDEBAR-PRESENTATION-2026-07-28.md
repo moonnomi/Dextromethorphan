@@ -5,8 +5,8 @@ The Folders tab previously assigned every folder card to the WPF sidebar wheneve
 ## Implementation
 
 - Folders and Playlists now keep separate stable presentation caches.
-- A tab exposes an initial 80-card window instead of swapping the full source into WPF.
-- Near-bottom paging adds another 80 cards only after mouse capture and smooth scrolling have gone idle.
+- A tab exposes an initial 32-card window instead of swapping the full source into WPF.
+- Near-bottom paging adds another 32 cards only after mouse capture and smooth scrolling have gone idle.
 - Scroll state stores both the pixel offset and materialized-card count, so Back/Forward and tab restoration can rebuild the same window before restoring the offset.
 - Artwork planning sees only the materialized sidebar window; it no longer considers thousands of invisible folder cards.
 - Selection and playback still resolve against the complete source index.

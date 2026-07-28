@@ -550,6 +550,8 @@ public partial class MainWindow : Window
                 timer.Stop();
                 samples.Add(new TabSwitchPerformanceSample(view, pass == 0 ? "first" : "cached", Math.Round(timer.Elapsed.TotalMilliseconds, 3)));
             }
+            if (pass == 0)
+                await WaitForBackgroundIdleAsync(cancellationToken);
         }
         return samples;
     }

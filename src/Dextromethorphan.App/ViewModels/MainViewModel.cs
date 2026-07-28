@@ -859,7 +859,7 @@ public sealed class MainViewModel : ObservableObject
         var presentation = _sidebarViews.GetOrCreate(
             PrimaryViewStateKey,
             () => groups,
-            80,
+            32,
             out var cacheHit);
         using var scope = _diagnostics.Measure("view", "sidebar-application",
             _diagnostics.Enabled ? new Dictionary<string, object?>
@@ -877,7 +877,7 @@ public sealed class MainViewModel : ObservableObject
         if (_activeSidebarPresentation is null
             || !PresentationCollectionCache<LibraryCardViewModel>.EnsureMaterialized(
                 _activeSidebarPresentation,
-                SidebarCards.Count + 80))
+                SidebarCards.Count + 32))
             return;
         RestartActiveArtworkResolution();
     }
