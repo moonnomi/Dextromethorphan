@@ -13,10 +13,12 @@ public sealed class LibraryCardViewModel : ObservableObject
     public string Subtitle { get; init; } = "";
     public string Detail { get; init; } = "";
     public long? PlaylistId { get; init; }
-    public IReadOnlyList<Track> Tracks { get; init; } = [];
-    public Track? RepresentativeTrack => Tracks.FirstOrDefault();
+    public IReadOnlyList<int> TrackIndexes { get; init; } = [];
+    public IReadOnlyList<Track>? MaterializedTracks { get; init; }
+    public required int TrackCount { get; init; }
+    public Track? RepresentativeTrack { get; init; }
     public string Initial => string.IsNullOrWhiteSpace(Title) ? "?" : Title[..1].ToUpperInvariant();
-    public string CountText => Tracks.Count == 1 ? "1 track" : $"{Tracks.Count:N0} tracks";
+    public string CountText => TrackCount == 1 ? "1 track" : $"{TrackCount:N0} tracks";
     public string? ArtworkPath { get => _artworkPath; set => Set(ref _artworkPath, value); }
     public bool IsSelected { get => _isSelected; set => Set(ref _isSelected, value); }
 }

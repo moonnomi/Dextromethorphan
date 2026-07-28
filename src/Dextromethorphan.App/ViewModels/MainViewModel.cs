@@ -98,7 +98,7 @@ public sealed class MainViewModel : ObservableObject
         NavigateCommand = new RelayCommand(p => Navigate(p?.ToString()));
         SelectGroupCommand = new RelayCommand(p => SelectGroup(p as LibraryCardViewModel));
         CloseCollectionCommand = new RelayCommand(_ => CloseCollectionDetail());
-        PlayGroupCommand = new AsyncRelayCommand(p => PlayGroupAsync(p as LibraryCardViewModel), p => p is LibraryCardViewModel card && card.Tracks.Count > 0);
+        PlayGroupCommand = new AsyncRelayCommand(p => PlayGroupAsync(p as LibraryCardViewModel), p => p is LibraryCardViewModel card && card.TrackCount > 0);
         PlaySelectedCommand = new AsyncRelayCommand(_ => PlaySelectedAsync(), _ => SelectedTrack is not null);
         TogglePlaybackCommand = new AsyncRelayCommand(_ => TogglePlaybackAsync());
         NextCommand = new AsyncRelayCommand(_ => ChangeTrackAsync(_queue.Advance()));
@@ -489,27 +489,39 @@ public sealed class MainViewModel : ObservableObject
 
     private static LibraryGroups BuildGroups(IReadOnlyList<Track> tracks)
     {
-        var albums = tracks.GroupBy(x => new { Album = x.DisplayAlbum, Artist = string.IsNullOrWhiteSpace(x.AlbumArtist) ? x.DisplayArtist : x.AlbumArtist })
-            .Select(group => Card("Album", group.Key.Artist + "\0" + group.Key.Album, group.Key.Album,
-                group.Max(x => x.Year) is > 0 and var year ? $"{group.Key.Artist} · {year}" : group.Key.Artist,
-                group.OrderBy(x => x.DiscNumber).ThenBy(x => x.TrackNumber).ThenBy(x => x.Title).ToArray()))
+        var indexed = tracks.Select((track, index) => new IndexedTrack(index, track)).ToArray();
+        var albums = indexed.GroupBy(x => new { Album = x.Track.DisplayAlbum, Artist = string.IsNullOrWhiteSpace(x.Track.AlbumArtist) ? x.Track.DisplayArtist : x.Track.AlbumArtist })
+            .Select(group =>
+            {
+                var indexes = group.OrderBy(x => x.Track.DiscNumber).ThenBy(x => x.Track.TrackNumber).ThenBy(x => x.Track.Title).Select(x => x.Index).ToArray();
+                return Card("Album", group.Key.Artist + "\0" + group.Key.Album, group.Key.Album,
+                    group.Max(x => x.Track.Year) is > 0 and var year ? $"{group.Key.Artist} · {year}" : group.Key.Artist,
+                    tracks, indexes);
+            })
             .OrderBy(x => x.Title, StringComparer.CurrentCultureIgnoreCase).ToArray();
-        var artists = tracks.SelectMany(track => SplitValues(track.DisplayArtist).Select(artist => (Artist: artist, Track: track)))
+        var artists = indexed.SelectMany(item => SplitValues(item.Track.DisplayArtist).Select(artist => (Artist: artist, Item: item)))
             .GroupBy(x => x.Artist, StringComparer.CurrentCultureIgnoreCase)
             .Select(group =>
             {
-                var albumCount = group.Select(x => x.Track.DisplayAlbum).Distinct(StringComparer.CurrentCultureIgnoreCase).Count();
+                var albumCount = group.Select(x => x.Item.Track.DisplayAlbum).Distinct(StringComparer.CurrentCultureIgnoreCase).Count();
+                var indexes = group.OrderBy(x => x.Item.Track.Year).ThenBy(x => x.Item.Track.Album).ThenBy(x => x.Item.Track.TrackNumber).Select(x => x.Item.Index).ToArray();
                 return Card("Artist", group.Key, group.Key, albumCount == 1 ? "1 album" : $"{albumCount:N0} albums",
-                    group.Select(x => x.Track).DistinctBy(x => x.Id > 0 ? x.Id.ToString() : x.Path).OrderBy(x => x.Year).ThenBy(x => x.Album).ThenBy(x => x.TrackNumber).ToArray());
+                    tracks, indexes);
             })
             .OrderBy(x => x.Title, StringComparer.CurrentCultureIgnoreCase).ToArray();
-        var genres = tracks.SelectMany(track => SplitValues(track.Genre, "Uncategorized").Select(genre => (Genre: genre, Track: track)))
+        var genres = indexed.SelectMany(item => SplitValues(item.Track.Genre, "Uncategorized").Select(genre => (Genre: genre, Item: item)))
             .GroupBy(x => x.Genre, StringComparer.CurrentCultureIgnoreCase)
-            .Select(group => Card("Genre", group.Key, group.Key, "Genre", group.Select(x => x.Track).DistinctBy(x => x.Id > 0 ? x.Id.ToString() : x.Path).OrderBy(x => x.Artist).ThenBy(x => x.Album).ThenBy(x => x.TrackNumber).ToArray()))
+            .Select(group => Card(
+                "Genre",
+                group.Key,
+                group.Key,
+                "Genre",
+                tracks,
+                group.OrderBy(x => x.Item.Track.Artist).ThenBy(x => x.Item.Track.Album).ThenBy(x => x.Item.Track.TrackNumber).Select(x => x.Item.Index).ToArray()))
             .OrderBy(x => x.Title, StringComparer.CurrentCultureIgnoreCase).ToArray();
-        var folders = tracks.GroupBy(x => Path.GetDirectoryName(x.Path) ?? x.Path, StringComparer.OrdinalIgnoreCase)
+        var folders = indexed.GroupBy(x => Path.GetDirectoryName(x.Track.Path) ?? x.Track.Path, StringComparer.OrdinalIgnoreCase)
             .Select(group => Card("Folder", group.Key, Path.GetFileName(group.Key.TrimEnd(Path.DirectorySeparatorChar)) is { Length: > 0 } name ? name : group.Key,
-                group.Key, group.OrderBy(x => x.Path, StringComparer.OrdinalIgnoreCase).ToArray(), group.Key))
+                group.Key, tracks, group.OrderBy(x => x.Track.Path, StringComparer.OrdinalIgnoreCase).Select(x => x.Index).ToArray(), group.Key))
             .OrderBy(x => x.Title, StringComparer.CurrentCultureIgnoreCase).ToArray();
         return new LibraryGroups(albums, artists, genres, folders);
     }
@@ -525,15 +537,30 @@ public sealed class MainViewModel : ObservableObject
             {
                 Kind = "Playlist", Key = playlist.Id.ToString(), PlaylistId = playlist.Id, Title = playlist.Name,
                 Subtitle = playlist.Kind == PlaylistKind.Smart ? "Smart playlist" : "Playlist", Detail = tracks.Count == 1 ? "1 track" : $"{tracks.Count:N0} tracks",
-                Tracks = tracks, ArtworkPath = ExistingArtwork(tracks.FirstOrDefault())
+                TrackCount = tracks.Count, MaterializedTracks = tracks, RepresentativeTrack = tracks.FirstOrDefault(), ArtworkPath = ExistingArtwork(tracks.FirstOrDefault())
             });
         }
         return result.OrderBy(x => x.Title, StringComparer.CurrentCultureIgnoreCase).ToArray();
     }
 
-    private static LibraryCardViewModel Card(string kind, string key, string title, string subtitle, IReadOnlyList<Track> tracks, string detail = "") => new()
+    private static LibraryCardViewModel Card(
+        string kind,
+        string key,
+        string title,
+        string subtitle,
+        IReadOnlyList<Track> source,
+        IReadOnlyList<int> trackIndexes,
+        string detail = "") => new()
     {
-        Kind = kind, Key = key, Title = title, Subtitle = subtitle, Detail = detail, Tracks = tracks, ArtworkPath = ExistingArtwork(tracks.FirstOrDefault())
+        Kind = kind,
+        Key = key,
+        Title = title,
+        Subtitle = subtitle,
+        Detail = detail,
+        TrackIndexes = trackIndexes,
+        TrackCount = trackIndexes.Count,
+        RepresentativeTrack = trackIndexes.Count > 0 ? source[trackIndexes[0]] : null,
+        ArtworkPath = ExistingArtwork(trackIndexes.Count > 0 ? source[trackIndexes[0]] : null)
     };
 
     private static string? ExistingArtwork(Track? track) => track?.ArtworkPath is { Length: > 0 } path && File.Exists(path) ? path : null;
@@ -674,7 +701,7 @@ public sealed class MainViewModel : ObservableObject
         card.IsSelected = true;
         if (rememberSelection)
             _cardSelections[CurrentView] = new CardSelection(card.Kind, card.Key);
-        SetBrowseTracks(card.Tracks, card.Title, string.IsNullOrWhiteSpace(card.Detail) ? $"{card.Subtitle} · {card.CountText}" : $"{card.Detail} · {card.CountText}");
+        SetBrowseTracks(GetCardTracks(card), card.Title, string.IsNullOrWhiteSpace(card.Detail) ? $"{card.Subtitle} · {card.CountText}" : $"{card.Detail} · {card.CountText}");
         if (openCollectionDetail && CurrentView is "Albums" or "Artists" or "Genres")
         {
             IsCollectionDetailOpen = true;
@@ -846,12 +873,16 @@ public sealed class MainViewModel : ObservableObject
     private static string CollectionViewStateKey(string view, LibraryCardViewModel card) =>
         $"collection:{view}:{card.Kind}:{card.Key}";
 
+    private IReadOnlyList<Track> GetCardTracks(LibraryCardViewModel card) =>
+        card.MaterializedTracks ?? new IndexedReadOnlyList<Track>(_allTracks, card.TrackIndexes);
+
     private async Task PlayGroupAsync(LibraryCardViewModel? card)
     {
-        if (card is null || card.Tracks.Count == 0) return;
+        if (card is null || card.TrackCount == 0) return;
+        var tracks = GetCardTracks(card);
         SelectGroup(card);
-        _queue.Replace(card.Tracks, 0);
-        await ChangeTrackAsync(card.Tracks[0]);
+        _queue.Replace(tracks, 0);
+        await ChangeTrackAsync(tracks[0]);
     }
 
     private async Task ScanAsync()
@@ -1287,4 +1318,5 @@ public sealed class MainViewModel : ObservableObject
     private sealed record LibraryGroups(IReadOnlyList<LibraryCardViewModel> Albums, IReadOnlyList<LibraryCardViewModel> Artists, IReadOnlyList<LibraryCardViewModel> Genres, IReadOnlyList<LibraryCardViewModel> Folders);
     private sealed record NavigationEntry(string View, string? CardKind, string? CardKey, bool IsCollectionDetail);
     private sealed record CardSelection(string Kind, string Key);
+    private readonly record struct IndexedTrack(int Index, Track Track);
 }

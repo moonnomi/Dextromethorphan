@@ -70,6 +70,7 @@ public sealed class ArtworkResolutionPlannerTests
         Kind = "Album",
         Key = key,
         Title = key,
-        Tracks = [new Track { Path = $"{key}.flac", Title = key }]
+        TrackCount = 1,
+        RepresentativeTrack = new Track { Path = $"{key}.flac", Title = key }
     };
 }
