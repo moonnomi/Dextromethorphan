@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -7,7 +8,8 @@ namespace Dextromethorphan.App.UI;
 
 public static class SmoothScrollBehavior
 {
-    private static readonly Dictionary<ScrollViewer, double> Targets = [];
+    private static readonly Dictionary<ScrollViewer, ScrollTarget> Targets = [];
+    private static long _lastFrameTimestamp;
     private static bool _isRendering;
 
     public static readonly DependencyProperty EnabledProperty = DependencyProperty.RegisterAttached(
@@ -15,53 +17,122 @@ public static class SmoothScrollBehavior
 
     public static bool GetEnabled(DependencyObject element) => (bool)element.GetValue(EnabledProperty);
     public static void SetEnabled(DependencyObject element, bool value) => element.SetValue(EnabledProperty, value);
+    internal static bool IsAnimating(DependencyObject element)
+    {
+        var viewer = element as ScrollViewer ?? FindDescendant<ScrollViewer>(element);
+        return viewer is not null && Targets.ContainsKey(viewer);
+    }
 
     private static void OnEnabledChanged(DependencyObject element, DependencyPropertyChangedEventArgs args)
     {
         if (element is not UIElement control) return;
-        if (args.NewValue is true) control.PreviewMouseWheel += OnPreviewMouseWheel;
-        else control.PreviewMouseWheel -= OnPreviewMouseWheel;
+        if (args.NewValue is true)
+        {
+            control.PreviewMouseWheel += OnPreviewMouseWheel;
+            if (control is FrameworkElement framework) framework.Unloaded += OnControlUnloaded;
+            control.IsVisibleChanged += OnControlVisibilityChanged;
+        }
+        else
+        {
+            control.PreviewMouseWheel -= OnPreviewMouseWheel;
+            if (control is FrameworkElement framework) framework.Unloaded -= OnControlUnloaded;
+            control.IsVisibleChanged -= OnControlVisibilityChanged;
+            RemoveViewer(control);
+        }
+    }
+
+    private static void OnControlUnloaded(object sender, RoutedEventArgs args)
+    {
+        if (sender is DependencyObject control) RemoveViewer(control);
+    }
+
+    private static void OnControlVisibilityChanged(object sender, DependencyPropertyChangedEventArgs args)
+    {
+        if (args.NewValue is false && sender is DependencyObject control) RemoveViewer(control);
     }
 
     private static void OnPreviewMouseWheel(object sender, MouseWheelEventArgs args)
     {
-        if (sender is not DependencyObject element) return;
+        if (sender is not DependencyObject element || args.Delta == 0) return;
         var viewer = element as ScrollViewer ?? FindDescendant<ScrollViewer>(element);
-        if (viewer is null || viewer.ScrollableHeight <= 0) return;
+        if (viewer is null || !viewer.IsVisible) return;
 
-        var currentTarget = Targets.TryGetValue(viewer, out var pending) ? pending : viewer.VerticalOffset;
-        Targets[viewer] = Math.Clamp(currentTarget - (args.Delta * 0.72), 0, viewer.ScrollableHeight);
+        var horizontal = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift) && viewer.ScrollableWidth > 0;
+        var state = Targets.TryGetValue(viewer, out var pending)
+            ? pending
+            : new ScrollTarget(viewer.HorizontalOffset, viewer.VerticalOffset);
+        var delta = args.Delta * 0.72;
+        var next = horizontal
+            ? state with { Horizontal = Math.Clamp(state.Horizontal - delta, 0, viewer.ScrollableWidth) }
+            : state with { Vertical = Math.Clamp(state.Vertical - delta, 0, viewer.ScrollableHeight) };
+        if (horizontal
+                ? !SmoothScrollMath.CanMove(state.Horizontal, next.Horizontal, viewer.HorizontalOffset)
+                : !SmoothScrollMath.CanMove(state.Vertical, next.Vertical, viewer.VerticalOffset))
+            return;
+
         args.Handled = true;
+        if (!SystemParameters.ClientAreaAnimation)
+        {
+            viewer.ScrollToHorizontalOffset(next.Horizontal);
+            viewer.ScrollToVerticalOffset(next.Vertical);
+            Targets.Remove(viewer);
+            StopRenderingIfIdle();
+            return;
+        }
+
+        Targets[viewer] = next;
+        StartRendering();
+    }
+
+    private static void StartRendering()
+    {
         if (_isRendering) return;
+        _lastFrameTimestamp = Stopwatch.GetTimestamp();
         CompositionTarget.Rendering += OnRendering;
         _isRendering = true;
     }
 
     private static void OnRendering(object? sender, EventArgs args)
     {
+        var now = Stopwatch.GetTimestamp();
+        var elapsed = Stopwatch.GetElapsedTime(_lastFrameTimestamp, now);
+        _lastFrameTimestamp = now;
         foreach (var pair in Targets.ToArray())
         {
             var viewer = pair.Key;
-            if (!viewer.IsLoaded)
+            if (!viewer.IsLoaded || !viewer.IsVisible)
             {
                 Targets.Remove(viewer);
                 continue;
             }
 
-            var target = Math.Clamp(pair.Value, 0, viewer.ScrollableHeight);
-            var distance = target - viewer.VerticalOffset;
-            if (Math.Abs(distance) < 0.35)
+            var horizontalTarget = Math.Clamp(pair.Value.Horizontal, 0, viewer.ScrollableWidth);
+            var verticalTarget = Math.Clamp(pair.Value.Vertical, 0, viewer.ScrollableHeight);
+            var horizontal = SmoothScrollMath.Next(viewer.HorizontalOffset, horizontalTarget, elapsed);
+            var vertical = SmoothScrollMath.Next(viewer.VerticalOffset, verticalTarget, elapsed);
+            viewer.ScrollToHorizontalOffset(horizontal);
+            viewer.ScrollToVerticalOffset(vertical);
+            if (SmoothScrollMath.IsSettled(horizontal, horizontalTarget)
+                && SmoothScrollMath.IsSettled(vertical, verticalTarget))
             {
-                viewer.ScrollToVerticalOffset(target);
+                viewer.ScrollToHorizontalOffset(horizontalTarget);
+                viewer.ScrollToVerticalOffset(verticalTarget);
                 Targets.Remove(viewer);
             }
-            else
-            {
-                viewer.ScrollToVerticalOffset(viewer.VerticalOffset + (distance * 0.24));
-            }
         }
+        StopRenderingIfIdle();
+    }
 
-        if (Targets.Count != 0) return;
+    private static void RemoveViewer(DependencyObject control)
+    {
+        var viewer = control as ScrollViewer ?? FindDescendant<ScrollViewer>(control);
+        if (viewer is not null) Targets.Remove(viewer);
+        StopRenderingIfIdle();
+    }
+
+    private static void StopRenderingIfIdle()
+    {
+        if (Targets.Count != 0 || !_isRendering) return;
         CompositionTarget.Rendering -= OnRendering;
         _isRendering = false;
     }
@@ -76,4 +147,26 @@ public static class SmoothScrollBehavior
         }
         return null;
     }
+
+    private readonly record struct ScrollTarget(double Horizontal, double Vertical);
+}
+
+internal static class SmoothScrollMath
+{
+    private static readonly TimeSpan ResponseTime = TimeSpan.FromMilliseconds(70);
+
+    public static bool CanMove(double pendingTarget, double nextTarget, double currentOffset) =>
+        Math.Abs(nextTarget - pendingTarget) > 0.01
+        || Math.Abs(nextTarget - currentOffset) > 0.01;
+
+    public static double Next(double current, double target, TimeSpan elapsed)
+    {
+        if (IsSettled(current, target)) return target;
+        var seconds = Math.Clamp(elapsed.TotalSeconds, 0, 0.1);
+        var responseSeconds = ResponseTime.TotalSeconds;
+        var progress = 1 - Math.Exp(-seconds / responseSeconds);
+        return current + ((target - current) * progress);
+    }
+
+    public static bool IsSettled(double current, double target) => Math.Abs(target - current) < 0.35;
 }

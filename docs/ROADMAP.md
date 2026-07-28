@@ -73,11 +73,11 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 
 ### Scrolling and rendering
 
-- [ ] **P0 SCROLL-001** Profile the custom per-frame smooth-scroll loop on mouse wheels and precision touchpads.
-- [ ] **P0 SCROLL-002** Support high-resolution touchpad deltas without swallowing horizontal scrolling or nested-scroll handoff.
-- [ ] **P0 SCROLL-003** Stop the render callback immediately when a viewer unloads, becomes hidden, or reaches its target.
-- [ ] **P0 SCROLL-004** Avoid layout-triggering work, image decode, and collection mutation during active scrolling.
-- [ ] **P0 SCROLL-005** Reduce or cache software-rendered blur and drop-shadow effects, especially on Now Playing.
+- [x] **P0 SCROLL-001** Profile the custom per-frame smooth-scroll loop on mouse wheels and precision touchpads. See [the scroll pipeline result](performance/SCROLL-PIPELINE-2026-07-28.md).
+- [x] **P0 SCROLL-002** Support high-resolution touchpad deltas without swallowing horizontal scrolling or nested-scroll handoff. See [the scroll pipeline result](performance/SCROLL-PIPELINE-2026-07-28.md).
+- [x] **P0 SCROLL-003** Stop the render callback immediately when a viewer unloads, becomes hidden, or reaches its target. See [the scroll pipeline result](performance/SCROLL-PIPELINE-2026-07-28.md).
+- [x] **P0 SCROLL-004** Avoid layout-triggering work, image decode, and collection mutation during active scrolling. See [the scroll pipeline result](performance/SCROLL-PIPELINE-2026-07-28.md).
+- [x] **P0 SCROLL-005** Reduce or cache software-rendered blur and drop-shadow effects, especially on Now Playing. See [the scroll pipeline result](performance/SCROLL-PIPELINE-2026-07-28.md).
 - [ ] **P1 SCROLL-006** Respect Windows reduced-motion and animation settings in addition to the app toggle.
 - [ ] **P1 SCROLL-007** Add keyboard, page, Home/End, and scrollbar scrolling tests for every list.
 

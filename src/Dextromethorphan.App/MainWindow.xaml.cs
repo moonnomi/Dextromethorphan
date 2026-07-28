@@ -37,6 +37,8 @@ public partial class MainWindow : Window
     private readonly NavigationViewStateStore _viewStates = new();
     private bool _scrollRestorePending;
     private bool _restoringScrollState;
+    private CancellationTokenSource? _galleryPageCancellation;
+    private CancellationTokenSource? _trackPageCancellation;
 
     public MainWindow(
         MainViewModel viewModel,
@@ -291,8 +293,12 @@ public partial class MainWindow : Window
     {
         if (!_restoringScrollState && GalleryList.IsVisible && e.OriginalSource is ScrollViewer)
             _viewStates.Capture(ViewModel.PrimaryViewStateKey, e.VerticalOffset, ViewModel.GalleryGroups.Count);
-        if (e.ExtentHeight <= 0 || e.VerticalOffset + e.ViewportHeight < e.ExtentHeight - 260) return;
-        ViewModel.LoadMoreGalleryGroups();
+        if (e.ExtentHeight <= 0 || e.VerticalOffset + e.ViewportHeight < e.ExtentHeight - 260)
+        {
+            _galleryPageCancellation?.Cancel();
+            return;
+        }
+        SchedulePageLoad(GalleryList, true);
     }
 
     private void GalleryList_Loaded(object sender, RoutedEventArgs e) => ScheduleScrollStateRestore();
@@ -312,7 +318,37 @@ public partial class MainWindow : Window
         if (_restoringScrollState || sender is not ListBox list || !list.IsVisible || e.OriginalSource is not ScrollViewer) return;
         _viewStates.Capture(ViewModel.ContentViewStateKey, e.VerticalOffset, ViewModel.BrowseTracks.Count);
         if (e.ExtentHeight > 0 && e.VerticalOffset + e.ViewportHeight >= e.ExtentHeight - 360)
-            ViewModel.LoadMoreBrowseTracks();
+            SchedulePageLoad(list, false);
+        else
+            _trackPageCancellation?.Cancel();
+    }
+
+    private void SchedulePageLoad(ListBox list, bool gallery)
+    {
+        var previous = gallery ? _galleryPageCancellation : _trackPageCancellation;
+        previous?.Cancel();
+        previous?.Dispose();
+        var cancellation = new CancellationTokenSource();
+        if (gallery) _galleryPageCancellation = cancellation;
+        else _trackPageCancellation = cancellation;
+        _ = LoadPageAfterScrollIdleAsync(list, gallery, cancellation.Token);
+    }
+
+    private async Task LoadPageAfterScrollIdleAsync(ListBox list, bool gallery, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(80, cancellationToken);
+            if (!list.IsVisible || list.IsMouseCaptureWithin || SmoothScrollBehavior.IsAnimating(list))
+            {
+                await Task.Delay(80, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+            if (!list.IsVisible || list.IsMouseCaptureWithin || SmoothScrollBehavior.IsAnimating(list)) return;
+            if (gallery) ViewModel.LoadMoreGalleryGroups();
+            else ViewModel.LoadMoreBrowseTracks();
+        }
+        catch (OperationCanceledException) { }
     }
 
     private void ScheduleScrollStateRestore()
@@ -745,6 +781,7 @@ public partial class MainWindow : Window
         await _diagnostics.CompleteAsync();
         _lyricScrollCancellation?.Cancel();
         _lyricScrollCancellation?.Dispose();
+        CancelDeferredPageLoads();
         PerformanceOverlay.Dispose();
         ViewModel.PropertyChanged -= ViewModelOnPropertyChanged;
         _allowClose = true;
@@ -758,9 +795,18 @@ public partial class MainWindow : Window
         await _diagnostics.CompleteAsync();
         _lyricScrollCancellation?.Cancel();
         _lyricScrollCancellation?.Dispose();
+        CancelDeferredPageLoads();
         PerformanceOverlay.Dispose();
         ViewModel.PropertyChanged -= ViewModelOnPropertyChanged;
         _allowClose = true;
         Close();
+    }
+
+    private void CancelDeferredPageLoads()
+    {
+        _galleryPageCancellation?.Cancel();
+        _galleryPageCancellation?.Dispose();
+        _trackPageCancellation?.Cancel();
+        _trackPageCancellation?.Dispose();
     }
 }
