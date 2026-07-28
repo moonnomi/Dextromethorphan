@@ -411,6 +411,72 @@ public partial class MainWindow : Window
         return samples;
     }
 
+    internal async Task<NavigationHistoryPerformanceMetrics> MeasureNavigationHistoryPerformanceAsync(CancellationToken cancellationToken)
+    {
+        ViewModel.NavigateCommand.Execute("Albums");
+        await NextRenderedFrameTimestampAsync(cancellationToken);
+        ViewModel.EnsureGalleryGroupsLoaded(Math.Min(140, ViewModel.ActiveGroups.Count));
+        GalleryList.UpdateLayout();
+
+        var selected = ViewModel.GalleryGroups.FirstOrDefault();
+        if (selected is not null)
+        {
+            ViewModel.SelectGroupCommand.Execute(selected);
+            await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ContextIdle, cancellationToken);
+            ViewModel.CloseCollectionCommand.Execute(null);
+            await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ContextIdle, cancellationToken);
+        }
+
+        var originalCollection = ViewModel.GalleryGroups;
+        var viewer = FindVisualChild<ScrollViewer>(GalleryList)
+            ?? throw new InvalidOperationException("The album gallery scroll viewer is unavailable.");
+        var targetOffset = Math.Min(viewer.ScrollableHeight, Math.Max(0, viewer.ViewportHeight * 1.5));
+        viewer.ScrollToVerticalOffset(targetOffset);
+        await NextRenderedFrameTimestampAsync(cancellationToken);
+        var expectedOffset = viewer.VerticalOffset;
+        var expectedCount = ViewModel.GalleryGroups.Count;
+        var expectedSelection = ViewModel.SelectedCard?.Key;
+
+        ViewModel.NavigateCommand.Execute("Artists");
+        await NextRenderedFrameTimestampAsync(cancellationToken);
+
+        var backTimer = Stopwatch.StartNew();
+        if (!ViewModel.NavigateBack())
+            throw new InvalidOperationException("Navigation history did not contain the Albums view.");
+        await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ContextIdle, cancellationToken);
+        await NextRenderedFrameTimestampAsync(cancellationToken);
+        backTimer.Stop();
+
+        GalleryList.UpdateLayout();
+        viewer = FindVisualChild<ScrollViewer>(GalleryList)
+            ?? throw new InvalidOperationException("The restored album gallery scroll viewer is unavailable.");
+        var restoredOffset = viewer.VerticalOffset;
+        var restoredCount = ViewModel.GalleryGroups.Count;
+        var collectionReused = ReferenceEquals(originalCollection, ViewModel.GalleryGroups);
+        var offsetRestored = Math.Abs(expectedOffset - restoredOffset) <= 3;
+        var selectionRestored = expectedSelection is null || ViewModel.SelectedCard?.Key == expectedSelection;
+        var countRestored = restoredCount >= expectedCount;
+
+        var forwardTimer = Stopwatch.StartNew();
+        if (!ViewModel.NavigateForward())
+            throw new InvalidOperationException("Forward navigation did not contain the Artists view.");
+        await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ContextIdle, cancellationToken);
+        await NextRenderedFrameTimestampAsync(cancellationToken);
+        forwardTimer.Stop();
+
+        return new NavigationHistoryPerformanceMetrics(
+            Math.Round(backTimer.Elapsed.TotalMilliseconds, 3),
+            Math.Round(forwardTimer.Elapsed.TotalMilliseconds, 3),
+            collectionReused,
+            offsetRestored,
+            selectionRestored,
+            countRestored,
+            Math.Round(expectedOffset, 3),
+            Math.Round(restoredOffset, 3),
+            expectedCount,
+            restoredCount);
+    }
+
     internal async Task<FramePerformanceMetrics> MeasureAlbumScrollPerformanceAsync(CancellationToken cancellationToken)
     {
         ViewModel.NavigateCommand.Execute("Albums");

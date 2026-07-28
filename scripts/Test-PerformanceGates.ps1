@@ -55,6 +55,16 @@ if ($tracks -eq 10000) {
     Add-MaximumCheck 'Cold start to interactive' ([double]$summaryData.coldStartInteractiveMs) ([double]$gateData.coldStart10kMaximumMs) 'ms' $true
 }
 Add-MaximumCheck 'Cached tab switch maximum' ([double]$summaryData.cachedTabSwitchMaximumMs) ([double]$gateData.cachedTabSwitchMaximumMs) 'ms' $true
+if ($null -ne $summaryData.navigationHistoryPassed) {
+    $historyPassed = [bool]$summaryData.navigationHistoryPassed
+    $checks.Add([pscustomobject]@{
+        Gate = 'Navigation history state restoration'
+        Actual = $historyPassed
+        Limit = 'True'
+        Result = $(if ($historyPassed) { 'PASS' } else { 'FAIL' })
+        Passed = $historyPassed
+    })
+}
 Add-MaximumCheck 'Album scroll p95 frame' ([double]$summaryData.scrollP95FrameMedianMs) ([double]$gateData.scrollP95FrameMaximumMs) 'ms'
 Add-MaximumCheck 'Album scroll worst frame' ([double]$summaryData.scrollMaximumFrameMs) ([double]$gateData.scrollFrameMaximumMs) 'ms'
 Add-MaximumCheck 'Album scroll frames over 50 ms' ([double]$summaryData.scrollFramesOver50Ms) ([double]$gateData.scrollFramesOver50Maximum) 'frames'

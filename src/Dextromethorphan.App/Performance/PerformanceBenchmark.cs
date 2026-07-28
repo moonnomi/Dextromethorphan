@@ -66,7 +66,7 @@ internal sealed record StartupPerformanceTimestamps(
 
 internal sealed class PerformanceBenchmarkReport
 {
-    public int SchemaVersion { get; init; } = 1;
+    public int SchemaVersion { get; init; } = 2;
     public required string RunKind { get; init; }
     public required DateTimeOffset CapturedAt { get; init; }
     public required string FixtureRoot { get; init; }
@@ -74,6 +74,7 @@ internal sealed class PerformanceBenchmarkReport
     public required MachineIdentity Machine { get; init; }
     public required StartupPerformanceMetrics Startup { get; init; }
     public required IReadOnlyList<TabSwitchPerformanceSample> TabSwitches { get; init; }
+    public required NavigationHistoryPerformanceMetrics NavigationHistory { get; init; }
     public required FramePerformanceMetrics AlbumScroll { get; init; }
     public required ResourcePerformanceMetrics Resources { get; init; }
     public required CpuPerformanceMetrics Cpu { get; init; }
@@ -85,6 +86,20 @@ internal sealed record FixtureIdentity(string Kind, int Tracks, int Albums, int 
 internal sealed record MachineIdentity(string Os, string Runtime, string Architecture, string Processor, int LogicalProcessors, long AvailableMemoryBytes, string Commit);
 internal sealed record StartupPerformanceMetrics(double ProcessToWindowShownMs, double ProcessToFirstRenderMs, double ProcessToFirstArtworkMs, double ProcessToLibraryReadyMs, double ProcessToInteractiveMs);
 internal sealed record TabSwitchPerformanceSample(string View, string Pass, double LatencyMs);
+internal sealed record NavigationHistoryPerformanceMetrics(
+    double BackLatencyMs,
+    double ForwardLatencyMs,
+    bool CollectionReused,
+    bool ScrollOffsetRestored,
+    bool SelectionRestored,
+    bool MaterializedCountRestored,
+    double ExpectedVerticalOffset,
+    double RestoredVerticalOffset,
+    int ExpectedMaterializedCount,
+    int RestoredMaterializedCount)
+{
+    public bool Passed => CollectionReused && ScrollOffsetRestored && SelectionRestored && MaterializedCountRestored;
+}
 internal sealed record FramePerformanceMetrics(int Samples, double AverageMs, double P50Ms, double P95Ms, double P99Ms, double MaximumMs, int Over16_67Ms, int Over33_33Ms, int Over50Ms, int GalleryCardsLoaded);
 internal sealed record ResourcePerformanceMetrics(long WorkingSetAfterStartupBytes, long WorkingSetAfterNavigationBytes, long WorkingSetAfterScrollBytes, long PeakWorkingSetBytes, long ManagedHeapBytes, int Gen0Collections, int Gen1Collections, int Gen2Collections);
 internal sealed record CpuPerformanceMetrics(double IdlePercent, double? PlaybackPercent, string? PlaybackStatus);
@@ -117,6 +132,7 @@ internal static class PerformanceBenchmarkRunner
         var startupWorkingSet = process.WorkingSet64;
 
         var tabSwitches = await window.MeasureTabSwitchPerformanceAsync(cancellationToken);
+        var navigationHistory = await window.MeasureNavigationHistoryPerformanceAsync(cancellationToken);
         process.Refresh();
         var navigationWorkingSet = process.WorkingSet64;
 
@@ -159,6 +175,7 @@ internal static class PerformanceBenchmarkRunner
                 Elapsed(timestamps.ProcessStartedAt, timestamps.LibraryReadyAt),
                 Elapsed(timestamps.ProcessStartedAt, timestamps.InteractiveAt)),
             TabSwitches = tabSwitches,
+            NavigationHistory = navigationHistory,
             AlbumScroll = scroll,
             Resources = new ResourcePerformanceMetrics(
                 startupWorkingSet,

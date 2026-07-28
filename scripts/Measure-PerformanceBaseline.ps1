@@ -115,6 +115,9 @@ $summary = [ordered]@{
     cachedTabSwitchMedianMs = Get-Median @($cachedTabs | ForEach-Object { [double]$_.latencyMs })
     cachedTabSwitchMaximumMs = [math]::Round(($cachedTabs | Measure-Object latencyMs -Maximum).Maximum, 3)
     cachedTabByView = $cachedTabByView
+    navigationHistoryPassed = @($reports | Where-Object { -not $_.navigationHistory.passed }).Count -eq 0
+    navigationBackMaximumMs = [math]::Round(($reports | ForEach-Object { $_.navigationHistory.backLatencyMs } | Measure-Object -Maximum).Maximum, 3)
+    navigationForwardMaximumMs = [math]::Round(($reports | ForEach-Object { $_.navigationHistory.forwardLatencyMs } | Measure-Object -Maximum).Maximum, 3)
     scrollP95FrameMedianMs = Get-Median @($reports | ForEach-Object { [double]$_.albumScroll.p95Ms })
     scrollMaximumFrameMs = [math]::Round(($reports | ForEach-Object { $_.albumScroll.maximumMs } | Measure-Object -Maximum).Maximum, 3)
     scrollFramesOver50Ms = ($reports | ForEach-Object { $_.albumScroll.over50Ms } | Measure-Object -Sum).Sum
@@ -142,6 +145,9 @@ Captured: $($summary.capturedAt)
 | First artwork, median | $($summary.firstArtworkMedianMs) ms |
 | Cached tab switch, median | $($summary.cachedTabSwitchMedianMs) ms |
 | Cached tab switch, maximum | $($summary.cachedTabSwitchMaximumMs) ms |
+| Navigation history state restored | $($summary.navigationHistoryPassed) |
+| Mouse4/Back maximum | $($summary.navigationBackMaximumMs) ms |
+| Mouse5/Forward maximum | $($summary.navigationForwardMaximumMs) ms |
 | Album scroll p95 frame, median | $($summary.scrollP95FrameMedianMs) ms |
 | Album scroll worst frame | $($summary.scrollMaximumFrameMs) ms |
 | Album scroll frames over 50 ms | $($summary.scrollFramesOver50Ms) |
