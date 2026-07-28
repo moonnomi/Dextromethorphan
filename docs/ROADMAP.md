@@ -96,7 +96,7 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 - [ ] **P0 PERF-GATE-001** Switching among cached Albums, Artists, Genres, Songs, Folders, and Playlists is visually immediate and does not start irrelevant artwork work.
 - [ ] **P0 PERF-GATE-002** Rapidly scrolling an uncached album grid does not produce repeated long UI-thread stalls.
 - [x] **P0 PERF-GATE-003** Returning through Mouse4/Mouse5 history restores state without rebuilding the view. See [the navigation state retention result](performance/NAVIGATION-STATE-RETENTION-2026-07-28.md).
-- [ ] **P0 PERF-GATE-004** Scanning and playback can run together without audio underruns or visible navigation degradation.
+- [x] **P0 PERF-GATE-004** Scanning and playback can run together without audio underruns or visible navigation degradation. See [the concurrent workload result](performance/CONCURRENT-WORKLOAD-2026-07-28.md).
 - [ ] **P0 PERF-GATE-005** Performance budgets are captured in a reproducible report before and after optimization.
 
 ---

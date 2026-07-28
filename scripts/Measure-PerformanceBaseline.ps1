@@ -132,6 +132,15 @@ $summary = [ordered]@{
     scanFilesPerSecond = $cold.scan.filesPerSecond
     scanImported = $cold.scan.imported
     scanFailed = $cold.scan.failed
+    concurrentWorkloadPassed = [bool]$cold.concurrentWorkload.passed
+    concurrentPlaybackAvailable = [bool]$cold.concurrentWorkload.playbackAvailable
+    concurrentPlaybackInterruptions = $cold.concurrentWorkload.playbackInterruptions
+    concurrentPlaybackPositionAdvancedMs = $cold.concurrentWorkload.playbackPositionAdvancedMs
+    concurrentScanImported = $cold.concurrentWorkload.scanImported
+    concurrentScanFailed = $cold.concurrentWorkload.scanFailed
+    concurrentNavigationP95Ms = $cold.concurrentWorkload.navigationP95Ms
+    concurrentNavigationMaximumMs = $cold.concurrentWorkload.navigationMaximumMs
+    concurrentWorkloadStatus = $cold.concurrentWorkload.status
 }
 $summaryPath = Join-Path $Output 'summary.json'
 $summary | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $summaryPath -Encoding utf8
@@ -163,6 +172,9 @@ Captured: $($summary.capturedAt)
 | Idle CPU, median | $($summary.idleCpuMedianPercent)% |
 | Playback CPU | $($summary.playbackCpuPercent)% |
 | Scan throughput | $($summary.scanFilesPerSecond) files/s |
+| Concurrent scan/playback/navigation | $($summary.concurrentWorkloadPassed) |
+| Concurrent playback interruptions | $($summary.concurrentPlaybackInterruptions) |
+| Concurrent navigation p95 / max | $($summary.concurrentNavigationP95Ms) / $($summary.concurrentNavigationMaximumMs) ms |
 
 Cold means the first fresh process in this run. The script does not purge the Windows standby list; perform the first run after reboot when a true filesystem-cold number is required.
 "@

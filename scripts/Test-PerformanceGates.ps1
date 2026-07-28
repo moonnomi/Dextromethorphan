@@ -85,6 +85,16 @@ if ($null -ne $summaryData.pagedSongsPassed) {
         Passed = $songsPassed
     })
 }
+if ($null -ne $summaryData.concurrentWorkloadPassed) {
+    $concurrentPassed = [bool]$summaryData.concurrentWorkloadPassed
+    $checks.Add([pscustomobject]@{
+        Gate = 'Concurrent scan, playback, and navigation'
+        Actual = $concurrentPassed
+        Limit = 'True'
+        Result = $(if ($concurrentPassed) { 'PASS' } else { 'FAIL' })
+        Passed = $concurrentPassed
+    })
+}
 Add-MaximumCheck 'Album scroll p95 frame' ([double]$summaryData.scrollP95FrameMedianMs) ([double]$gateData.scrollP95FrameMaximumMs) 'ms'
 Add-MaximumCheck 'Album scroll worst frame' ([double]$summaryData.scrollMaximumFrameMs) ([double]$gateData.scrollFrameMaximumMs) 'ms'
 Add-MaximumCheck 'Album scroll frames over 50 ms' ([double]$summaryData.scrollFramesOver50Ms) ([double]$gateData.scrollFramesOver50Maximum) 'frames'

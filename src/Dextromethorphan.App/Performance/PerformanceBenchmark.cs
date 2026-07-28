@@ -66,7 +66,7 @@ internal sealed record StartupPerformanceTimestamps(
 
 internal sealed class PerformanceBenchmarkReport
 {
-    public int SchemaVersion { get; init; } = 3;
+    public int SchemaVersion { get; init; } = 4;
     public required string RunKind { get; init; }
     public required DateTimeOffset CapturedAt { get; init; }
     public required string FixtureRoot { get; init; }
@@ -81,6 +81,7 @@ internal sealed class PerformanceBenchmarkReport
     public required ResourcePerformanceMetrics Resources { get; init; }
     public required CpuPerformanceMetrics Cpu { get; init; }
     public ScanPerformanceMetrics? Scan { get; init; }
+    public ConcurrentWorkloadPerformanceMetrics? ConcurrentWorkload { get; init; }
     public string? WorkloadError { get; init; }
 }
 
@@ -134,6 +135,29 @@ internal sealed record ResourcePerformanceMetrics(
     long PeakWorkingSetAfterScrollBytes);
 internal sealed record CpuPerformanceMetrics(double IdlePercent, double? PlaybackPercent, string? PlaybackStatus);
 internal sealed record ScanPerformanceMetrics(int Files, int Imported, int Failed, double ElapsedMs, double FilesPerSecond);
+internal sealed record ConcurrentWorkloadPerformanceMetrics(
+    bool PlaybackAvailable,
+    bool PlaybackStayedHealthy,
+    int PlaybackInterruptions,
+    double PlaybackPositionAdvancedMs,
+    int ScanFiles,
+    int ScanImported,
+    int ScanFailed,
+    double ScanElapsedMs,
+    double NavigationP95Ms,
+    double NavigationMaximumMs,
+    long MaximumWorkingSetBytes,
+    string Status)
+{
+    public bool Passed =>
+        PlaybackAvailable
+        && PlaybackStayedHealthy
+        && PlaybackInterruptions == 0
+        && PlaybackPositionAdvancedMs >= 250
+        && ScanImported == ScanFiles
+        && ScanFailed == 0
+        && NavigationMaximumMs < 100;
+}
 
 internal static class PerformanceBenchmarkRunner
 {
@@ -181,6 +205,7 @@ internal static class PerformanceBenchmarkRunner
         var idleCpu = await MeasureCpuAsync(TimeSpan.FromSeconds(2), cancellationToken);
 
         ScanPerformanceMetrics? scan = null;
+        ConcurrentWorkloadPerformanceMetrics? concurrentWorkload = null;
         double? playbackCpu = null;
         string? playbackStatus = options.MeasureWorkloads ? "Not attempted" : "Skipped on warm run";
         string? workloadError = null;
@@ -190,6 +215,12 @@ internal static class PerformanceBenchmarkRunner
             {
                 scan = await MeasureScanAsync(options, settings, cancellationToken);
                 (playbackCpu, playbackStatus) = await MeasurePlaybackAsync(options, audio, cancellationToken);
+                concurrentWorkload = await MeasureConcurrentWorkloadAsync(
+                    window,
+                    options,
+                    settings,
+                    audio,
+                    cancellationToken);
             }
             catch (Exception exception)
             {
@@ -222,7 +253,7 @@ internal static class PerformanceBenchmarkRunner
                 startupWorkingSet,
                 navigationWorkingSet,
                 scrollWorkingSet,
-                process.PeakWorkingSet64,
+                scrollPeakWorkingSet,
                 GC.GetTotalMemory(false),
                 GC.CollectionCount(0),
                 GC.CollectionCount(1),
@@ -235,6 +266,7 @@ internal static class PerformanceBenchmarkRunner
                 scrollPeakWorkingSet),
             Cpu = new CpuPerformanceMetrics(idleCpu, playbackCpu, playbackStatus),
             Scan = scan,
+            ConcurrentWorkload = concurrentWorkload,
             WorkloadError = workloadError
         };
 
@@ -360,6 +392,212 @@ internal static class PerformanceBenchmarkRunner
             return (null, $"Unavailable: {exception.GetBaseException().Message}");
         }
     }
+
+    private static async Task<ConcurrentWorkloadPerformanceMetrics> MeasureConcurrentWorkloadAsync(
+        MainWindow window,
+        PerformanceBenchmarkOptions options,
+        ISettingsService settings,
+        IAudioEngine audio,
+        CancellationToken cancellationToken)
+    {
+        var workloadRoot = Path.Combine(
+            Path.GetDirectoryName(options.OutputPath)!,
+            "workload",
+            "concurrent");
+        var mediaRoot = Path.Combine(workloadRoot, "scan-media");
+        var dataRoot = Path.Combine(workloadRoot, "scan-data");
+        RecreateDirectory(workloadRoot);
+        Directory.CreateDirectory(mediaRoot);
+        var scanWave = GeneratedWaveWorkload.CreatePcmWave(TimeSpan.FromMilliseconds(40));
+        for (var index = 0; index < options.ScanFileCount; index++)
+            await File.WriteAllBytesAsync(
+                Path.Combine(mediaRoot, $"concurrent-{index:D5}.wav"),
+                scanWave,
+                cancellationToken);
+
+        var playbackPath = Path.Combine(workloadRoot, "playback-silence.wav");
+        await File.WriteAllBytesAsync(
+            playbackPath,
+            GeneratedWaveWorkload.CreatePcmWave(TimeSpan.FromSeconds(30)),
+            cancellationToken);
+        var playbackTrack = GeneratedTrack(
+            playbackPath,
+            "Concurrent scan and navigation benchmark",
+            TimeSpan.FromSeconds(30));
+
+        var paths = new AppPaths(dataRoot);
+        var repository = new SqliteLibraryRepository(paths);
+        await repository.InitializeAsync(cancellationToken);
+        var artwork = new ArtworkCache(paths, settings);
+        await using var scanner = new LibraryScanner(
+            repository,
+            new TagLibMetadataReader(),
+            artwork);
+        ScanProgress? final = null;
+        scanner.ProgressChanged += (_, progress) =>
+        {
+            if (progress.IsComplete) final = progress;
+        };
+
+        var playbackInterruptions = 0;
+        var playbackStarted = false;
+        var playbackHealthy = true;
+        string? playbackError = null;
+        void OnAudioStateChanged(object? sender, PlaybackSnapshot snapshot)
+        {
+            if (!playbackStarted) return;
+            if (snapshot.State is PlaybackState.Faulted or PlaybackState.Buffering)
+            {
+                Interlocked.Increment(ref playbackInterruptions);
+                playbackHealthy = false;
+            }
+            if (!string.IsNullOrWhiteSpace(snapshot.Error))
+            {
+                playbackHealthy = false;
+                playbackError = snapshot.Error;
+            }
+        }
+
+        audio.StateChanged += OnAudioStateChanged;
+        try
+        {
+            await audio.ConfigureOutputAsync(new AudioOutputProfile
+            {
+                DeviceId = "default",
+                Name = "System default",
+                Mode = WasapiMode.Shared,
+                BufferMilliseconds = 100,
+                HardwareVolume = false,
+                PreferBitPerfect = false,
+                FallbackPolicy = OutputFallbackPolicy.SharedMode
+            }, cancellationToken);
+            await audio.SetPlaybackOptionsAsync(new AudioPlaybackOptions
+            {
+                ReplayGainMode = ReplayGainMode.Off,
+                TransitionMode = TransitionMode.Gapless,
+                PreventClipping = true
+            }, cancellationToken);
+            await audio.SetVolumeAsync(1, cancellationToken);
+            await audio.LoadAsync(playbackTrack, cancellationToken);
+            await audio.PlayAsync(cancellationToken);
+            await Task.Delay(250, cancellationToken);
+            if (audio.Snapshot.State != PlaybackState.Playing)
+            {
+                var snapshot = audio.Snapshot;
+                return UnavailableConcurrentWorkload(
+                    options.ScanFileCount,
+                    snapshot.Error ?? $"Playback entered {snapshot.State}.");
+            }
+
+            playbackStarted = true;
+            var initialPosition = audio.Snapshot.Position;
+            var process = Process.GetCurrentProcess();
+            process.Refresh();
+            var maximumWorkingSet = process.WorkingSet64;
+            var scanTimer = Stopwatch.StartNew();
+            var scanTask = scanner.ScanAsync(
+                [mediaRoot],
+                cancellationToken: cancellationToken);
+            var navigationTask = window.MeasureTabSwitchPerformanceAsync(cancellationToken);
+
+            while (!scanTask.IsCompleted || !navigationTask.IsCompleted)
+            {
+                await Task.Delay(50, cancellationToken);
+                var snapshot = audio.Snapshot;
+                if (snapshot.State != PlaybackState.Playing)
+                {
+                    playbackHealthy = false;
+                    Interlocked.Increment(ref playbackInterruptions);
+                }
+                if (!string.IsNullOrWhiteSpace(snapshot.Error))
+                    playbackError = snapshot.Error;
+                process.Refresh();
+                maximumWorkingSet = Math.Max(maximumWorkingSet, process.WorkingSet64);
+            }
+
+            await scanTask;
+            scanTimer.Stop();
+            var navigation = await navigationTask;
+            var finalPosition = audio.Snapshot.Position;
+            var stats = await repository.GetStatsAsync(cancellationToken);
+            var failed = final?.Failed
+                ?? Math.Max(0, options.ScanFileCount - (int)stats.TrackCount);
+            var navigationFrames = PerformanceStatistics.Frames(
+                navigation.Select(sample => sample.LatencyMs),
+                0);
+            var positionAdvanced = Math.Max(
+                0,
+                (finalPosition - initialPosition).TotalMilliseconds);
+            var status = playbackHealthy
+                ? "Playback advanced continuously while scanning and switching all primary tabs."
+                : playbackError ?? "Playback left the Playing state during the concurrent workload.";
+
+            return new ConcurrentWorkloadPerformanceMetrics(
+                true,
+                playbackHealthy,
+                playbackInterruptions,
+                Math.Round(positionAdvanced, 3),
+                options.ScanFileCount,
+                (int)stats.TrackCount,
+                failed,
+                Math.Round(scanTimer.Elapsed.TotalMilliseconds, 3),
+                navigationFrames.P95Ms,
+                navigationFrames.MaximumMs,
+                maximumWorkingSet,
+                status);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return UnavailableConcurrentWorkload(
+                options.ScanFileCount,
+                exception.GetBaseException().Message);
+        }
+        finally
+        {
+            playbackStarted = false;
+            audio.StateChanged -= OnAudioStateChanged;
+            try { await audio.StopAsync(CancellationToken.None); } catch { }
+        }
+    }
+
+    private static Track GeneratedTrack(
+        string path,
+        string title,
+        TimeSpan duration)
+    {
+        var info = new FileInfo(path);
+        return new Track
+        {
+            Path = path,
+            Title = title,
+            Artist = "Dextromethorphan",
+            AlbumArtist = "Dextromethorphan",
+            Album = "Performance workload",
+            Codec = "WAV",
+            Duration = duration,
+            SampleRate = GeneratedWaveWorkload.SampleRate,
+            BitsPerSample = 16,
+            Channels = 2,
+            FileSize = info.Length,
+            FileModifiedAt = info.LastWriteTimeUtc
+        };
+    }
+
+    private static ConcurrentWorkloadPerformanceMetrics UnavailableConcurrentWorkload(
+        int scanFiles,
+        string status) => new(
+            false,
+            false,
+            0,
+            0,
+            scanFiles,
+            0,
+            scanFiles,
+            0,
+            0,
+            0,
+            0,
+            $"Unavailable: {status}");
 
     private static void RecreateDirectory(string path)
     {

@@ -13,8 +13,9 @@ The tracked thresholds are in [release-gates.json](release-gates.json).
 | Album scroll frames over 50 ms | 0 | All fixtures |
 | Idle CPU | < 5% | All fixtures |
 | Peak working set | < 300 MiB | 50k fixture |
+| Concurrent scan/playback/navigation | No playback interruption, all scan files imported, tab max < 100 ms | 10k cold workload |
 
-The 16.67 ms p95 threshold represents sustained 60 Hz scrolling. Startup is evaluated only on the deterministic 10k fixture, and the memory gate only on the deterministic 50k fixture. Navigation, scrolling, and CPU gates apply to both.
+The 16.67 ms p95 threshold represents sustained 60 Hz scrolling. Startup is evaluated only on the deterministic 10k fixture, and the memory gate only on the deterministic 50k fixture. Navigation, scrolling, and CPU gates apply to both. The cold workload also plays generated 44.1 kHz PCM through shared WASAPI while an isolated library scan and all primary-tab switches run together; playback must keep advancing without a fault or buffering transition.
 
 ## Run the gates
 
