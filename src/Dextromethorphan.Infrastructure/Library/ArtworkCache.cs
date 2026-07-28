@@ -41,6 +41,10 @@ public sealed class ArtworkCache(AppPaths paths, ISettingsService settings) : IA
     public async Task<string?> GetOrCreateAsync(string mediaPath, CancellationToken cancellationToken = default)
     {
         if (!File.Exists(mediaPath)) return null;
+        var external = await Task.Run(
+            () => ExternalArtworkResolver.FindPreferredForMedia(mediaPath, cancellationToken),
+            cancellationToken);
+        if (external is not null) return external;
         var modifiedAt = new DateTimeOffset(File.GetLastWriteTimeUtc(mediaPath), TimeSpan.Zero);
         var existing = FindExistingCachePath(mediaPath, modifiedAt);
         if (existing is not null)

@@ -42,10 +42,14 @@ public sealed class SqliteLibraryRepository(AppPaths paths) : ILibraryRepository
         var index = new Dictionary<string, LibraryFileStamp>(StringComparer.OrdinalIgnoreCase);
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT id, path, file_modified_at, file_size FROM tracks";
+        command.CommandText = "SELECT id, path, file_modified_at, file_size, artwork_path FROM tracks";
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
-            index[reader.GetString(1)] = new LibraryFileStamp(reader.GetInt64(0), DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(2)), reader.GetInt64(3));
+            index[reader.GetString(1)] = new LibraryFileStamp(
+                reader.GetInt64(0),
+                DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(2)),
+                reader.GetInt64(3),
+                reader.IsDBNull(4) ? null : reader.GetString(4));
         return index;
     }
 

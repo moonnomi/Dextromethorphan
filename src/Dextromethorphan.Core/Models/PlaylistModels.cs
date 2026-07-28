@@ -56,4 +56,8 @@ public sealed record ImportedPlaylist
     public IReadOnlyList<string> Locations { get; init; } = [];
 }
 
-public sealed record LibraryFileStamp(long Id, DateTimeOffset ModifiedAt, long Size);
+public sealed record LibraryFileStamp(
+    long Id,
+    DateTimeOffset ModifiedAt,
+    long Size,
+    string? ArtworkPath = null);

@@ -1,3 +1,4 @@
+using Dextromethorphan.Core.Abstractions;
 using Dextromethorphan.Core.Models;
 using Dextromethorphan.Infrastructure.Library;
 using Dextromethorphan.Infrastructure.Settings;
@@ -108,6 +109,97 @@ public sealed class PersistenceTests : IDisposable
     }
 
     [Fact]
+    public async Task ExternalArtworkUsesDeterministicNameAndExtensionPrecedence()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        Directory.CreateDirectory(_root);
+        var media = Path.Combine(_root, "song.flac");
+        var folder = Path.Combine(_root, "folder.jpg");
+        var coverPng = Path.Combine(_root, "cover.png");
+        var coverJpeg = Path.Combine(_root, "cover.jpg");
+        var image = ValidPng();
+        await File.WriteAllBytesAsync(media, [0x00], cancellationToken);
+        await File.WriteAllBytesAsync(folder, image, cancellationToken);
+        await File.WriteAllBytesAsync(coverPng, image, cancellationToken);
+        var paths = new AppPaths(Path.Combine(_root, "state"));
+        var settings = new JsonSettingsService(paths);
+        await settings.InitializeAsync(cancellationToken);
+        var cache = new ArtworkCache(paths, settings);
+
+        Assert.Equal(coverPng, await cache.GetOrCreateAsync(media, cancellationToken));
+
+        await File.WriteAllBytesAsync(coverJpeg, image, cancellationToken);
+
+        Assert.Equal(coverJpeg, await cache.GetOrCreateAsync(media, cancellationToken));
+    }
+
+    [Fact]
+    public async Task ExternalArtworkSkipsCorruptPreferredCandidate()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        Directory.CreateDirectory(_root);
+        var media = Path.Combine(_root, "song.flac");
+        var corruptCover = Path.Combine(_root, "cover.jpg");
+        var validFolder = Path.Combine(_root, "folder.png");
+        await File.WriteAllBytesAsync(media, [0x00], cancellationToken);
+        await File.WriteAllBytesAsync(corruptCover, "not an image"u8.ToArray(), cancellationToken);
+        await File.WriteAllBytesAsync(validFolder, ValidPng(), cancellationToken);
+        var paths = new AppPaths(Path.Combine(_root, "state"));
+        var settings = new JsonSettingsService(paths);
+        await settings.InitializeAsync(cancellationToken);
+        var cache = new ArtworkCache(paths, settings);
+
+        var selected = await cache.GetOrCreateAsync(media, cancellationToken);
+
+        Assert.Equal(validFolder, selected);
+    }
+
+    [Fact]
+    public async Task ScannerUpdatesExternalArtworkWithoutReparsingUnchangedMedia()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var mediaRoot = Path.Combine(_root, "music");
+        Directory.CreateDirectory(mediaRoot);
+        var media = Path.Combine(mediaRoot, "song.flac");
+        var coverPng = Path.Combine(mediaRoot, "cover.png");
+        var coverJpeg = Path.Combine(mediaRoot, "cover.jpg");
+        await File.WriteAllBytesAsync(media, [0x00], cancellationToken);
+        await File.WriteAllBytesAsync(coverPng, ValidPng(), cancellationToken);
+        var paths = new AppPaths(Path.Combine(_root, "state"));
+        var settings = new JsonSettingsService(paths);
+        await settings.InitializeAsync(cancellationToken);
+        var repository = new SqliteLibraryRepository(paths);
+        await repository.InitializeAsync(cancellationToken);
+        var reader = new CountingMetadataReader();
+        await using var scanner = new LibraryScanner(
+            repository,
+            reader,
+            new ArtworkCache(paths, settings));
+
+        await scanner.ScanAsync([mediaRoot], cancellationToken: cancellationToken);
+        Assert.Equal(coverPng, (await repository.GetByPathAsync(media, cancellationToken))?.ArtworkPath);
+        Assert.Equal(1, reader.Reads);
+
+        await File.WriteAllBytesAsync(coverJpeg, ValidPng(), cancellationToken);
+        await scanner.ScanAsync([mediaRoot], cancellationToken: cancellationToken);
+
+        Assert.Equal(coverJpeg, (await repository.GetByPathAsync(media, cancellationToken))?.ArtworkPath);
+        Assert.Equal(1, reader.Reads);
+
+        File.Delete(coverJpeg);
+        await scanner.ScanAsync([mediaRoot], cancellationToken: cancellationToken);
+        Assert.Equal(coverPng, (await repository.GetByPathAsync(media, cancellationToken))?.ArtworkPath);
+        Assert.Equal(1, reader.Reads);
+
+        File.Delete(coverPng);
+        await scanner.ScanAsync([mediaRoot], cancellationToken: cancellationToken);
+        var embedded = (await repository.GetByPathAsync(media, cancellationToken))?.ArtworkPath;
+        Assert.NotNull(embedded);
+        Assert.True(File.Exists(embedded));
+        Assert.Equal(2, reader.Reads);
+    }
+
+    [Fact]
     public async Task ArtworkCacheReportsPrunesAndClearsAllLayers()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -156,6 +248,31 @@ public sealed class PersistenceTests : IDisposable
     {
         using var file = File.Create(path);
         file.SetLength(length);
+    }
+
+    private static byte[] ValidPng() => Convert.FromBase64String(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
+
+    private sealed class CountingMetadataReader : ITrackMetadataReader
+    {
+        public int Reads { get; private set; }
+
+        public Task<Track> ReadAsync(
+            string path,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Reads++;
+            var file = new FileInfo(path);
+            return Task.FromResult(new Track
+            {
+                Path = file.FullName,
+                Title = Path.GetFileNameWithoutExtension(path),
+                FileModifiedAt = file.LastWriteTimeUtc,
+                FileSize = file.Length,
+                Artwork = ValidPng()
+            });
+        }
     }
 
     public void Dispose()

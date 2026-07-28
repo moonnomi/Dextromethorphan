@@ -33,6 +33,8 @@ public sealed class LibraryScanner(ILibraryRepository repository, ITrackMetadata
             var files = EnumerateFiles(validRoots, exclusions).ToArray();
             var processed = 0; var added = 0; var updated = 0; var failed = 0;
             var fileIndex = await repository.GetFileIndexAsync(cancellationToken);
+            var directoryArtwork = new ConcurrentDictionary<string, ExternalArtworkSelection>(
+                StringComparer.OrdinalIgnoreCase);
             ProgressChanged?.Invoke(this, new ScanProgress(files.Length, 0, 0, 0, 0, null, false));
 
             var pending = Channel.CreateBounded<(Track Track, bool IsNew)>(new BoundedChannelOptions(500)
@@ -87,13 +89,46 @@ public sealed class LibraryScanner(ILibraryRepository repository, ITrackMetadata
                     {
                         var info = new FileInfo(path);
                         fileIndex.TryGetValue(path, out var existing);
-                        if (existing is not null && existing.ModifiedAt.UtcDateTime == info.LastWriteTimeUtc && existing.Size == info.Length)
+                        var preferredArtwork = PreferredArtwork(
+                            path,
+                            directoryArtwork,
+                            ct);
+                        if (existing is not null
+                            && existing.ModifiedAt.ToUnixTimeMilliseconds()
+                                == new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero).ToUnixTimeMilliseconds()
+                            && existing.Size == info.Length)
                         {
+                            if (preferredArtwork is not null
+                                && !preferredArtwork.Equals(existing.ArtworkPath, StringComparison.OrdinalIgnoreCase))
+                            {
+                                var persisted = await repository.GetByPathAsync(path, ct);
+                                if (persisted is not null)
+                                {
+                                    await pending.Writer.WriteAsync(
+                                        (persisted with { ArtworkPath = preferredArtwork, Artwork = null }, false),
+                                        ct);
+                                    return;
+                                }
+                            }
+                            else if (preferredArtwork is null
+                                     && existing.ArtworkPath is { Length: > 0 } staleArtwork
+                                     && !File.Exists(staleArtwork))
+                            {
+                                var refreshed = await CacheArtworkAsync(
+                                    await metadataReader.ReadAsync(path, ct),
+                                    preferredArtwork,
+                                    ct);
+                                await pending.Writer.WriteAsync((refreshed, false), ct);
+                                return;
+                            }
                             Interlocked.Increment(ref processed);
                             ProgressChanged?.Invoke(this, new ScanProgress(files.Length, processed, added, updated, failed, path, false));
                             return;
                         }
-                        var track = await CacheArtworkAsync(await metadataReader.ReadAsync(path, ct), ct);
+                        var track = await CacheArtworkAsync(
+                            await metadataReader.ReadAsync(path, ct),
+                            preferredArtwork,
+                            ct);
                         await pending.Writer.WriteAsync((track, existing is null), ct);
                     }
                     catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
@@ -171,7 +206,18 @@ public sealed class LibraryScanner(ILibraryRepository repository, ITrackMetadata
             try
             {
                 await Task.Delay(800, source.Token);
-                if (File.Exists(path)) await repository.UpsertAsync(await CacheArtworkAsync(await metadataReader.ReadAsync(path, source.Token), source.Token), source.Token);
+                if (File.Exists(path))
+                {
+                    var preferredArtwork = ExternalArtworkResolver.FindPreferredForMedia(
+                        path,
+                        source.Token);
+                    await repository.UpsertAsync(
+                        await CacheArtworkAsync(
+                            await metadataReader.ReadAsync(path, source.Token),
+                            preferredArtwork,
+                            source.Token),
+                        source.Token);
+                }
             }
             catch (OperationCanceledException) { }
             catch { }
@@ -181,11 +227,28 @@ public sealed class LibraryScanner(ILibraryRepository repository, ITrackMetadata
 
     private void QueueRootRescan(string root) => _ = Task.Run(async () => { try { await ScanAsync([root]); } catch { } });
 
-    private async Task<Track> CacheArtworkAsync(Track track, CancellationToken cancellationToken)
+    private async Task<Track> CacheArtworkAsync(
+        Track track,
+        string? preferredArtwork,
+        CancellationToken cancellationToken)
     {
+        if (preferredArtwork is not null)
+            return track with { ArtworkPath = preferredArtwork, Artwork = null };
         if (track.Artwork is not { Length: > 0 }) return track;
         var cached = await artworkCache.StoreAsync(track.Path, track.FileModifiedAt, track.Artwork, cancellationToken);
         return track with { ArtworkPath = cached, Artwork = null };
+    }
+
+    private static string? PreferredArtwork(
+        string mediaPath,
+        ConcurrentDictionary<string, ExternalArtworkSelection> selections,
+        CancellationToken cancellationToken)
+    {
+        var directory = Path.GetDirectoryName(mediaPath) ?? string.Empty;
+        return selections.GetOrAdd(
+            directory,
+            path => new ExternalArtworkSelection(
+                ExternalArtworkResolver.FindPreferredInDirectory(path, cancellationToken))).Path;
     }
 
     private static IEnumerable<string> EnumerateFiles(IEnumerable<string> roots, IReadOnlyList<string> exclusions)
@@ -216,4 +279,6 @@ public sealed class LibraryScanner(ILibraryRepository repository, ITrackMetadata
     }
 
     public ValueTask DisposeAsync() { StopWatching(); return ValueTask.CompletedTask; }
+
+    private readonly record struct ExternalArtworkSelection(string? Path);
 }
