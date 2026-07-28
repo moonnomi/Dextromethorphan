@@ -43,4 +43,4 @@ The baseline runner waits five seconds after the cold process because its genera
 
 ## Current status
 
-The 2026-07-26 10k measurement passes cold startup and routine-frame safety, but remains blocked by cached Songs-tab latency, 60 Hz p95 scrolling, and an idle-CPU sample slightly above 5%. The 50k memory gate must also be rerun after the latest artwork/virtualization changes. Defining the gates does not mark those remaining optimization problems as solved.
+The four-process 10k and 50k reference qualifications captured on 2026-07-28 both pass all 10 applicable checks. See [the final gate report](GATE-REPORT-2026-07-28.md) for the results and source report locations.

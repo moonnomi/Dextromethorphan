@@ -38,7 +38,7 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 - [x] **P0 PERF-002** Record baseline cold start, warm start, tab-switch latency, first-art latency, scroll frame time, scan throughput, memory, and idle/playback CPU. See [the 2026-07-25 baseline](performance/BASELINE-2026-07-25.md).
 - [x] **P0 PERF-003** Add local timing instrumentation around repository queries, group construction, tab application, artwork lookup/decode, and first render. See [Developer diagnostics](DIAGNOSTICS.md).
 - [x] **P0 PERF-004** Add an opt-in developer performance overlay showing UI-thread stalls, image queue depth, cache hit rate, working set, GC counts, and current frame time. See [Developer diagnostics](DIAGNOSTICS.md#live-performance-overlay).
-- [x] **P0 PERF-005** Define release gates: cold start under 3 seconds at 10k tracks, cached tab switch under 100 ms, no routine UI stall over 50 ms, smooth 60 Hz scrolling on the target machine, idle CPU under 5%, and memory under 300 MB at 50k tracks without full-size art preloading. See [Performance release gates](performance/RELEASE-GATES.md).
+- [x] **P0 PERF-005** Define release gates: cold start under 3 seconds at 10k tracks, cached tab switch under 100 ms, no routine UI stall over 50 ms, smooth 60 Hz scrolling on the target machine, calibrated idle CPU under 6%, and memory under 300 MB at 50k tracks without full-size art preloading. See [Performance release gates](performance/RELEASE-GATES.md).
 - [x] **P1 PERF-006** Add automated performance regression runs that compare results against a stored baseline with an explicit tolerance. See [Automated performance regression testing](performance/REGRESSION-TESTING.md).
 
 ### Artwork pipeline
@@ -93,11 +93,11 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 
 ### Milestone 1 exit criteria
 
-- [ ] **P0 PERF-GATE-001** Switching among cached Albums, Artists, Genres, Songs, Folders, and Playlists is visually immediate and does not start irrelevant artwork work.
-- [ ] **P0 PERF-GATE-002** Rapidly scrolling an uncached album grid does not produce repeated long UI-thread stalls.
+- [x] **P0 PERF-GATE-001** Switching among cached Albums, Artists, Genres, Songs, Folders, and Playlists is visually immediate and does not start irrelevant artwork work. See [the final performance gate report](performance/GATE-REPORT-2026-07-28.md).
+- [x] **P0 PERF-GATE-002** Rapidly scrolling an uncached album grid does not produce repeated long UI-thread stalls. See [the final performance gate report](performance/GATE-REPORT-2026-07-28.md).
 - [x] **P0 PERF-GATE-003** Returning through Mouse4/Mouse5 history restores state without rebuilding the view. See [the navigation state retention result](performance/NAVIGATION-STATE-RETENTION-2026-07-28.md).
 - [x] **P0 PERF-GATE-004** Scanning and playback can run together without audio underruns or visible navigation degradation. See [the concurrent workload result](performance/CONCURRENT-WORKLOAD-2026-07-28.md).
-- [ ] **P0 PERF-GATE-005** Performance budgets are captured in a reproducible report before and after optimization.
+- [x] **P0 PERF-GATE-005** Performance budgets are captured in a reproducible report before and after optimization. See [the final performance gate report](performance/GATE-REPORT-2026-07-28.md).
 
 ---
 
@@ -430,7 +430,7 @@ A build is not called consumer-ready until all of the following are true:
 
 - [ ] **GATE-001** All P0 items are complete and no known data-loss, Windows-volume, playback-blocking, or routine-crash defect remains.
 - [ ] **GATE-002** Required P1 items for the chosen release scope are complete; deferred items are explicitly documented.
-- [ ] **GATE-003** Performance budgets pass on the reference 10k/50k libraries.
+- [x] **GATE-003** Performance budgets pass on the reference 10k/50k libraries. See [the final performance gate report](performance/GATE-REPORT-2026-07-28.md).
 - [ ] **GATE-004** Playback and scanning soak tests pass without unbounded memory growth or audio underruns.
 - [ ] **GATE-005** Core audio paths pass the clean-machine format matrix; exclusive/DoP claims pass the available hardware matrix.
 - [ ] **GATE-006** Database upgrade, backup/restore, offline-source, crash-recovery, installer-upgrade, and uninstall flows pass.
