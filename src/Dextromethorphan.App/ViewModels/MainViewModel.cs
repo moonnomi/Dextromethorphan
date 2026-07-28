@@ -30,6 +30,8 @@ public sealed class MainViewModel : ObservableObject
     private readonly ConcurrentDictionary<string, string?> _resolvedArtwork = new(StringComparer.OrdinalIgnoreCase);
     private readonly Stack<NavigationEntry> _backHistory = new();
     private readonly Stack<NavigationEntry> _forwardHistory = new();
+    private readonly Dictionary<string, CardSelection> _cardSelections = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _trackSelections = new(StringComparer.Ordinal);
     private CancellationTokenSource? _searchCancellation;
     private CancellationTokenSource? _artworkCancellation;
     private CancellationTokenSource? _queueArtworkCancellation;
@@ -66,6 +68,8 @@ public sealed class MainViewModel : ObservableObject
     private bool _hasSyncedLyrics;
     private bool _isArtworkCacheBusy;
     private int _artworkCacheMegabytes = 512;
+    private string _contentViewStateKey = "primary:Albums";
+    private bool _restoringViewSelection;
     private string _artworkCacheStatus = "Calculating cache size…";
 
     public MainViewModel(
@@ -140,9 +144,29 @@ public sealed class MainViewModel : ObservableObject
     public ObservableCollection<LyricLineViewModel> Lyrics { get; } = [];
     public ObservableCollection<AudioDeviceInfo> OutputDevices { get; } = [];
 
-    public Track? SelectedTrack { get => _selectedTrack; set { if (Set(ref _selectedTrack, value)) (PlaySelectedCommand as AsyncRelayCommand)?.CanExecute(value); } }
+    public Track? SelectedTrack
+    {
+        get => _selectedTrack;
+        set
+        {
+            if (!Set(ref _selectedTrack, value)) return;
+            if (!_restoringViewSelection && value is not null)
+                _trackSelections[_contentViewStateKey] = value.Path;
+            (PlaySelectedCommand as AsyncRelayCommand)?.CanExecute(value);
+        }
+    }
     public Track? CurrentTrack { get => _currentTrack; private set { if (Set(ref _currentTrack, value)) { Raise(nameof(HasCurrentTrack)); Raise(nameof(CurrentTitle)); Raise(nameof(CurrentArtist)); Raise(nameof(CurrentArtworkPath)); Raise(nameof(LoveGlyph)); } } }
-    public LibraryCardViewModel? SelectedCard { get => _selectedCard; private set { if (Set(ref _selectedCard, value)) { Raise(nameof(DetailTabTitle)); Raise(nameof(HasDetailArtwork)); } } }
+    public LibraryCardViewModel? SelectedCard
+    {
+        get => _selectedCard;
+        private set
+        {
+            if (!Set(ref _selectedCard, value)) return;
+            Raise(nameof(DetailTabTitle));
+            Raise(nameof(HasDetailArtwork));
+            Raise(nameof(ContentViewStateKey));
+        }
+    }
     public bool HasCurrentTrack => CurrentTrack is not null;
     public bool HasLibrary => _allTracks.Count > 0;
     public bool HasBrowseTracks => BrowseTracks.Count > 0;
@@ -164,6 +188,7 @@ public sealed class MainViewModel : ObservableObject
             if (!Set(ref _isCollectionDetailOpen, value)) return;
             Raise(nameof(IsGroupView)); Raise(nameof(IsCollectionDetailView)); Raise(nameof(IsTrackView)); Raise(nameof(IsSidebarView)); Raise(nameof(IsNowPlayingView));
             Raise(nameof(ViewTitle)); Raise(nameof(DetailTabTitle));
+            Raise(nameof(ContentViewStateKey));
         }
     }
     public string DetailTabTitle => SelectedCard?.Title ?? "Collection";
@@ -175,8 +200,11 @@ public sealed class MainViewModel : ObservableObject
         {
             if (!Set(ref _currentView, value)) return;
             Raise(nameof(IsGroupView)); Raise(nameof(IsCollectionDetailView)); Raise(nameof(IsTrackView)); Raise(nameof(IsSidebarView)); Raise(nameof(IsNowPlayingView));
+            Raise(nameof(PrimaryViewStateKey)); Raise(nameof(ContentViewStateKey));
         }
     }
+    public string PrimaryViewStateKey => $"primary:{CurrentView}";
+    public string ContentViewStateKey => _contentViewStateKey;
     public string ViewTitle => IsCollectionDetailOpen ? DetailTabTitle : CurrentView;
     public string ViewSubtitle { get => _viewSubtitle; private set => Set(ref _viewSubtitle, value); }
     public string SelectedGroupTitle { get => _selectedGroupTitle; private set => Set(ref _selectedGroupTitle, value); }
@@ -585,29 +613,40 @@ public sealed class MainViewModel : ObservableObject
         if (resetSelection && IsCollectionDetailOpen) IsCollectionDetailOpen = false;
         switch (CurrentView)
         {
-            case "Albums": ViewSubtitle = $"{Albums.Count:N0} albums in your library"; SetActiveGroups(Albums); ClearCollectionSelection(); break;
-            case "Artists": ViewSubtitle = $"{Artists.Count:N0} artists in your library"; SetActiveGroups(Artists); ClearCollectionSelection(); break;
-            case "Genres": ViewSubtitle = $"{Genres.Count:N0} genres in your library"; SetActiveGroups(Genres); ClearCollectionSelection(); break;
+            case "Albums": ViewSubtitle = $"{Albums.Count:N0} albums in your library"; SetActiveGroups(Albums); RestoreGallerySelection(Albums); break;
+            case "Artists": ViewSubtitle = $"{Artists.Count:N0} artists in your library"; SetActiveGroups(Artists); RestoreGallerySelection(Artists); break;
+            case "Genres": ViewSubtitle = $"{Genres.Count:N0} genres in your library"; SetActiveGroups(Genres); RestoreGallerySelection(Genres); break;
             case "Folders": ViewSubtitle = $"{Folders.Count:N0} folders across {_settings.Current.LibraryFolders.Count:N0} sources"; SidebarCards = Folders; SelectDefault(SidebarCards, resetSelection); break;
             case "Playlists": ViewSubtitle = $"{Playlists.Count:N0} saved and smart playlists"; SidebarCards = Playlists; SelectDefault(SidebarCards, resetSelection); break;
             case "Favorites":
                 ViewSubtitle = "Tracks you have marked as loved";
-                SetBrowseTracks(_allTracks.Where(x => x.IsLoved).OrderBy(x => x.Artist).ThenBy(x => x.Album).ThenBy(x => x.TrackNumber), "Favorites", $"{_allTracks.Count(x => x.IsLoved):N0} loved tracks");
+                SetBrowseTracks(_allTracks.Where(x => x.IsLoved).OrderBy(x => x.Artist).ThenBy(x => x.Album).ThenBy(x => x.TrackNumber), "Favorites", $"{_allTracks.Count(x => x.IsLoved):N0} loved tracks", PrimaryViewStateKey);
                 break;
             case "Songs":
                 ViewSubtitle = $"{_allTracks.Count:N0} tracks, stored offline";
-                SetBrowseTracks(_allTracks, "All songs", StatusText);
+                SetBrowseTracks(_allTracks, "All songs", StatusText, PrimaryViewStateKey);
                 break;
-            case "Now Playing": ViewSubtitle = CurrentTrack is null ? "Choose a track to begin" : CurrentArtist; break;
+            case "Now Playing":
+                SetContentViewStateKey(PrimaryViewStateKey);
+                ViewSubtitle = CurrentTrack is null ? "Choose a track to begin" : CurrentArtist;
+                break;
         }
         RestartActiveArtworkResolution();
     }
 
     private void SelectDefault(IReadOnlyList<LibraryCardViewModel> cards, bool reset)
     {
-        var selected = !reset && SelectedCard is not null ? cards.FirstOrDefault(x => x.Key == SelectedCard.Key && x.Kind == SelectedCard.Kind) : null;
-        SelectGroupCore(selected ?? cards.FirstOrDefault(), false);
-        if (cards.Count == 0) SetBrowseTracks([], $"No {CurrentView.ToLowerInvariant()}", string.IsNullOrWhiteSpace(SearchText) ? "This view will populate as your library is scanned." : "No results match your search.");
+        _cardSelections.TryGetValue(CurrentView, out var remembered);
+        var selected = remembered is not null
+            ? cards.FirstOrDefault(x => x.Key == remembered.Key && x.Kind == remembered.Kind)
+            : null;
+        SelectGroupCore(selected ?? cards.FirstOrDefault(), false, rememberSelection: false);
+        if (cards.Count == 0)
+            SetBrowseTracks(
+                [],
+                $"No {CurrentView.ToLowerInvariant()}",
+                string.IsNullOrWhiteSpace(SearchText) ? "This view will populate as your library is scanned." : "No results match your search.",
+                PrimaryViewStateKey);
     }
 
     private void SelectGroup(LibraryCardViewModel? card)
@@ -619,12 +658,14 @@ public sealed class MainViewModel : ObservableObject
         RecordNavigation(previous);
     }
 
-    private void SelectGroupCore(LibraryCardViewModel? card, bool openCollectionDetail)
+    private void SelectGroupCore(LibraryCardViewModel? card, bool openCollectionDetail, bool rememberSelection = true)
     {
         if (card is null) return;
         if (SelectedCard is not null) SelectedCard.IsSelected = false;
         SelectedCard = card;
         card.IsSelected = true;
+        if (rememberSelection)
+            _cardSelections[CurrentView] = new CardSelection(card.Kind, card.Key);
         SetBrowseTracks(card.Tracks, card.Title, string.IsNullOrWhiteSpace(card.Detail) ? $"{card.Subtitle} · {card.CountText}" : $"{card.Detail} · {card.CountText}");
         if (openCollectionDetail && CurrentView is "Albums" or "Artists" or "Genres")
         {
@@ -712,25 +753,68 @@ public sealed class MainViewModel : ObservableObject
         RestartActiveArtworkResolution();
     }
 
-    private void ClearCollectionSelection()
+    public void EnsureGalleryGroupsLoaded(int count)
+    {
+        var target = Math.Clamp(count, 0, ActiveGroups.Count);
+        if (target <= GalleryGroups.Count) return;
+        for (var index = GalleryGroups.Count; index < target; index++)
+            GalleryGroups.Add(ActiveGroups[index]);
+        RestartActiveArtworkResolution();
+    }
+
+    private void RestoreGallerySelection(IReadOnlyList<LibraryCardViewModel> cards)
     {
         if (SelectedCard is not null) SelectedCard.IsSelected = false;
-        SelectedCard = null;
+        _cardSelections.TryGetValue(CurrentView, out var remembered);
+        SelectedCard = remembered is null
+            ? null
+            : cards.FirstOrDefault(x => x.Kind == remembered.Kind && x.Key == remembered.Key);
+        if (SelectedCard is not null) SelectedCard.IsSelected = true;
+        SetContentViewStateKey(PrimaryViewStateKey);
         BrowseTracks.Clear();
-        SelectedTrack = null;
+        SetSelectedTrackForView(null);
         Raise(nameof(HasBrowseTracks));
     }
 
-    private void SetBrowseTracks(IEnumerable<Track> tracks, string title, string subtitle)
+    private void SetBrowseTracks(IEnumerable<Track> tracks, string title, string subtitle) =>
+        SetBrowseTracks(
+            tracks,
+            title,
+            subtitle,
+            SelectedCard is null ? PrimaryViewStateKey : CollectionViewStateKey(CurrentView, SelectedCard));
+
+    private void SetBrowseTracks(IEnumerable<Track> tracks, string title, string subtitle, string contentStateKey)
     {
         var materialized = tracks as IReadOnlyCollection<Track> ?? tracks.ToArray();
         using var scope = _diagnostics.Measure("view", "track-list-application",
             _diagnostics.Enabled ? new Dictionary<string, object?> { ["tracks"] = materialized.Count } : null);
+        SetContentViewStateKey(contentStateKey);
         BrowseTracks.Clear(); foreach (var track in materialized) BrowseTracks.Add(track);
         SelectedGroupTitle = title; SelectedGroupSubtitle = subtitle;
-        SelectedTrack = BrowseTracks.FirstOrDefault();
+        _trackSelections.TryGetValue(contentStateKey, out var selectedPath);
+        SetSelectedTrackForView(
+            selectedPath is null
+                ? BrowseTracks.FirstOrDefault()
+                : BrowseTracks.FirstOrDefault(x => x.Path.Equals(selectedPath, StringComparison.OrdinalIgnoreCase)) ?? BrowseTracks.FirstOrDefault());
         Raise(nameof(HasBrowseTracks));
     }
+
+    private void SetSelectedTrackForView(Track? track)
+    {
+        _restoringViewSelection = true;
+        try { SelectedTrack = track; }
+        finally { _restoringViewSelection = false; }
+    }
+
+    private void SetContentViewStateKey(string key)
+    {
+        if (_contentViewStateKey == key) return;
+        _contentViewStateKey = key;
+        Raise(nameof(ContentViewStateKey));
+    }
+
+    private static string CollectionViewStateKey(string view, LibraryCardViewModel card) =>
+        $"collection:{view}:{card.Kind}:{card.Key}";
 
     private async Task PlayGroupAsync(LibraryCardViewModel? card)
     {
@@ -1160,4 +1244,5 @@ public sealed class MainViewModel : ObservableObject
 
     private sealed record LibraryGroups(IReadOnlyList<LibraryCardViewModel> Albums, IReadOnlyList<LibraryCardViewModel> Artists, IReadOnlyList<LibraryCardViewModel> Genres, IReadOnlyList<LibraryCardViewModel> Folders);
     private sealed record NavigationEntry(string View, string? CardKind, string? CardKey, bool IsCollectionDetail);
+    private sealed record CardSelection(string Kind, string Key);
 }

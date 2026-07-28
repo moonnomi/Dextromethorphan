@@ -33,6 +33,9 @@ public partial class MainWindow : Window
     private readonly IShortcutService _shortcuts;
     private readonly ISystemMediaTransportService _systemMedia;
     private readonly DeveloperDiagnostics _diagnostics;
+    private readonly NavigationViewStateStore _viewStates = new();
+    private bool _scrollRestorePending;
+    private bool _restoringScrollState;
 
     public MainWindow(
         MainViewModel viewModel,
@@ -138,6 +141,9 @@ public partial class MainWindow : Window
             if (_diagnostics.Enabled)
                 _ = RecordViewRenderAsync(Stopwatch.GetTimestamp(), ViewModel.CurrentView, ViewModel.IsCollectionDetailOpen);
         }
+        if (e.PropertyName is nameof(MainViewModel.PrimaryViewStateKey) or nameof(MainViewModel.ContentViewStateKey)
+            or nameof(MainViewModel.CurrentView) or nameof(MainViewModel.IsCollectionDetailOpen))
+            ScheduleScrollStateRestore();
     }
 
     private void ResetLyricsView()
@@ -281,8 +287,84 @@ public partial class MainWindow : Window
 
     private void Gallery_ScrollChanged(object sender, ScrollChangedEventArgs e)
     {
+        if (!_restoringScrollState && GalleryList.IsVisible && e.OriginalSource is ScrollViewer)
+            _viewStates.Capture(ViewModel.PrimaryViewStateKey, e.VerticalOffset, ViewModel.GalleryGroups.Count);
         if (e.ExtentHeight <= 0 || e.VerticalOffset + e.ViewportHeight < e.ExtentHeight - 260) return;
         ViewModel.LoadMoreGalleryGroups();
+    }
+
+    private void GalleryList_Loaded(object sender, RoutedEventArgs e) => ScheduleScrollStateRestore();
+
+    private void SidebarList_Loaded(object sender, RoutedEventArgs e) => ScheduleScrollStateRestore();
+
+    private void SidebarList_ScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        if (!_restoringScrollState && SidebarList.IsVisible && e.OriginalSource is ScrollViewer)
+            _viewStates.Capture(ViewModel.PrimaryViewStateKey, e.VerticalOffset);
+    }
+
+    private void TrackList_Loaded(object sender, RoutedEventArgs e) => ScheduleScrollStateRestore();
+
+    private void TrackList_ScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        if (_restoringScrollState || sender is not ListBox list || !list.IsVisible || e.OriginalSource is not ScrollViewer) return;
+        _viewStates.Capture(ViewModel.ContentViewStateKey, e.VerticalOffset);
+    }
+
+    private void ScheduleScrollStateRestore()
+    {
+        if (!IsLoaded) return;
+        _restoringScrollState = true;
+        if (_scrollRestorePending) return;
+        _scrollRestorePending = true;
+        Dispatcher.BeginInvoke(() =>
+        {
+            _scrollRestorePending = false;
+            RestoreVisibleScrollState();
+        }, DispatcherPriority.Loaded);
+    }
+
+    private void RestoreVisibleScrollState()
+    {
+        try
+        {
+            if (GalleryList.IsVisible)
+            {
+                var state = _viewStates.Get(ViewModel.PrimaryViewStateKey);
+                ViewModel.EnsureGalleryGroupsLoaded(state.MaterializedItemCount);
+                GalleryList.UpdateLayout();
+                FindVisualChild<ScrollViewer>(GalleryList)?.ScrollToVerticalOffset(state.VerticalOffset);
+            }
+
+            if (SidebarList.IsVisible)
+            {
+                SidebarList.UpdateLayout();
+                var state = _viewStates.Get(ViewModel.PrimaryViewStateKey);
+                FindVisualChild<ScrollViewer>(SidebarList)?.ScrollToVerticalOffset(state.VerticalOffset);
+            }
+
+            foreach (var list in FindVisualChildren<ListBox>(ViewTransitionHost)
+                         .Where(x => x.IsVisible
+                             && !ReferenceEquals(x, GalleryList)
+                             && !ReferenceEquals(x, SidebarList)
+                             && !ReferenceEquals(x, LyricsList)))
+            {
+                var state = _viewStates.Get(ViewModel.ContentViewStateKey);
+                list.UpdateLayout();
+                FindVisualChild<ScrollViewer>(list)?.ScrollToVerticalOffset(state.VerticalOffset);
+            }
+        }
+        finally { _restoringScrollState = false; }
+    }
+
+    private static IEnumerable<T> FindVisualChildren<T>(DependencyObject parent) where T : DependencyObject
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, index);
+            if (child is T result) yield return result;
+            foreach (var nested in FindVisualChildren<T>(child)) yield return nested;
+        }
     }
 
     private void GalleryArtwork_Loaded(object sender, RoutedEventArgs e)

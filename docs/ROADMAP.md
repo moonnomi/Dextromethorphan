@@ -61,7 +61,7 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 ### View virtualization and state changes
 
 - [x] **P0 VIEW-001** Replace the gallery `WrapPanel` with a virtualizing wrap panel; incremental loading alone is not virtualization. See [the artwork and virtualization result](performance/ARTWORK-VIRTUALIZATION-2026-07-25.md).
-- [ ] **P0 VIEW-002** Preserve the scroll position and selected item independently for every primary and collection tab.
+- [x] **P0 VIEW-002** Preserve the scroll position and selected item independently for every primary and collection tab. See [the navigation state retention result](performance/NAVIGATION-STATE-RETENTION-2026-07-28.md).
 - [ ] **P0 VIEW-003** Stop rebuilding or replacing view collections when switching to already-indexed tabs.
 - [ ] **P0 VIEW-004** Replace `ObservableCollection.Clear` plus per-track `Add` loops with range replacement or an immutable/paged view source.
 - [ ] **P0 VIEW-005** Avoid retaining a separate full track-array projection for every album, artist, genre, and folder; use lightweight group keys and lazy track queries/indexes.
