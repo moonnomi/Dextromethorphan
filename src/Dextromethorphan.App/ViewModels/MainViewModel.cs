@@ -32,6 +32,8 @@ public sealed class MainViewModel : ObservableObject
     private readonly Stack<NavigationEntry> _forwardHistory = new();
     private readonly Dictionary<string, CardSelection> _cardSelections = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _trackSelections = new(StringComparer.Ordinal);
+    private readonly PresentationCollectionCache<LibraryCardViewModel> _galleryViews = new();
+    private readonly PresentationCollectionCache<Track> _trackViews = new();
     private CancellationTokenSource? _searchCancellation;
     private CancellationTokenSource? _artworkCancellation;
     private CancellationTokenSource? _queueArtworkCancellation;
@@ -40,6 +42,9 @@ public sealed class MainViewModel : ObservableObject
     private IReadOnlyList<Track> _allTracks = [];
     private IReadOnlyList<LibraryCardViewModel> _activeGroups = [];
     private IReadOnlyList<LibraryCardViewModel> _sidebarCards = [];
+    private ObservableCollection<Track> _browseTracks = [];
+    private ObservableCollection<LibraryCardViewModel> _galleryGroups = [];
+    private PresentationCollection<LibraryCardViewModel>? _activeGalleryPresentation;
     private Track? _selectedTrack;
     private Track? _currentTrack;
     private LibraryCardViewModel? _selectedCard;
@@ -131,8 +136,8 @@ public sealed class MainViewModel : ObservableObject
         _systemMedia.CommandReceived += SystemMediaOnCommandReceived;
     }
 
-    public ObservableCollection<Track> BrowseTracks { get; } = [];
-    public ObservableCollection<LibraryCardViewModel> GalleryGroups { get; } = [];
+    public ObservableCollection<Track> BrowseTracks { get => _browseTracks; private set => Set(ref _browseTracks, value); }
+    public ObservableCollection<LibraryCardViewModel> GalleryGroups { get => _galleryGroups; private set => Set(ref _galleryGroups, value); }
     public IReadOnlyList<LibraryCardViewModel> ActiveGroups { get => _activeGroups; private set => Set(ref _activeGroups, value); }
     public IReadOnlyList<LibraryCardViewModel> SidebarCards { get => _sidebarCards; private set => Set(ref _sidebarCards, value); }
     public ObservableCollection<LibraryCardViewModel> Albums { get; } = [];
@@ -472,6 +477,9 @@ public sealed class MainViewModel : ObservableObject
                     ["playlists"] = playlistCards.Count
                 } : null);
             _allTracks = tracks;
+            _galleryViews.Clear();
+            _trackViews.Clear();
+            _activeGalleryPresentation = null;
             Replace(Albums, groups.Albums); Replace(Artists, groups.Artists); Replace(Genres, groups.Genres); Replace(Folders, groups.Folders); Replace(Playlists, playlistCards);
             StatusText = tracks.Count == 0 ? (_settings.Current.LibraryFolders.Count == 0 ? "Add a music folder to begin" : "No matching tracks") : $"{tracks.Count:N0} tracks · {groups.Albums.Count:N0} albums · {groups.Artists.Count:N0} artists";
             Raise(nameof(HasLibrary));
@@ -736,29 +744,39 @@ public sealed class MainViewModel : ObservableObject
 
     private void SetActiveGroups(IReadOnlyList<LibraryCardViewModel> groups)
     {
+        var presentation = _galleryViews.GetOrCreate(
+            PrimaryViewStateKey,
+            () => groups,
+            28,
+            out var cacheHit);
         using var scope = _diagnostics.Measure("view", "gallery-application",
-            _diagnostics.Enabled ? new Dictionary<string, object?> { ["groups"] = groups.Count } : null);
-        ActiveGroups = groups;
-        GalleryGroups.Clear();
-        foreach (var group in groups.Take(28)) GalleryGroups.Add(group);
+            _diagnostics.Enabled ? new Dictionary<string, object?>
+            {
+                ["groups"] = presentation.Source.Count,
+                ["materialized"] = presentation.Items.Count,
+                ["cacheHit"] = cacheHit
+            } : null);
+        _activeGalleryPresentation = presentation;
+        ActiveGroups = presentation.Source;
+        GalleryGroups = presentation.Items;
     }
 
     public void LoadMoreGalleryGroups()
     {
-        if (GalleryGroups.Count >= ActiveGroups.Count) return;
+        if (_activeGalleryPresentation is null || GalleryGroups.Count >= ActiveGroups.Count) return;
         using var scope = _diagnostics.Measure("view", "gallery-page-application",
             _diagnostics.Enabled ? new Dictionary<string, object?> { ["before"] = GalleryGroups.Count, ["total"] = ActiveGroups.Count } : null);
-        var end = Math.Min(GalleryGroups.Count + 28, ActiveGroups.Count);
-        for (var index = GalleryGroups.Count; index < end; index++) GalleryGroups.Add(ActiveGroups[index]);
+        PresentationCollectionCache<LibraryCardViewModel>.EnsureMaterialized(
+            _activeGalleryPresentation,
+            GalleryGroups.Count + 28);
         RestartActiveArtworkResolution();
     }
 
     public void EnsureGalleryGroupsLoaded(int count)
     {
-        var target = Math.Clamp(count, 0, ActiveGroups.Count);
-        if (target <= GalleryGroups.Count) return;
-        for (var index = GalleryGroups.Count; index < target; index++)
-            GalleryGroups.Add(ActiveGroups[index]);
+        if (_activeGalleryPresentation is null
+            || !PresentationCollectionCache<LibraryCardViewModel>.EnsureMaterialized(_activeGalleryPresentation, count))
+            return;
         RestartActiveArtworkResolution();
     }
 
@@ -771,7 +789,11 @@ public sealed class MainViewModel : ObservableObject
             : cards.FirstOrDefault(x => x.Kind == remembered.Kind && x.Key == remembered.Key);
         if (SelectedCard is not null) SelectedCard.IsSelected = true;
         SetContentViewStateKey(PrimaryViewStateKey);
-        BrowseTracks.Clear();
+        BrowseTracks = _trackViews.GetOrCreate(
+            PrimaryViewStateKey,
+            static () => Array.Empty<Track>(),
+            int.MaxValue,
+            out _).Items;
         SetSelectedTrackForView(null);
         Raise(nameof(HasBrowseTracks));
     }
@@ -785,11 +807,19 @@ public sealed class MainViewModel : ObservableObject
 
     private void SetBrowseTracks(IEnumerable<Track> tracks, string title, string subtitle, string contentStateKey)
     {
-        var materialized = tracks as IReadOnlyCollection<Track> ?? tracks.ToArray();
+        var presentation = _trackViews.GetOrCreate(
+            contentStateKey,
+            () => tracks as IReadOnlyList<Track> ?? tracks.ToArray(),
+            int.MaxValue,
+            out var cacheHit);
         using var scope = _diagnostics.Measure("view", "track-list-application",
-            _diagnostics.Enabled ? new Dictionary<string, object?> { ["tracks"] = materialized.Count } : null);
+            _diagnostics.Enabled ? new Dictionary<string, object?>
+            {
+                ["tracks"] = presentation.Source.Count,
+                ["cacheHit"] = cacheHit
+            } : null);
         SetContentViewStateKey(contentStateKey);
-        BrowseTracks.Clear(); foreach (var track in materialized) BrowseTracks.Add(track);
+        BrowseTracks = presentation.Items;
         SelectedGroupTitle = title; SelectedGroupSubtitle = subtitle;
         _trackSelections.TryGetValue(contentStateKey, out var selectedPath);
         SetSelectedTrackForView(
