@@ -32,6 +32,7 @@ public interface ILibraryRepository
 public interface IPlaylistRepository
 {
     Task<IReadOnlyList<Playlist>> GetAllAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<PlaylistSummary>> GetSummariesAsync(CancellationToken cancellationToken = default);
     Task<Playlist?> GetAsync(long playlistId, CancellationToken cancellationToken = default);
     Task<long> CreateManualAsync(string name, CancellationToken cancellationToken = default);
     Task<long> CreateSmartAsync(string name, SmartPlaylistDefinition rules, CancellationToken cancellationToken = default);

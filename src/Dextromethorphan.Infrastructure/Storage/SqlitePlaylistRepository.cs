@@ -20,6 +20,62 @@ public sealed class SqlitePlaylistRepository(SqliteLibraryRepository library) : 
         return result;
     }
 
+    public async Task<IReadOnlyList<PlaylistSummary>> GetSummariesAsync(CancellationToken cancellationToken = default)
+    {
+        var playlists = await GetAllAsync(cancellationToken);
+        if (playlists.Count == 0) return [];
+
+        var summaries = new Dictionary<long, PlaylistSummary>();
+        await using (var connection = await library.OpenAsync(cancellationToken))
+        await using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                SELECT t.*, p.id AS playlist_id, COUNT(pt.track_id) AS track_count
+                FROM playlists p
+                LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
+                LEFT JOIN tracks t ON t.id = (
+                    SELECT first.track_id
+                    FROM playlist_tracks first
+                    WHERE first.playlist_id = p.id
+                    ORDER BY first.position
+                    LIMIT 1
+                )
+                WHERE p.kind = 'manual'
+                GROUP BY p.id
+                """;
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var playlistId = reader.GetInt64(reader.GetOrdinal("playlist_id"));
+                var playlist = playlists.First(x => x.Id == playlistId);
+                var idOrdinal = reader.GetOrdinal("id");
+                var representative = reader.IsDBNull(idOrdinal) ? null : SqliteLibraryRepository.ReadTrack(reader);
+                summaries[playlistId] = new PlaylistSummary(
+                    playlist,
+                    checked((int)reader.GetInt64(reader.GetOrdinal("track_count"))),
+                    representative);
+            }
+        }
+
+        var smart = playlists.Where(x => x.Kind == PlaylistKind.Smart).ToArray();
+        if (smart.Length > 0)
+        {
+            var smartSummaries = new System.Collections.Concurrent.ConcurrentDictionary<long, PlaylistSummary>();
+            await Parallel.ForEachAsync(
+                smart,
+                new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = cancellationToken },
+                async (playlist, token) => smartSummaries[playlist.Id] = await GetSmartSummaryAsync(playlist, token));
+            foreach (var pair in smartSummaries)
+                summaries[pair.Key] = pair.Value;
+        }
+
+        return playlists
+            .Select(playlist => summaries.TryGetValue(playlist.Id, out var summary)
+                ? summary
+                : new PlaylistSummary(playlist, 0, null))
+            .ToArray();
+    }
+
     public async Task<Playlist?> GetAsync(long playlistId, CancellationToken cancellationToken = default)
     {
         await using var connection = await library.OpenAsync(cancellationToken);
@@ -122,6 +178,34 @@ public sealed class SqlitePlaylistRepository(SqliteLibraryRepository library) : 
             if (compiled.Limit is not null) command.Parameters.AddWithValue("$limit", compiled.Limit.Value);
         }
         return await SqliteLibraryRepository.ReadManyAsync(command, cancellationToken);
+    }
+
+    private async Task<PlaylistSummary> GetSmartSummaryAsync(Playlist playlist, CancellationToken cancellationToken)
+    {
+        var compiled = SmartPlaylistSqlCompiler.Compile(playlist.Rules ?? new SmartPlaylistDefinition(), DateTimeOffset.UtcNow);
+        await using var connection = await library.OpenAsync(cancellationToken);
+
+        await using var count = connection.CreateCommand();
+        count.CommandText =
+            $"SELECT COUNT(*) FROM (SELECT id FROM tracks WHERE {compiled.Where}" +
+            (compiled.Limit is null ? ")" : " LIMIT $limit)");
+        AddSmartParameters(count, compiled, includeLimit: true);
+        var trackCount = checked((int)Convert.ToInt64(await count.ExecuteScalarAsync(cancellationToken)));
+
+        await using var representative = connection.CreateCommand();
+        representative.CommandText = $"SELECT * FROM tracks WHERE {compiled.Where} ORDER BY {compiled.OrderBy} LIMIT 1";
+        AddSmartParameters(representative, compiled, includeLimit: false);
+        await using var reader = await representative.ExecuteReaderAsync(cancellationToken);
+        var track = await reader.ReadAsync(cancellationToken) ? SqliteLibraryRepository.ReadTrack(reader) : null;
+        return new PlaylistSummary(playlist, trackCount, track);
+    }
+
+    private static void AddSmartParameters(SqliteCommand command, SmartPlaylistSqlCompiler.Result compiled, bool includeLimit)
+    {
+        foreach (var (name, value) in compiled.Parameters)
+            command.Parameters.AddWithValue(name, value);
+        if (includeLimit && compiled.Limit is not null)
+            command.Parameters.AddWithValue("$limit", compiled.Limit.Value);
     }
 
     private async Task<long> CreateAsync(string name, PlaylistKind kind, string? rulesJson, CancellationToken cancellationToken)

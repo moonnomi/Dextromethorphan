@@ -81,6 +81,9 @@ internal sealed class DiagnosticPlaylistRepository(IPlaylistRepository inner, De
     public Task<IReadOnlyList<Playlist>> GetAllAsync(CancellationToken cancellationToken = default) =>
         MeasureCountAsync("playlist.get-all", () => inner.GetAllAsync(cancellationToken));
 
+    public Task<IReadOnlyList<PlaylistSummary>> GetSummariesAsync(CancellationToken cancellationToken = default) =>
+        MeasureCountAsync("playlist.get-summaries", () => inner.GetSummariesAsync(cancellationToken));
+
     public Task<Playlist?> GetAsync(long playlistId, CancellationToken cancellationToken = default) =>
         diagnostics.MeasureAsync("repository", "playlist.get", () => inner.GetAsync(playlistId, cancellationToken));
 

@@ -14,7 +14,6 @@ public sealed class LibraryCardViewModel : ObservableObject
     public string Detail { get; init; } = "";
     public long? PlaylistId { get; init; }
     public IReadOnlyList<int> TrackIndexes { get; init; } = [];
-    public IReadOnlyList<Track>? MaterializedTracks { get; init; }
     public required int TrackCount { get; init; }
     public Track? RepresentativeTrack { get; init; }
     public string Initial => string.IsNullOrWhiteSpace(Title) ? "?" : Title[..1].ToUpperInvariant();

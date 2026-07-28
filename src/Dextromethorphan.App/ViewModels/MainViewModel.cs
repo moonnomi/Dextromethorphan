@@ -34,6 +34,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly Dictionary<string, string> _trackSelections = new(StringComparer.Ordinal);
     private readonly PresentationCollectionCache<LibraryCardViewModel> _galleryViews = new();
     private readonly PresentationCollectionCache<Track> _trackViews = new();
+    private readonly ConcurrentDictionary<long, Lazy<Task<IReadOnlyList<Track>>>> _playlistTrackLoads = new();
     private CancellationTokenSource? _searchCancellation;
     private CancellationTokenSource? _artworkCancellation;
     private CancellationTokenSource? _queueArtworkCancellation;
@@ -479,6 +480,7 @@ public sealed class MainViewModel : ObservableObject
             _allTracks = tracks;
             _galleryViews.Clear();
             _trackViews.Clear();
+            _playlistTrackLoads.Clear();
             _activeGalleryPresentation = null;
             Replace(Albums, groups.Albums); Replace(Artists, groups.Artists); Replace(Genres, groups.Genres); Replace(Folders, groups.Folders); Replace(Playlists, playlistCards);
             StatusText = tracks.Count == 0 ? (_settings.Current.LibraryFolders.Count == 0 ? "Add a music folder to begin" : "No matching tracks") : $"{tracks.Count:N0} tracks · {groups.Albums.Count:N0} albums · {groups.Artists.Count:N0} artists";
@@ -529,15 +531,18 @@ public sealed class MainViewModel : ObservableObject
     private async Task<IReadOnlyList<LibraryCardViewModel>> BuildPlaylistCardsAsync(string query, CancellationToken cancellationToken)
     {
         var result = new List<LibraryCardViewModel>();
-        foreach (var playlist in await _playlists.GetAllAsync(cancellationToken))
+        foreach (var summary in await _playlists.GetSummariesAsync(cancellationToken))
         {
+            var playlist = summary.Playlist;
             if (!string.IsNullOrWhiteSpace(query) && !playlist.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase)) continue;
-            var tracks = await _playlists.GetTracksAsync(playlist.Id, cancellationToken);
             result.Add(new LibraryCardViewModel
             {
                 Kind = "Playlist", Key = playlist.Id.ToString(), PlaylistId = playlist.Id, Title = playlist.Name,
-                Subtitle = playlist.Kind == PlaylistKind.Smart ? "Smart playlist" : "Playlist", Detail = tracks.Count == 1 ? "1 track" : $"{tracks.Count:N0} tracks",
-                TrackCount = tracks.Count, MaterializedTracks = tracks, RepresentativeTrack = tracks.FirstOrDefault(), ArtworkPath = ExistingArtwork(tracks.FirstOrDefault())
+                Subtitle = playlist.Kind == PlaylistKind.Smart ? "Smart playlist" : "Playlist",
+                Detail = summary.TrackCount == 1 ? "1 track" : $"{summary.TrackCount:N0} tracks",
+                TrackCount = summary.TrackCount,
+                RepresentativeTrack = summary.RepresentativeTrack,
+                ArtworkPath = ExistingArtwork(summary.RepresentativeTrack)
             });
         }
         return result.OrderBy(x => x.Title, StringComparer.CurrentCultureIgnoreCase).ToArray();
@@ -701,7 +706,22 @@ public sealed class MainViewModel : ObservableObject
         card.IsSelected = true;
         if (rememberSelection)
             _cardSelections[CurrentView] = new CardSelection(card.Kind, card.Key);
-        SetBrowseTracks(GetCardTracks(card), card.Title, string.IsNullOrWhiteSpace(card.Detail) ? $"{card.Subtitle} · {card.CountText}" : $"{card.Detail} · {card.CountText}");
+        var subtitle = string.IsNullOrWhiteSpace(card.Detail) ? $"{card.Subtitle} · {card.CountText}" : $"{card.Detail} · {card.CountText}";
+        var tracks = TryGetCardTracks(card);
+        if (tracks is null)
+        {
+            SetContentViewStateKey(CollectionViewStateKey(CurrentView, card));
+            BrowseTracks = [];
+            SetSelectedTrackForView(null);
+            SelectedGroupTitle = card.Title;
+            SelectedGroupSubtitle = $"Loading {card.CountText}…";
+            Raise(nameof(HasBrowseTracks));
+            _ = LoadSelectedPlaylistAsync(card, CurrentView, subtitle);
+        }
+        else
+        {
+            SetBrowseTracks(tracks, card.Title, subtitle);
+        }
         if (openCollectionDetail && CurrentView is "Albums" or "Artists" or "Genres")
         {
             IsCollectionDetailOpen = true;
@@ -873,13 +893,56 @@ public sealed class MainViewModel : ObservableObject
     private static string CollectionViewStateKey(string view, LibraryCardViewModel card) =>
         $"collection:{view}:{card.Kind}:{card.Key}";
 
-    private IReadOnlyList<Track> GetCardTracks(LibraryCardViewModel card) =>
-        card.MaterializedTracks ?? new IndexedReadOnlyList<Track>(_allTracks, card.TrackIndexes);
+    private IReadOnlyList<Track>? TryGetCardTracks(LibraryCardViewModel card)
+    {
+        if (card.PlaylistId is not { } playlistId)
+            return new IndexedReadOnlyList<Track>(_allTracks, card.TrackIndexes);
+        if (!_playlistTrackLoads.TryGetValue(playlistId, out var load)
+            || !load.IsValueCreated
+            || !load.Value.IsCompletedSuccessfully)
+            return null;
+        return load.Value.Result;
+    }
+
+    private async Task<IReadOnlyList<Track>> GetCardTracksAsync(LibraryCardViewModel card)
+    {
+        if (card.PlaylistId is not { } playlistId)
+            return new IndexedReadOnlyList<Track>(_allTracks, card.TrackIndexes);
+        var load = _playlistTrackLoads.GetOrAdd(
+            playlistId,
+            id => new Lazy<Task<IReadOnlyList<Track>>>(
+                () => _playlists.GetTracksAsync(id, _lifetime.Token),
+                LazyThreadSafetyMode.ExecutionAndPublication));
+        try { return await load.Value; }
+        catch
+        {
+            _playlistTrackLoads.TryRemove(new KeyValuePair<long, Lazy<Task<IReadOnlyList<Track>>>>(playlistId, load));
+            throw;
+        }
+    }
+
+    private async Task LoadSelectedPlaylistAsync(LibraryCardViewModel card, string view, string subtitle)
+    {
+        try
+        {
+            var tracks = await GetCardTracksAsync(card);
+            RunOnUi(() =>
+            {
+                if (CurrentView != view || SelectedCard?.PlaylistId != card.PlaylistId) return;
+                var key = CollectionViewStateKey(view, card);
+                _trackViews.Remove(key);
+                SetBrowseTracks(tracks, card.Title, subtitle, key);
+            });
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception) { RunOnUi(() => StatusText = exception.Message); }
+    }
 
     private async Task PlayGroupAsync(LibraryCardViewModel? card)
     {
         if (card is null || card.TrackCount == 0) return;
-        var tracks = GetCardTracks(card);
+        var tracks = await GetCardTracksAsync(card);
+        if (tracks.Count == 0) return;
         SelectGroup(card);
         _queue.Replace(tracks, 0);
         await ChangeTrackAsync(tracks[0]);

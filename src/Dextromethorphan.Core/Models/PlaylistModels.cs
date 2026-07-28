@@ -48,6 +48,8 @@ public sealed record Playlist
     public DateTimeOffset UpdatedAt { get; init; }
 }
 
+public sealed record PlaylistSummary(Playlist Playlist, int TrackCount, Track? RepresentativeTrack);
+
 public sealed record ImportedPlaylist
 {
     public required string Name { get; init; }

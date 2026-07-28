@@ -39,6 +39,10 @@ public sealed class PerformanceFixtureTests : IDisposable
 
         var playlists = new SqlitePlaylistRepository(new SqliteLibraryRepository(new AppPaths(firstRoot)));
         Assert.Equal(20, (await playlists.GetAllAsync(cancellationToken)).Count);
+        var summaries = await playlists.GetSummariesAsync(cancellationToken);
+        Assert.Equal(20, summaries.Count);
+        Assert.All(summaries, summary => Assert.True(summary.TrackCount > 0));
+        Assert.All(summaries, summary => Assert.NotNull(summary.RepresentativeTrack));
         Assert.Equal(80, (await playlists.GetTracksAsync(1, cancellationToken)).Count);
     }
 

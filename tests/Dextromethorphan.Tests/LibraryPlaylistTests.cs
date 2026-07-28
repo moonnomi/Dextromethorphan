@@ -92,6 +92,13 @@ public sealed class LibraryPlaylistTests : IDisposable
         }, cancellationToken);
 
         Assert.Equal(["Charlie", "Alpha"], (await playlists.GetTracksAsync(smartId, cancellationToken)).Select(x => x.Title));
+        var summaries = await playlists.GetSummariesAsync(cancellationToken);
+        var manualSummary = summaries.Single(x => x.Playlist.Id == manualId);
+        var smartSummary = summaries.Single(x => x.Playlist.Id == smartId);
+        Assert.Equal(3, manualSummary.TrackCount);
+        Assert.Equal("Charlie", manualSummary.RepresentativeTrack?.Title);
+        Assert.Equal(2, smartSummary.TrackCount);
+        Assert.Equal("Charlie", smartSummary.RepresentativeTrack?.Title);
         await Assert.ThrowsAsync<InvalidOperationException>(() => playlists.AddTracksAsync(smartId, [beta.Id], cancellationToken));
         await playlists.UpdateSmartRulesAsync(smartId, new SmartPlaylistDefinition
         {

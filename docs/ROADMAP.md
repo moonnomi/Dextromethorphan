@@ -65,7 +65,7 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 - [x] **P0 VIEW-003** Stop rebuilding or replacing view collections when switching to already-indexed tabs. See [the presentation collection reuse result](performance/PRESENTATION-COLLECTION-REUSE-2026-07-28.md).
 - [x] **P0 VIEW-004** Replace `ObservableCollection.Clear` plus per-track `Add` loops with range replacement or an immutable/paged view source. See [the batched collection result](performance/BATCHED-COLLECTION-APPLICATION-2026-07-28.md).
 - [x] **P0 VIEW-005** Avoid retaining a separate full track-array projection for every album, artist, genre, and folder; use lightweight group keys and lazy track queries/indexes. See [the lightweight group index result](performance/LIGHTWEIGHT-GROUP-INDEXES-2026-07-28.md).
-- [ ] **P0 VIEW-006** Remove the playlist N+1 query pattern by loading playlist summaries and tracks in a bounded or joined operation.
+- [x] **P0 VIEW-006** Remove the playlist N+1 query pattern by loading playlist summaries and tracks in a bounded or joined operation. See [the playlist query result](performance/PLAYLIST-QUERY-BOUNDS-2026-07-28.md).
 - [ ] **P0 VIEW-007** Ensure hidden views do not keep expensive effects, bindings, and image sources alive.
 - [ ] **P1 VIEW-008** Page or window the Songs view instead of loading every database row into presentation state.
 - [ ] **P1 VIEW-009** Cache stable grouping/sorting indexes and update only affected groups after file-watcher changes.

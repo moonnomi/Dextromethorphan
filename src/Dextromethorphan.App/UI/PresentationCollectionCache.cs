@@ -37,6 +37,8 @@ internal sealed class PresentationCollectionCache<T>
         return true;
     }
 
+    public void Remove(string key) => _entries.Remove(key);
+
     public void Clear() => _entries.Clear();
 }
 
