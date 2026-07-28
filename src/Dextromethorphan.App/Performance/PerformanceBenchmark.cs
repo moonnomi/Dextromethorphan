@@ -122,6 +122,7 @@ internal sealed record ResourcePerformanceMetrics(
     long WorkingSetAfterStartupBytes,
     long WorkingSetAfterNavigationBytes,
     long WorkingSetAfterScrollBytes,
+    long SettledMaximumWorkingSetBytes,
     long PeakWorkingSetBytes,
     long ManagedHeapBytes,
     int Gen0Collections,
@@ -268,6 +269,9 @@ internal static class PerformanceBenchmarkRunner
                 startupWorkingSet,
                 navigationWorkingSet,
                 scrollWorkingSet,
+                Math.Max(
+                    startupWorkingSet,
+                    Math.Max(navigationWorkingSet, scrollWorkingSet)),
                 scrollPeakWorkingSet,
                 GC.GetTotalMemory(false),
                 GC.CollectionCount(0),

@@ -100,7 +100,7 @@ Add-MaximumCheck 'Album scroll worst frame' ([double]$summaryData.scrollMaximumF
 Add-MaximumCheck 'Album scroll frames over 50 ms' ([double]$summaryData.scrollFramesOver50Ms) ([double]$gateData.scrollFramesOver50Maximum) 'frames'
 Add-MaximumCheck 'Idle CPU' ([double]$summaryData.idleCpuMedianPercent) ([double]$gateData.idleCpuMaximumPercent) '%' $true
 if ($tracks -eq 50000) {
-    Add-MaximumCheck 'Peak working set at 50k' ([double]$summaryData.maximumWorkingSetBytes) ([double]$gateData.workingSet50kMaximumBytes) 'bytes' $true
+    Add-MaximumCheck 'Settled working set at 50k' ([double]$summaryData.maximumWorkingSetBytes) ([double]$gateData.workingSet50kMaximumBytes) 'bytes' $true
 }
 
 $failed = @($checks | Where-Object { -not $_.Passed })

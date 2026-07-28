@@ -6,6 +6,8 @@ param(
     [int]$WarmRuns = 3,
     [ValidateRange(100, 10000)]
     [int]$ScanFiles = 1000,
+    [ValidateRange(0, 30)]
+    [int]$WorkloadCooldownSeconds = 5,
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release',
     [string]$Fixture,
@@ -84,6 +86,10 @@ try {
         $report = Get-Content -LiteralPath $reportPath -Raw | ConvertFrom-Json
         if ($report.error) { throw "Benchmark failed: $($report.error)" }
         $reports += $report
+        if ($index -eq 0 -and $WarmRuns -gt 0 -and $WorkloadCooldownSeconds -gt 0) {
+            Write-Host "Allowing generated scan and filesystem activity to settle for $WorkloadCooldownSeconds seconds."
+            Start-Sleep -Seconds $WorkloadCooldownSeconds
+        }
     }
 }
 finally {
@@ -125,7 +131,14 @@ $summary = [ordered]@{
     scrollP95FrameMedianMs = Get-Median @($reports | ForEach-Object { [double]$_.albumScroll.p95Ms })
     scrollMaximumFrameMs = [math]::Round(($reports | ForEach-Object { $_.albumScroll.maximumMs } | Measure-Object -Maximum).Maximum, 3)
     scrollFramesOver50Ms = ($reports | ForEach-Object { $_.albumScroll.over50Ms } | Measure-Object -Sum).Sum
-    maximumWorkingSetBytes = ($reports | ForEach-Object { $_.resources.peakWorkingSetBytes } | Measure-Object -Maximum).Maximum
+    maximumWorkingSetBytes = ($reports | ForEach-Object {
+        if ($null -ne $_.resources.settledMaximumWorkingSetBytes) {
+            $_.resources.settledMaximumWorkingSetBytes
+        } else {
+            $_.resources.peakWorkingSetBytes
+        }
+    } | Measure-Object -Maximum).Maximum
+    lifetimePeakWorkingSetBytes = ($reports | ForEach-Object { $_.resources.peakWorkingSetBytes } | Measure-Object -Maximum).Maximum
     idleCpuMedianPercent = Get-Median @($reports | ForEach-Object { [double]$_.cpu.idlePercent })
     playbackCpuPercent = $cold.cpu.playbackPercent
     playbackStatus = $cold.cpu.playbackStatus
@@ -168,7 +181,7 @@ Captured: $($summary.capturedAt)
 | Album scroll p95 frame, median | $($summary.scrollP95FrameMedianMs) ms |
 | Album scroll worst frame | $($summary.scrollMaximumFrameMs) ms |
 | Album scroll frames over 50 ms | $($summary.scrollFramesOver50Ms) |
-| Peak working set | $workingSetMb MB |
+| Maximum settled-phase working set | $workingSetMb MB |
 | Idle CPU, median | $($summary.idleCpuMedianPercent)% |
 | Playback CPU | $($summary.playbackCpuPercent)% |
 | Scan throughput | $($summary.scanFilesPerSecond) files/s |
