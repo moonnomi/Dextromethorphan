@@ -3,6 +3,7 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using Dextromethorphan.App.Diagnostics;
 using Dextromethorphan.App.ViewModels;
@@ -16,7 +17,7 @@ public sealed class ArtworkImageService : IDisposable
     private readonly object _cacheGate = new();
     private readonly Dictionary<string, CacheEntry> _cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly LinkedList<string> _lru = [];
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTimeOffset> _failures = new(StringComparer.OrdinalIgnoreCase);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, ArtworkFailureEntry> _failures = new(StringComparer.OrdinalIgnoreCase);
     private readonly PriorityWorkScheduler<BitmapSource?> _scheduler;
     private readonly DeveloperDiagnostics _diagnostics;
     private readonly ArtworkPropertyUpdateBatcher _artworkUpdates;
@@ -61,7 +62,8 @@ public sealed class ArtworkImageService : IDisposable
             return cached;
         }
         Interlocked.Increment(ref _cacheMisses);
-        if (_failures.TryGetValue(key, out var failedAt) && failedAt >= DateTimeOffset.UtcNow.AddMinutes(-5))
+        if (_failures.TryGetValue(key, out var failure)
+            && (failure.Kind == ArtworkFailureKind.Permanent || failure.RetryAt > DateTimeOffset.UtcNow))
             return null;
 
         var before = _scheduler.GetMetrics();
@@ -82,6 +84,22 @@ public sealed class ArtworkImageService : IDisposable
     internal void EnqueuePropertyUpdate(Action update, CancellationToken cancellationToken) =>
         _artworkUpdates.Enqueue(update, cancellationToken);
 
+    internal ArtworkFailureSnapshot GetFailure(string path, int decodePixelWidth)
+    {
+        var size = ArtworkThumbnailVariant.ForRequestedWidth(
+            Math.Clamp(decodePixelWidth, 32, 1200)).PixelWidth;
+        var key = $"{Path.GetFullPath(path)}|{size}";
+        if (!_failures.TryGetValue(key, out var failure))
+            return ArtworkFailureSnapshot.None;
+        return new ArtworkFailureSnapshot(
+            failure.Kind,
+            failure.Reason,
+            failure.Attempts,
+            failure.Kind == ArtworkFailureKind.Permanent
+                ? TimeSpan.Zero
+                : failure.RetryAt - DateTimeOffset.UtcNow);
+    }
+
     private BitmapSource? Decode(
         string key,
         string path,
@@ -99,14 +117,17 @@ public sealed class ArtworkImageService : IDisposable
             if (prepared is { SourceRejected: true })
             {
                 Interlocked.Increment(ref _decodeFailures);
-                _failures[key] = DateTimeOffset.UtcNow;
+                RecordFailure(
+                    key,
+                    ArtworkFailureKind.Permanent,
+                    prepared.Value.Rejection.ToString());
                 return null;
             }
             var decodePath = prepared?.Path ?? path;
             if (!File.Exists(decodePath))
             {
                 Interlocked.Increment(ref _decodeFailures);
-                _failures[key] = DateTimeOffset.UtcNow;
+                RecordFailure(key, ArtworkFailureKind.Transient, "SourceMissing");
                 return null;
             }
             cancellationToken.ThrowIfCancellationRequested();
@@ -127,7 +148,10 @@ public sealed class ArtworkImageService : IDisposable
         {
             error = exception;
             Interlocked.Increment(ref _decodeFailures);
-            _failures[key] = DateTimeOffset.UtcNow;
+            RecordFailure(
+                key,
+                ArtworkFailurePolicy.Classify(exception),
+                exception.GetType().Name);
             _diagnostics.Error("artwork", "thumbnail.decode", exception, Data(path, variantSize));
             return null;
         }
@@ -215,6 +239,18 @@ public sealed class ArtworkImageService : IDisposable
         }
     }
 
+    private void RecordFailure(string key, ArtworkFailureKind kind, string reason)
+    {
+        _failures.AddOrUpdate(
+            key,
+            _ => ArtworkFailureEntry.Create(kind, reason, 1),
+            (_, previous) =>
+            {
+                var attempts = previous.Kind == kind ? previous.Attempts + 1 : 1;
+                return ArtworkFailureEntry.Create(kind, reason, attempts);
+            });
+    }
+
     private static Dictionary<string, object?> Data(string path, int size) => new()
     {
         ["size"] = size,
@@ -222,6 +258,62 @@ public sealed class ArtworkImageService : IDisposable
     };
 
     private sealed record CacheEntry(BitmapSource Value, long Bytes, LinkedListNode<string> Node);
+    private sealed record ArtworkFailureEntry(
+        ArtworkFailureKind Kind,
+        string Reason,
+        int Attempts,
+        DateTimeOffset RetryAt)
+    {
+        internal static ArtworkFailureEntry Create(
+            ArtworkFailureKind kind,
+            string reason,
+            int attempts) =>
+            new(
+                kind,
+                reason,
+                attempts,
+                kind == ArtworkFailureKind.Permanent
+                    ? DateTimeOffset.MaxValue
+                    : DateTimeOffset.UtcNow + ArtworkFailurePolicy.RetryDelay(attempts));
+    }
+}
+
+internal enum ArtworkFailureKind
+{
+    None,
+    Transient,
+    Permanent
+}
+
+internal readonly record struct ArtworkFailureSnapshot(
+    ArtworkFailureKind Kind,
+    string Reason,
+    int Attempts,
+    TimeSpan RetryAfter)
+{
+    internal static ArtworkFailureSnapshot None => new(
+        ArtworkFailureKind.None,
+        "",
+        0,
+        TimeSpan.Zero);
+}
+
+internal static class ArtworkFailurePolicy
+{
+    internal const int MaximumAutomaticAttempts = 3;
+
+    internal static ArtworkFailureKind Classify(Exception exception) =>
+        exception is IOException or UnauthorizedAccessException
+            ? ArtworkFailureKind.Transient
+            : ArtworkFailureKind.Permanent;
+
+    internal static TimeSpan RetryDelay(int attempts) =>
+        attempts switch
+        {
+            <= 1 => TimeSpan.FromMilliseconds(400),
+            2 => TimeSpan.FromMilliseconds(1_500),
+            _ => TimeSpan.FromSeconds(5)
+        };
 }
 
 internal readonly record struct ArtworkRuntimeMetrics(
@@ -256,6 +348,16 @@ internal readonly record struct ArtworkRuntimeMetrics(
 public static class AsyncArtwork
 {
     private static readonly ConditionalWeakTable<Image, RequestState> States = new();
+    private static readonly DependencyPropertyKey StatePropertyKey = DependencyProperty.RegisterAttachedReadOnly(
+        "State",
+        typeof(ArtworkLoadState),
+        typeof(AsyncArtwork),
+        new PropertyMetadata(ArtworkLoadState.Empty));
+    private static readonly DependencyPropertyKey FailureReasonPropertyKey = DependencyProperty.RegisterAttachedReadOnly(
+        "FailureReason",
+        typeof(string),
+        typeof(AsyncArtwork),
+        new PropertyMetadata(""));
 
     public static readonly DependencyProperty PathProperty = DependencyProperty.RegisterAttached(
         "Path", typeof(string), typeof(AsyncArtwork), new PropertyMetadata(null, OnRequestChanged));
@@ -267,6 +369,9 @@ public static class AsyncArtwork
         "Priority", typeof(ArtworkRequestPriority), typeof(AsyncArtwork),
         new PropertyMetadata(ArtworkRequestPriority.Deferred, OnRequestChanged));
 
+    public static readonly DependencyProperty StateProperty = StatePropertyKey.DependencyProperty;
+    public static readonly DependencyProperty FailureReasonProperty = FailureReasonPropertyKey.DependencyProperty;
+
     public static readonly RoutedEvent ArtworkLoadedEvent = EventManager.RegisterRoutedEvent(
         "ArtworkLoaded", RoutingStrategy.Bubble, typeof(RoutedEventHandler), typeof(AsyncArtwork));
 
@@ -276,6 +381,8 @@ public static class AsyncArtwork
     public static void SetDecodePixelWidth(DependencyObject element, int value) => element.SetValue(DecodePixelWidthProperty, value);
     public static ArtworkRequestPriority GetPriority(DependencyObject element) => (ArtworkRequestPriority)element.GetValue(PriorityProperty);
     public static void SetPriority(DependencyObject element, ArtworkRequestPriority value) => element.SetValue(PriorityProperty, value);
+    public static ArtworkLoadState GetState(DependencyObject element) => (ArtworkLoadState)element.GetValue(StateProperty);
+    public static string GetFailureReason(DependencyObject element) => (string)element.GetValue(FailureReasonProperty);
     public static void AddArtworkLoadedHandler(DependencyObject element, RoutedEventHandler handler) => ((UIElement)element).AddHandler(ArtworkLoadedEvent, handler);
     public static void RemoveArtworkLoadedHandler(DependencyObject element, RoutedEventHandler handler) => ((UIElement)element).RemoveHandler(ArtworkLoadedEvent, handler);
 
@@ -317,20 +424,30 @@ public static class AsyncArtwork
             _cancellation?.Cancel();
             _cancellation?.Dispose();
             _cancellation = null;
-            if (clearSource) image.Source = null;
+            if (clearSource)
+            {
+                image.BeginAnimation(UIElement.OpacityProperty, null);
+                image.Source = null;
+                image.Opacity = 0;
+                SetVisualState(ArtworkLoadState.Empty);
+            }
         }
 
         public void Restart()
         {
+            var version = ++_version;
             _cancellation?.Cancel();
             _cancellation?.Dispose();
             _cancellation = null;
+            image.BeginAnimation(UIElement.OpacityProperty, null);
             image.Source = null;
+            image.Opacity = 0;
+            SetVisualState(ArtworkLoadState.Empty);
             var path = GetPath(image);
             if (!image.IsLoaded || !image.IsVisible || string.IsNullOrWhiteSpace(path) || ArtworkImageService.Current is null) return;
             var source = new CancellationTokenSource();
             _cancellation = source;
-            var version = ++_version;
+            SetVisualState(ArtworkLoadState.Loading);
             _ = LoadAsync(
                 path,
                 Math.Clamp(GetDecodePixelWidth(image), 32, 1200),
@@ -350,18 +467,92 @@ public static class AsyncArtwork
             {
                 var service = ArtworkImageService.Current;
                 if (service is null) return;
-                var bitmap = await service.GetAsync(path, size, priority, cancellationToken).ConfigureAwait(false);
-                if (bitmap is null || cancellationToken.IsCancellationRequested) return;
-                service.EnqueuePropertyUpdate(
-                    () =>
+                for (var attempt = 1; attempt <= ArtworkFailurePolicy.MaximumAutomaticAttempts; attempt++)
+                {
+                    var bitmap = await service.GetAsync(path, size, priority, cancellationToken).ConfigureAwait(false);
+                    if (cancellationToken.IsCancellationRequested) return;
+                    if (bitmap is not null)
                     {
-                        if (version != _version || !image.IsLoaded || !image.IsVisible) return;
-                        image.Source = bitmap;
-                        image.RaiseEvent(new RoutedEventArgs(ArtworkLoadedEvent, image));
-                    },
-                    cancellationToken);
+                        service.EnqueuePropertyUpdate(
+                            () =>
+                            {
+                                if (version != _version || !image.IsLoaded || !image.IsVisible) return;
+                                image.Source = bitmap;
+                                SetVisualState(ArtworkLoadState.Loaded);
+                                Reveal();
+                                image.RaiseEvent(new RoutedEventArgs(ArtworkLoadedEvent, image));
+                            },
+                            cancellationToken);
+                        return;
+                    }
+
+                    var failure = service.GetFailure(path, size);
+                    if (failure.Kind == ArtworkFailureKind.Transient
+                        && attempt < ArtworkFailurePolicy.MaximumAutomaticAttempts)
+                    {
+                        service.EnqueuePropertyUpdate(
+                            () =>
+                            {
+                                if (version != _version || !image.IsLoaded || !image.IsVisible) return;
+                                SetVisualState(ArtworkLoadState.Retrying, failure.Reason);
+                            },
+                            cancellationToken);
+                        var delay = failure.RetryAfter <= TimeSpan.Zero
+                            ? ArtworkFailurePolicy.RetryDelay(attempt)
+                            : failure.RetryAfter;
+                        await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+                        continue;
+                    }
+
+                    var state = failure.Kind == ArtworkFailureKind.Permanent
+                        ? ArtworkLoadState.FailedPermanent
+                        : ArtworkLoadState.FailedTransient;
+                    service.EnqueuePropertyUpdate(
+                        () =>
+                        {
+                            if (version != _version || !image.IsLoaded || !image.IsVisible) return;
+                            SetVisualState(state, failure.Reason);
+                        },
+                        cancellationToken);
+                    return;
+                }
             }
             catch (OperationCanceledException) { }
         }
+
+        private void SetVisualState(ArtworkLoadState state, string reason = "")
+        {
+            image.SetValue(StatePropertyKey, state);
+            image.SetValue(FailureReasonPropertyKey, reason);
+        }
+
+        private void Reveal()
+        {
+            image.BeginAnimation(UIElement.OpacityProperty, null);
+            image.Opacity = 1;
+            if (!SystemParameters.ClientAreaAnimation
+                || Window.GetWindow(image)?.DataContext is MainViewModel { AnimationsEnabled: false })
+                return;
+
+            var animation = new DoubleAnimation(
+                0,
+                1,
+                new Duration(TimeSpan.FromMilliseconds(160)))
+            {
+                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
+                FillBehavior = FillBehavior.Stop
+            };
+            image.BeginAnimation(UIElement.OpacityProperty, animation, HandoffBehavior.SnapshotAndReplace);
+        }
     }
+}
+
+public enum ArtworkLoadState
+{
+    Empty,
+    Loading,
+    Retrying,
+    Loaded,
+    FailedTransient,
+    FailedPermanent
 }
