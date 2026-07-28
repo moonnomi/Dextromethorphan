@@ -41,6 +41,7 @@ public partial class MainWindow : Window
     private bool _scrollRestorePending;
     private bool _restoringScrollState;
     private CancellationTokenSource? _galleryPageCancellation;
+    private CancellationTokenSource? _sidebarPageCancellation;
     private CancellationTokenSource? _trackPageCancellation;
     private int _viewTransitionAnimationVersion;
 
@@ -381,7 +382,7 @@ public partial class MainWindow : Window
             _galleryPageCancellation?.Cancel();
             return;
         }
-        SchedulePageLoad(GalleryList, true);
+        SchedulePageLoad(GalleryList, PageTarget.Gallery);
     }
 
     private void GalleryList_Loaded(object sender, RoutedEventArgs e) => ScheduleScrollStateRestore();
@@ -391,7 +392,11 @@ public partial class MainWindow : Window
     private void SidebarList_ScrollChanged(object sender, ScrollChangedEventArgs e)
     {
         if (!_restoringScrollState && SidebarList.IsVisible && e.OriginalSource is ScrollViewer)
-            _viewStates.Capture(ViewModel.PrimaryViewStateKey, e.VerticalOffset);
+            _viewStates.Capture(ViewModel.PrimaryViewStateKey, e.VerticalOffset, ViewModel.SidebarCards.Count);
+        if (e.ExtentHeight > 0 && e.VerticalOffset + e.ViewportHeight >= e.ExtentHeight - 260)
+            SchedulePageLoad(SidebarList, PageTarget.Sidebar);
+        else
+            _sidebarPageCancellation?.Cancel();
     }
 
     private void TrackList_Loaded(object sender, RoutedEventArgs e) => ScheduleScrollStateRestore();
@@ -401,23 +406,32 @@ public partial class MainWindow : Window
         if (_restoringScrollState || sender is not ListBox list || !list.IsVisible || e.OriginalSource is not ScrollViewer) return;
         _viewStates.Capture(ViewModel.ContentViewStateKey, e.VerticalOffset, ViewModel.BrowseTracks.Count);
         if (e.ExtentHeight > 0 && e.VerticalOffset + e.ViewportHeight >= e.ExtentHeight - 360)
-            SchedulePageLoad(list, false);
+            SchedulePageLoad(list, PageTarget.Tracks);
         else
             _trackPageCancellation?.Cancel();
     }
 
-    private void SchedulePageLoad(ListBox list, bool gallery)
+    private void SchedulePageLoad(ListBox list, PageTarget target)
     {
-        var previous = gallery ? _galleryPageCancellation : _trackPageCancellation;
+        var previous = target switch
+        {
+            PageTarget.Gallery => _galleryPageCancellation,
+            PageTarget.Sidebar => _sidebarPageCancellation,
+            _ => _trackPageCancellation
+        };
         previous?.Cancel();
         previous?.Dispose();
         var cancellation = new CancellationTokenSource();
-        if (gallery) _galleryPageCancellation = cancellation;
-        else _trackPageCancellation = cancellation;
-        _ = LoadPageAfterScrollIdleAsync(list, gallery, cancellation.Token);
+        switch (target)
+        {
+            case PageTarget.Gallery: _galleryPageCancellation = cancellation; break;
+            case PageTarget.Sidebar: _sidebarPageCancellation = cancellation; break;
+            default: _trackPageCancellation = cancellation; break;
+        }
+        _ = LoadPageAfterScrollIdleAsync(list, target, cancellation.Token);
     }
 
-    private async Task LoadPageAfterScrollIdleAsync(ListBox list, bool gallery, CancellationToken cancellationToken)
+    private async Task LoadPageAfterScrollIdleAsync(ListBox list, PageTarget target, CancellationToken cancellationToken)
     {
         try
         {
@@ -428,8 +442,12 @@ public partial class MainWindow : Window
                 cancellationToken.ThrowIfCancellationRequested();
             }
             if (!list.IsVisible || list.IsMouseCaptureWithin || SmoothScrollBehavior.IsAnimating(list)) return;
-            if (gallery) ViewModel.LoadMoreGalleryGroups();
-            else ViewModel.LoadMoreBrowseTracks();
+            switch (target)
+            {
+                case PageTarget.Gallery: ViewModel.LoadMoreGalleryGroups(); break;
+                case PageTarget.Sidebar: ViewModel.LoadMoreSidebarCards(); break;
+                default: ViewModel.LoadMoreBrowseTracks(); break;
+            }
         }
         catch (OperationCanceledException) { }
     }
@@ -461,8 +479,9 @@ public partial class MainWindow : Window
 
             if (SidebarList.IsVisible)
             {
-                SidebarList.UpdateLayout();
                 var state = _viewStates.Get(ViewModel.PrimaryViewStateKey);
+                ViewModel.EnsureSidebarCardsLoaded(state.MaterializedItemCount);
+                SidebarList.UpdateLayout();
                 FindVisualChild<ScrollViewer>(SidebarList)?.ScrollToVerticalOffset(state.VerticalOffset);
             }
 
@@ -980,7 +999,16 @@ public partial class MainWindow : Window
     {
         _galleryPageCancellation?.Cancel();
         _galleryPageCancellation?.Dispose();
+        _sidebarPageCancellation?.Cancel();
+        _sidebarPageCancellation?.Dispose();
         _trackPageCancellation?.Cancel();
         _trackPageCancellation?.Dispose();
+    }
+
+    private enum PageTarget
+    {
+        Gallery,
+        Sidebar,
+        Tracks
     }
 }

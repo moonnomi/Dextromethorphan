@@ -33,6 +33,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly Dictionary<string, CardSelection> _cardSelections = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _trackSelections = new(StringComparer.Ordinal);
     private readonly PresentationCollectionCache<LibraryCardViewModel> _galleryViews = new();
+    private readonly PresentationCollectionCache<LibraryCardViewModel> _sidebarViews = new();
     private readonly PresentationCollectionCache<Track> _trackViews = new();
     private readonly ConcurrentDictionary<long, Lazy<Task<IReadOnlyList<Track>>>> _playlistTrackLoads = new();
     private CancellationTokenSource? _searchCancellation;
@@ -47,6 +48,7 @@ public sealed class MainViewModel : ObservableObject
     private ObservableCollection<Track> _browseTracks = [];
     private ObservableCollection<LibraryCardViewModel> _galleryGroups = [];
     private PresentationCollection<LibraryCardViewModel>? _activeGalleryPresentation;
+    private PresentationCollection<LibraryCardViewModel>? _activeSidebarPresentation;
     private PresentationCollection<Track>? _activeTrackPresentation;
     private Track? _selectedTrack;
     private Track? _currentTrack;
@@ -482,9 +484,11 @@ public sealed class MainViewModel : ObservableObject
                 } : null);
             _allTracks = tracks;
             _galleryViews.Clear();
+            _sidebarViews.Clear();
             _trackViews.Clear();
             _playlistTrackLoads.Clear();
             _activeGalleryPresentation = null;
+            _activeSidebarPresentation = null;
             _activeTrackPresentation = null;
             Replace(Albums, groups.Albums); Replace(Artists, groups.Artists); Replace(Genres, groups.Genres); Replace(Folders, groups.Folders); Replace(Playlists, playlistCards);
             StatusText = tracks.Count == 0 ? (_settings.Current.LibraryFolders.Count == 0 ? "Add a music folder to begin" : "No matching tracks") : $"{tracks.Count:N0} tracks · {groups.Albums.Count:N0} albums · {groups.Artists.Count:N0} artists";
@@ -668,8 +672,8 @@ public sealed class MainViewModel : ObservableObject
             case "Albums": ViewSubtitle = $"{Albums.Count:N0} albums in your library"; SetActiveGroups(Albums); RestoreGallerySelection(Albums); break;
             case "Artists": ViewSubtitle = $"{Artists.Count:N0} artists in your library"; SetActiveGroups(Artists); RestoreGallerySelection(Artists); break;
             case "Genres": ViewSubtitle = $"{Genres.Count:N0} genres in your library"; SetActiveGroups(Genres); RestoreGallerySelection(Genres); break;
-            case "Folders": ViewSubtitle = $"{Folders.Count:N0} folders across {_settings.Current.LibraryFolders.Count:N0} sources"; SidebarCards = Folders; SelectDefault(SidebarCards, resetSelection, selectFirst: true); break;
-            case "Playlists": ViewSubtitle = $"{Playlists.Count:N0} saved and smart playlists"; SidebarCards = Playlists; SelectDefault(SidebarCards, resetSelection, selectFirst: false); break;
+            case "Folders": ViewSubtitle = $"{Folders.Count:N0} folders across {_settings.Current.LibraryFolders.Count:N0} sources"; SetSidebarGroups(Folders); SelectDefault(Folders, resetSelection, selectFirst: true); break;
+            case "Playlists": ViewSubtitle = $"{Playlists.Count:N0} saved and smart playlists"; SetSidebarGroups(Playlists); SelectDefault(Playlists, resetSelection, selectFirst: false); break;
             case "Favorites":
                 ViewSubtitle = "Tracks you have marked as loved";
                 SetBrowseTracks(_allTracks.Where(x => x.IsLoved).OrderBy(x => x.Artist).ThenBy(x => x.Album).ThenBy(x => x.TrackNumber), "Favorites", $"{_allTracks.Count(x => x.IsLoved):N0} loved tracks", PrimaryViewStateKey);
@@ -846,6 +850,44 @@ public sealed class MainViewModel : ObservableObject
     {
         if (_activeGalleryPresentation is null
             || !PresentationCollectionCache<LibraryCardViewModel>.EnsureMaterialized(_activeGalleryPresentation, count))
+            return;
+        RestartActiveArtworkResolution();
+    }
+
+    private void SetSidebarGroups(IReadOnlyList<LibraryCardViewModel> groups)
+    {
+        var presentation = _sidebarViews.GetOrCreate(
+            PrimaryViewStateKey,
+            () => groups,
+            80,
+            out var cacheHit);
+        using var scope = _diagnostics.Measure("view", "sidebar-application",
+            _diagnostics.Enabled ? new Dictionary<string, object?>
+            {
+                ["groups"] = presentation.Source.Count,
+                ["materialized"] = presentation.Items.Count,
+                ["cacheHit"] = cacheHit
+            } : null);
+        _activeSidebarPresentation = presentation;
+        SidebarCards = presentation.Items;
+    }
+
+    public void LoadMoreSidebarCards()
+    {
+        if (_activeSidebarPresentation is null
+            || !PresentationCollectionCache<LibraryCardViewModel>.EnsureMaterialized(
+                _activeSidebarPresentation,
+                SidebarCards.Count + 80))
+            return;
+        RestartActiveArtworkResolution();
+    }
+
+    public void EnsureSidebarCardsLoaded(int count)
+    {
+        if (_activeSidebarPresentation is null
+            || !PresentationCollectionCache<LibraryCardViewModel>.EnsureMaterialized(
+                _activeSidebarPresentation,
+                count))
             return;
         RestartActiveArtworkResolution();
     }
