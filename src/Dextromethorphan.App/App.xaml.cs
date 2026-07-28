@@ -26,6 +26,7 @@ public partial class App : Application
         {
             services.AddSingleton<DeveloperDiagnostics>();
             services.AddSingleton<ArtworkPropertyUpdateBatcher>();
+            services.AddSingleton<PersistentArtworkThumbnailStore>();
             services.AddSingleton<ArtworkImageService>();
             services.AddSingleton<PerformanceOverlayViewModel>();
             services.AddSingleton<AppPaths>();

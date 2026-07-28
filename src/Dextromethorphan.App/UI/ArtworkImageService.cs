@@ -20,6 +20,7 @@ public sealed class ArtworkImageService : IDisposable
     private readonly PriorityWorkScheduler<BitmapSource?> _scheduler;
     private readonly DeveloperDiagnostics _diagnostics;
     private readonly ArtworkPropertyUpdateBatcher _artworkUpdates;
+    private readonly PersistentArtworkThumbnailStore _persistentThumbnails;
     private long _cacheBytes;
     private long _requests;
     private long _cacheHits;
@@ -29,10 +30,12 @@ public sealed class ArtworkImageService : IDisposable
 
     public ArtworkImageService(
         DeveloperDiagnostics diagnostics,
-        ArtworkPropertyUpdateBatcher artworkUpdates)
+        ArtworkPropertyUpdateBatcher artworkUpdates,
+        PersistentArtworkThumbnailStore persistentThumbnails)
     {
         _diagnostics = diagnostics;
         _artworkUpdates = artworkUpdates;
+        _persistentThumbnails = persistentThumbnails;
         _scheduler = new PriorityWorkScheduler<BitmapSource?>(DecoderWorkers);
         Current = this;
     }
@@ -47,7 +50,8 @@ public sealed class ArtworkImageService : IDisposable
     {
         if (string.IsNullOrWhiteSpace(path)) return null;
         Interlocked.Increment(ref _requests);
-        var size = Math.Clamp(decodePixelWidth, 32, 1200);
+        var requestedSize = Math.Clamp(decodePixelWidth, 32, 1200);
+        var size = ArtworkThumbnailVariant.ForRequestedWidth(requestedSize).PixelWidth;
         var key = $"{Path.GetFullPath(path)}|{size}";
         if (TryGet(key, out var cached))
         {
@@ -64,7 +68,7 @@ public sealed class ArtworkImageService : IDisposable
         var result = await _scheduler.RunAsync(
             key,
             priority,
-            ct => Task.FromResult(Decode(key, path, size, ct)),
+            ct => Task.FromResult(Decode(key, path, requestedSize, size, ct)),
             cancellationToken).ConfigureAwait(false);
         var after = _scheduler.GetMetrics();
         if (after.Deduplicated > before.Deduplicated)
@@ -78,7 +82,12 @@ public sealed class ArtworkImageService : IDisposable
     internal void EnqueuePropertyUpdate(Action update, CancellationToken cancellationToken) =>
         _artworkUpdates.Enqueue(update, cancellationToken);
 
-    private BitmapSource? Decode(string key, string path, int size, CancellationToken cancellationToken)
+    private BitmapSource? Decode(
+        string key,
+        string path,
+        int requestedSize,
+        int variantSize,
+        CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         Interlocked.Increment(ref _decodes);
@@ -86,19 +95,21 @@ public sealed class ArtworkImageService : IDisposable
         Exception? error = null;
         try
         {
-            if (!File.Exists(path))
+            var prepared = _persistentThumbnails.GetOrCreate(path, requestedSize, cancellationToken);
+            var decodePath = prepared?.Path ?? path;
+            if (!File.Exists(decodePath))
             {
                 Interlocked.Increment(ref _decodeFailures);
                 _failures[key] = DateTimeOffset.UtcNow;
                 return null;
             }
             cancellationToken.ThrowIfCancellationRequested();
-            using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var stream = File.Open(decodePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             var image = new BitmapImage();
             image.BeginInit();
             image.CacheOption = BitmapCacheOption.OnLoad;
             image.CreateOptions = BitmapCreateOptions.PreservePixelFormat | BitmapCreateOptions.IgnoreColorProfile;
-            image.DecodePixelWidth = size;
+            image.DecodePixelWidth = variantSize;
             image.StreamSource = stream;
             image.EndInit();
             image.Freeze();
@@ -111,12 +122,12 @@ public sealed class ArtworkImageService : IDisposable
             error = exception;
             Interlocked.Increment(ref _decodeFailures);
             _failures[key] = DateTimeOffset.UtcNow;
-            _diagnostics.Error("artwork", "thumbnail.decode", exception, Data(path, size));
+            _diagnostics.Error("artwork", "thumbnail.decode", exception, Data(path, variantSize));
             return null;
         }
         finally
         {
-            _diagnostics.RecordDuration("artwork", "thumbnail.decode-off-thread", timer.Elapsed, Data(path, size), error);
+            _diagnostics.RecordDuration("artwork", "thumbnail.decode-off-thread", timer.Elapsed, Data(path, variantSize), error);
         }
     }
 
@@ -130,6 +141,7 @@ public sealed class ArtworkImageService : IDisposable
             cacheBytes = _cacheBytes;
         }
         var queue = _scheduler.GetMetrics();
+        var persistent = _persistentThumbnails.GetMetrics();
         return new ArtworkRuntimeMetrics(
             queue.Queued + queue.Active,
             queue.Queued,
@@ -143,7 +155,12 @@ public sealed class ArtworkImageService : IDisposable
             Interlocked.Read(ref _decodes),
             Interlocked.Read(ref _decodeFailures),
             queue.Promoted,
-            queue.DroppedBeforeStart);
+            queue.DroppedBeforeStart,
+            persistent.Requests,
+            persistent.Hits,
+            persistent.SourceDecodes,
+            persistent.VariantsGenerated,
+            persistent.Failures);
     }
 
     public void Dispose()
@@ -214,11 +231,20 @@ internal readonly record struct ArtworkRuntimeMetrics(
     long Decodes,
     long DecodeFailures,
     long PromotedRequests,
-    long DroppedBeforeDecode)
+    long DroppedBeforeDecode,
+    long PersistentRequests,
+    long PersistentHits,
+    long PersistentSourceDecodes,
+    long PersistentVariantsGenerated,
+    long PersistentFailures)
 {
     public double CacheHitRate => CacheHits + CacheMisses == 0
         ? 0
         : CacheHits * 100d / (CacheHits + CacheMisses);
+
+    public double PersistentHitRate => PersistentRequests == 0
+        ? 0
+        : PersistentHits * 100d / PersistentRequests;
 }
 
 public static class AsyncArtwork

@@ -51,7 +51,7 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 - [x] **P0 ART-006** Cancel stale artwork requests immediately when the query, tab, collection, or library generation changes.
 - [x] **P0 ART-007** Resolve artwork only for the active view instead of starting work for albums, artists, genres, folders, and playlists together. See [the active-view artwork result](performance/ARTWORK-ACTIVE-VIEW-2026-07-26.md).
 - [x] **P0 ART-008** Coalesce artwork property changes into small dispatcher batches rather than one UI dispatch per card. See [the artwork dispatcher batching result](performance/ARTWORK-DISPATCH-BATCHING-2026-07-28.md).
-- [ ] **P1 ART-009** Generate persistent 64, 256, 640, and Now Playing thumbnail variants so normal navigation never decodes original embedded artwork.
+- [x] **P1 ART-009** Generate persistent 64, 256, 640, and Now Playing thumbnail variants so normal navigation never decodes original embedded artwork. See [the persistent artwork variant result](performance/ARTWORK-PERSISTENT-VARIANTS-2026-07-28.md).
 - [ ] **P1 ART-010** Store the detected image format/extension and reject corrupt or decompression-bomb artwork safely.
 - [ ] **P1 ART-011** Add placeholders, fade-in, retry, and permanent-failure states without layout shifts.
 - [ ] **P1 ART-012** Prune memory and disk caches predictably; expose current size, clear-cache, and rebuild-cache actions.

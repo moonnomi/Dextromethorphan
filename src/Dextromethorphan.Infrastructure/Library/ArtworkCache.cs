@@ -64,7 +64,9 @@ public sealed class ArtworkCache(AppPaths paths, ISettingsService settings) : IA
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            var files = new DirectoryInfo(paths.ArtworkCache).EnumerateFiles("*.art", SearchOption.TopDirectoryOnly)
+            var files = new DirectoryInfo(paths.ArtworkCache)
+                .EnumerateFiles("*", SearchOption.AllDirectories)
+                .Where(x => !x.Extension.Equals(".tmp", StringComparison.OrdinalIgnoreCase))
                 .OrderByDescending(x => x.LastWriteTimeUtc).ToArray();
             var limit = settings.Current.ArtworkCacheMegabytes * 1024L * 1024L;
             long retained = 0;
@@ -75,7 +77,7 @@ public sealed class ArtworkCache(AppPaths paths, ISettingsService settings) : IA
                 if (retained <= limit) continue;
                 try { file.Delete(); } catch (IOException) { } catch (UnauthorizedAccessException) { }
             }
-            foreach (var temporary in new DirectoryInfo(paths.ArtworkCache).EnumerateFiles("*.tmp", SearchOption.TopDirectoryOnly))
+            foreach (var temporary in new DirectoryInfo(paths.ArtworkCache).EnumerateFiles("*.tmp", SearchOption.AllDirectories))
             {
                 if (temporary.LastWriteTimeUtc >= DateTime.UtcNow.AddHours(-1)) continue;
                 try { temporary.Delete(); } catch (IOException) { } catch (UnauthorizedAccessException) { }
