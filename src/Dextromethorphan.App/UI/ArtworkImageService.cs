@@ -18,6 +18,7 @@ public sealed class ArtworkImageService : IDisposable
     private readonly Dictionary<string, CacheEntry> _cache = new(StringComparer.OrdinalIgnoreCase);
     private readonly LinkedList<string> _lru = [];
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, ArtworkFailureEntry> _failures = new(StringComparer.OrdinalIgnoreCase);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _latestRequestKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly PriorityWorkScheduler<BitmapSource?> _scheduler;
     private readonly DeveloperDiagnostics _diagnostics;
     private readonly ArtworkPropertyUpdateBatcher _artworkUpdates;
@@ -42,6 +43,7 @@ public sealed class ArtworkImageService : IDisposable
     }
 
     internal static ArtworkImageService? Current { get; private set; }
+    internal static event Action<string>? SourceInvalidated;
 
     internal async Task<BitmapSource?> GetAsync(
         string path,
@@ -53,7 +55,13 @@ public sealed class ArtworkImageService : IDisposable
         Interlocked.Increment(ref _requests);
         var requestedSize = Math.Clamp(decodePixelWidth, 32, 1200);
         var size = ArtworkThumbnailVariant.ForRequestedWidth(requestedSize).PixelWidth;
-        var key = $"{Path.GetFullPath(path)}|{size}";
+        var fullPath = Path.GetFullPath(path);
+        var identity = await Task.Run(
+            () => _persistentThumbnails.GetSourceIdentity(fullPath),
+            cancellationToken).ConfigureAwait(false);
+        var requestAlias = $"{fullPath}|{size}";
+        var key = $"{fullPath}|{identity ?? "missing"}|{size}";
+        _latestRequestKeys[requestAlias] = key;
         if (TryGet(key, out var cached))
         {
             Interlocked.Increment(ref _cacheHits);
@@ -88,8 +96,9 @@ public sealed class ArtworkImageService : IDisposable
     {
         var size = ArtworkThumbnailVariant.ForRequestedWidth(
             Math.Clamp(decodePixelWidth, 32, 1200)).PixelWidth;
-        var key = $"{Path.GetFullPath(path)}|{size}";
-        if (!_failures.TryGetValue(key, out var failure))
+        var alias = $"{Path.GetFullPath(path)}|{size}";
+        if (!_latestRequestKeys.TryGetValue(alias, out var key)
+            || !_failures.TryGetValue(key, out var failure))
             return ArtworkFailureSnapshot.None;
         return new ArtworkFailureSnapshot(
             failure.Kind,
@@ -202,8 +211,32 @@ public sealed class ArtworkImageService : IDisposable
             _cacheBytes = 0;
         }
         _failures.Clear();
+        _latestRequestKeys.Clear();
         if (_diagnostics.Enabled)
             _diagnostics.Mark("artwork", "thumbnail.memory-cache-cleared");
+    }
+
+    internal void InvalidatePath(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var prefix = fullPath + "|";
+        lock (_cacheGate)
+        {
+            foreach (var key in _cache.Keys.Where(key => key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToArray())
+            {
+                if (!_cache.Remove(key, out var removed)) continue;
+                _lru.Remove(removed.Node);
+                _cacheBytes -= removed.Bytes;
+            }
+        }
+        foreach (var key in _failures.Keys.Where(key => key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToArray())
+            _failures.TryRemove(key, out _);
+        foreach (var alias in _latestRequestKeys.Keys.Where(key => key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToArray())
+            _latestRequestKeys.TryRemove(alias, out _);
+        SourceInvalidated?.Invoke(fullPath);
+        if (_diagnostics.Enabled)
+            _diagnostics.Mark("artwork", "thumbnail.source-invalidated",
+                new Dictionary<string, object?> { ["extension"] = Path.GetExtension(fullPath) });
     }
 
     public void Dispose()
@@ -429,6 +462,7 @@ public static class AsyncArtwork
 
         public void OnUnloaded(object sender, RoutedEventArgs args)
         {
+            ArtworkImageService.SourceInvalidated -= OnSourceInvalidated;
             Cancel(clearSource: true);
         }
 
@@ -458,6 +492,8 @@ public static class AsyncArtwork
             SetVisualState(ArtworkLoadState.Empty);
             var path = GetPath(image);
             if (!image.IsLoaded || !image.IsVisible || string.IsNullOrWhiteSpace(path) || ArtworkImageService.Current is null) return;
+            ArtworkImageService.SourceInvalidated -= OnSourceInvalidated;
+            ArtworkImageService.SourceInvalidated += OnSourceInvalidated;
             var source = new CancellationTokenSource();
             _cancellation = source;
             SetVisualState(ArtworkLoadState.Loading);
@@ -467,6 +503,15 @@ public static class AsyncArtwork
                 GetPriority(image),
                 version,
                 source.Token);
+        }
+
+        private void OnSourceInvalidated(string path)
+        {
+            var current = GetPath(image);
+            if (string.IsNullOrWhiteSpace(current)
+                || !Path.GetFullPath(current).Equals(path, StringComparison.OrdinalIgnoreCase))
+                return;
+            _ = image.Dispatcher.BeginInvoke(Restart);
         }
 
         private async Task LoadAsync(

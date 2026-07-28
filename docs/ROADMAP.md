@@ -55,7 +55,7 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 - [x] **P1 ART-010** Store the detected image format/extension and reject corrupt or decompression-bomb artwork safely. See [the artwork format and safety result](performance/ARTWORK-FORMAT-SAFETY-2026-07-28.md).
 - [x] **P1 ART-011** Add placeholders, fade-in, retry, and permanent-failure states without layout shifts. See [the artwork loading-state result](performance/ARTWORK-LOADING-STATES-2026-07-28.md).
 - [x] **P1 ART-012** Prune memory and disk caches predictably; expose current size, clear-cache, and rebuild-cache actions. See [the artwork cache management result](performance/ARTWORK-CACHE-MANAGEMENT-2026-07-28.md).
-- [ ] **P1 ART-013** Invalidate thumbnails when media modification time, embedded art, or an external cover changes.
+- [x] **P1 ART-013** Invalidate thumbnails when media modification time, embedded art, or an external cover changes. See [the artwork invalidation result](performance/ARTWORK-INVALIDATION-2026-07-28.md).
 - [ ] **P2 ART-014** Support preferred external covers such as `cover`, `folder`, and `front` with deterministic precedence.
 
 ### View virtualization and state changes

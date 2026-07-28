@@ -86,6 +86,28 @@ public sealed class PersistenceTests : IDisposable
     }
 
     [Fact]
+    public async Task EmbeddedArtworkContentChangesInvalidatePreservedMediaVersion()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var paths = new AppPaths(_root);
+        var settings = new JsonSettingsService(paths);
+        await settings.InitializeAsync(cancellationToken);
+        var cache = new ArtworkCache(paths, settings);
+        var mediaVersion = new DateTimeOffset(2026, 7, 28, 9, 0, 0, TimeSpan.Zero);
+        var firstBytes = Convert.FromBase64String(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
+        var changedBytes = firstBytes.ToArray();
+        changedBytes[42] ^= 0x01;
+
+        var first = await cache.StoreAsync("same-media.flac", mediaVersion, firstBytes, cancellationToken);
+        var changed = await cache.StoreAsync("same-media.flac", mediaVersion, changedBytes, cancellationToken);
+
+        Assert.NotNull(first);
+        Assert.NotNull(changed);
+        Assert.NotEqual(first, changed);
+    }
+
+    [Fact]
     public async Task ArtworkCacheReportsPrunesAndClearsAllLayers()
     {
         var cancellationToken = TestContext.Current.CancellationToken;

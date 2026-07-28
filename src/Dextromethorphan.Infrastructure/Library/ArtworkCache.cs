@@ -17,7 +17,7 @@ public sealed class ArtworkCache(AppPaths paths, ISettingsService settings) : IA
         if (artwork.IsEmpty) return null;
         if (!ArtworkImageInspector.TryInspect(artwork.Span, out var image, out _)) return null;
         paths.EnsureCreated();
-        var target = CachePath(mediaPath, modifiedAt, image.Extension);
+        var target = CachePath(mediaPath, modifiedAt, artwork.Span, image.Extension);
         await _gate.WaitAsync(cancellationToken);
         try
         {
@@ -147,13 +147,28 @@ public sealed class ArtworkCache(AppPaths paths, ISettingsService settings) : IA
     private string? FindExistingCachePath(string mediaPath, DateTimeOffset modifiedAt)
     {
         var prefix = CachePathPrefix(mediaPath, modifiedAt);
-        return StoredExtensions
+        var legacy = StoredExtensions
             .Select(extension => prefix + extension)
             .FirstOrDefault(File.Exists);
+        if (legacy is not null) return legacy;
+        return new DirectoryInfo(paths.ArtworkCache)
+            .EnumerateFiles(Path.GetFileName(prefix) + "-*", SearchOption.TopDirectoryOnly)
+            .Where(file => StoredExtensions.Contains(file.Extension, StringComparer.OrdinalIgnoreCase))
+            .OrderByDescending(file => file.LastWriteTimeUtc)
+            .ThenBy(file => file.FullName, StringComparer.OrdinalIgnoreCase)
+            .Select(file => file.FullName)
+            .FirstOrDefault();
     }
 
-    private string CachePath(string mediaPath, DateTimeOffset modifiedAt, string extension) =>
-        CachePathPrefix(mediaPath, modifiedAt) + extension;
+    private string CachePath(
+        string mediaPath,
+        DateTimeOffset modifiedAt,
+        ReadOnlySpan<byte> artwork,
+        string extension)
+    {
+        var contentHash = Convert.ToHexString(SHA256.HashData(artwork)).ToLowerInvariant();
+        return $"{CachePathPrefix(mediaPath, modifiedAt)}-{contentHash}{extension}";
+    }
 
     private string CachePathPrefix(string mediaPath, DateTimeOffset modifiedAt)
     {

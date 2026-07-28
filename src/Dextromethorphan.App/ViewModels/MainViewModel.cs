@@ -121,6 +121,7 @@ public sealed class MainViewModel : ObservableObject
         _audio.PlaybackEnded += AudioOnPlaybackEnded;
         _queue.Changed += QueueOnChanged;
         _scanner.ProgressChanged += ScannerOnProgressChanged;
+        _scanner.ArtworkChanged += ScannerOnArtworkChanged;
         _sleepTimer.Expired += (_, _) => _ = _audio.StopAsync();
         _shortcuts.ActionInvoked += ShortcutsOnActionInvoked;
         _systemMedia.CommandReceived += SystemMediaOnCommandReceived;
@@ -746,6 +747,8 @@ public sealed class MainViewModel : ObservableObject
         finally { IsScanning = false; }
     }
 
+    private void ScannerOnArtworkChanged(string path) => _artworkImages.InvalidatePath(path);
+
     private async Task PlaySelectedAsync()
     {
         if (SelectedTrack is null) return;
@@ -1149,6 +1152,7 @@ public sealed class MainViewModel : ObservableObject
         _sessionSaveCancellation?.Cancel();
         await SaveSessionAsync(CancellationToken.None);
         _lifetime.Cancel(); _searchCancellation?.Cancel(); _artworkCancellation?.Cancel(); _queueArtworkCancellation?.Cancel(); _volumeCancellation?.Cancel(); _scanner.StopWatching();
+        _scanner.ArtworkChanged -= ScannerOnArtworkChanged;
         _shortcuts.ActionInvoked -= ShortcutsOnActionInvoked; _systemMedia.CommandReceived -= SystemMediaOnCommandReceived;
         await _settings.UpdateAsync(x => { x.Volume = Volume; x.QueuePanelVisible = QueueVisible; }, CancellationToken.None);
         _searchCancellation?.Dispose(); _artworkCancellation?.Dispose(); _queueArtworkCancellation?.Dispose(); _sessionSaveCancellation?.Dispose(); _volumeCancellation?.Dispose(); _lifetime.Dispose();

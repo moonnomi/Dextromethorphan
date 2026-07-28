@@ -82,6 +82,7 @@ public interface ILibraryScanner : IAsyncDisposable
 {
     bool IsScanning { get; }
     event EventHandler<ScanProgress>? ProgressChanged;
+    event Action<string>? ArtworkChanged;
     Task ScanAsync(IEnumerable<string> roots, IEnumerable<string>? excluded = null, CancellationToken cancellationToken = default);
     void StartWatching(IEnumerable<string> roots);
     void StopWatching();

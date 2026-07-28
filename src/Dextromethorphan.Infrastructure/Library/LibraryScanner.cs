@@ -11,12 +11,17 @@ public sealed class LibraryScanner(ILibraryRepository repository, ITrackMetadata
     {
         ".flac", ".mp3", ".m4a", ".mp4", ".alac", ".wav", ".wave", ".aif", ".aiff", ".dsf", ".dff", ".ogg", ".opus", ".aac", ".wma"
     };
+    private static readonly HashSet<string> ArtworkExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tif", ".tiff", ".webp"
+    };
     private readonly List<FileSystemWatcher> _watchers = [];
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _debounce = new(StringComparer.OrdinalIgnoreCase);
     private int _scanning;
 
     public bool IsScanning => Volatile.Read(ref _scanning) == 1;
     public event EventHandler<ScanProgress>? ProgressChanged;
+    public event Action<string>? ArtworkChanged;
 
     public async Task ScanAsync(IEnumerable<string> roots, IEnumerable<string>? excluded = null, CancellationToken cancellationToken = default)
     {
@@ -127,6 +132,7 @@ public sealed class LibraryScanner(ILibraryRepository repository, ITrackMetadata
                 };
                 watcher.Created += OnChanged;
                 watcher.Changed += OnChanged;
+                watcher.Deleted += OnChanged;
                 watcher.Renamed += OnRenamed;
                 watcher.Error += (_, _) => QueueRootRescan(root);
                 _watchers.Add(watcher);
@@ -146,11 +152,14 @@ public sealed class LibraryScanner(ILibraryRepository repository, ITrackMetadata
     private void OnChanged(object sender, FileSystemEventArgs e)
     {
         if (SupportedExtensions.Contains(Path.GetExtension(e.FullPath))) QueueFileUpdate(e.FullPath);
+        else if (ArtworkExtensions.Contains(Path.GetExtension(e.FullPath))) ArtworkChanged?.Invoke(e.FullPath);
     }
 
     private void OnRenamed(object sender, RenamedEventArgs e)
     {
         if (SupportedExtensions.Contains(Path.GetExtension(e.FullPath))) QueueFileUpdate(e.FullPath);
+        else if (ArtworkExtensions.Contains(Path.GetExtension(e.FullPath))) ArtworkChanged?.Invoke(e.FullPath);
+        if (ArtworkExtensions.Contains(Path.GetExtension(e.OldFullPath))) ArtworkChanged?.Invoke(e.OldFullPath);
     }
 
     private void QueueFileUpdate(string path)

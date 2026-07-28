@@ -102,6 +102,36 @@ public sealed class ArtworkFailurePolicyTests : IDisposable
         Assert.Equal(ArtworkFailureKind.None, service.GetFailure(source, 256).Kind);
     }
 
+    [Fact]
+    public async Task ExternalSourceVersionChangeBypassesStaleRamAndDiskVariants()
+    {
+        Directory.CreateDirectory(_root);
+        var source = Path.Combine(_root, "external-cover.png");
+        var png = Convert.FromBase64String(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
+        await File.WriteAllBytesAsync(source, png, TestContext.Current.CancellationToken);
+        using var service = CreateService();
+
+        var first = await service.GetAsync(
+            source,
+            256,
+            ArtworkRequestPriority.Visible,
+            TestContext.Current.CancellationToken);
+        var firstDecodes = service.GetRuntimeMetrics().Decodes;
+        File.SetLastWriteTimeUtc(source, File.GetLastWriteTimeUtc(source).AddSeconds(2));
+
+        var changed = await service.GetAsync(
+            source,
+            256,
+            ArtworkRequestPriority.Visible,
+            TestContext.Current.CancellationToken);
+
+        Assert.NotNull(first);
+        Assert.NotNull(changed);
+        Assert.NotSame(first, changed);
+        Assert.True(service.GetRuntimeMetrics().Decodes > firstDecodes);
+    }
+
     private ArtworkImageService CreateService()
     {
         var diagnostics = new DeveloperDiagnostics();

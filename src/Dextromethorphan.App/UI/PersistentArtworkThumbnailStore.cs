@@ -87,6 +87,9 @@ public sealed class PersistentArtworkThumbnailStore
         Interlocked.Read(ref _variantsGenerated),
         Interlocked.Read(ref _failures));
 
+    internal string? GetSourceIdentity(string sourcePath) =>
+        TryDescribeSource(sourcePath, out var source) ? source.Identity : null;
+
     private ArtworkImageRejectionReason GenerateVariant(
         ArtworkSource source,
         ArtworkThumbnailVariant variant,
