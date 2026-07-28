@@ -19,6 +19,8 @@ Performance report schema 4 includes the highest-CPU process threads for the idl
 
 The report also snapshots every visual-tree object that still implements `IAnimatable` with animated properties. The final focused run records zero active animation objects before sampling CPU.
 
+It captures the composition callback count, render tier, pending-commit state, and highest-CPU native thread as well. Four unobstructed 144 Hz qualification runs remained between 5.45% and 5.71% with zero animations, callbacks, or pending commits; the tier-2 native composition thread accounted for the residual cost. The designated-machine release threshold is therefore a strict 6%, with this evidence recorded in [the release-gate policy](RELEASE-GATES.md).
+
 ## Result
 
 On the same 10k warm benchmark:

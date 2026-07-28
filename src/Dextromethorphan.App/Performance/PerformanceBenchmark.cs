@@ -138,7 +138,8 @@ internal sealed record CpuPerformanceMetrics(
     double? PlaybackPercent,
     string? PlaybackStatus,
     IReadOnlyList<ThreadCpuPerformanceSample> IdleThreads,
-    IReadOnlyList<string> IdleAnimations);
+    IReadOnlyList<string> IdleAnimations,
+    IReadOnlyList<string> CompositionState);
 internal sealed record ThreadCpuPerformanceSample(
     int ThreadId,
     double CpuMs,
@@ -213,6 +214,7 @@ internal static class PerformanceBenchmarkRunner
         var scrollArtworkSources = window.ArtworkMetrics.ActiveImageSources;
         await window.WaitForBackgroundIdleAsync(cancellationToken);
         var idleAnimations = window.CaptureActiveAnimationState();
+        var compositionState = window.CaptureCompositionState();
         var idleCpu = await MeasureCpuDetailedAsync(
             TimeSpan.FromSeconds(2),
             cancellationToken);
@@ -282,7 +284,8 @@ internal static class PerformanceBenchmarkRunner
                 playbackCpu,
                 playbackStatus,
                 idleCpu.Threads,
-                idleAnimations),
+                idleAnimations,
+                compositionState),
             Scan = scan,
             ConcurrentWorkload = concurrentWorkload,
             WorkloadError = workloadError
@@ -370,15 +373,31 @@ internal static class PerformanceBenchmarkRunner
     private static Dictionary<int, ThreadCpuSnapshot> CaptureThreadCpu(Process process)
     {
         var result = new Dictionary<int, ThreadCpuSnapshot>();
+        var modules = new List<(long Start, long End, string Name)>();
+        try
+        {
+            foreach (ProcessModule module in process.Modules)
+            {
+                var start = module.BaseAddress.ToInt64();
+                modules.Add((start, start + module.ModuleMemorySize, module.ModuleName));
+            }
+        }
+        catch { }
         foreach (ProcessThread thread in process.Threads)
         {
             try
             {
+                var startAddress = thread.StartAddress.ToInt64();
+                var moduleName = modules.FirstOrDefault(module =>
+                    startAddress >= module.Start
+                    && startAddress < module.End).Name;
                 result[thread.Id] = new ThreadCpuSnapshot(
                     thread.TotalProcessorTime.TotalMilliseconds,
-                    thread.ThreadState.ToString());
+                    string.IsNullOrWhiteSpace(moduleName)
+                        ? thread.ThreadState.ToString()
+                        : $"{thread.ThreadState} · {moduleName}");
             }
-            catch (InvalidOperationException) { }
+            catch { }
         }
         return result;
     }

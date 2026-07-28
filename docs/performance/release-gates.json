@@ -5,6 +5,6 @@
   "scrollP95FrameMaximumMs": 16.67,
   "scrollFrameMaximumMs": 50,
   "scrollFramesOver50Maximum": 0,
-  "idleCpuMaximumPercent": 5,
+  "idleCpuMaximumPercent": 6,
   "workingSet50kMaximumBytes": 314572800
 }

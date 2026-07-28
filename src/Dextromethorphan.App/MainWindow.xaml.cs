@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Interop;
@@ -647,6 +648,57 @@ public partial class MainWindow : Window
         var animated = new List<string>();
         CaptureAnimations(this, animated);
         return animated;
+    }
+
+    internal IReadOnlyList<string> CaptureCompositionState()
+    {
+        var result = new List<string>();
+        try
+        {
+            var mediaContextType = typeof(CompositionTarget).Assembly.GetType(
+                "System.Windows.Media.MediaContext");
+            var current = mediaContextType?.GetProperty(
+                "CurrentMediaContext",
+                BindingFlags.Static | BindingFlags.NonPublic)
+                ?.GetValue(null);
+            if (mediaContextType is null || current is null)
+                return ["MediaContext unavailable"];
+            var callbackCount = mediaContextType.GetProperty(
+                "InvokeOnRenderCallbacksCount",
+                BindingFlags.Instance | BindingFlags.NonPublic)
+                ?.GetValue(current);
+            result.Add($"InvokeOnRenderCallbacks={callbackCount ?? "unknown"}");
+            result.Add($"RenderTier={RenderCapability.Tier >> 16}");
+            foreach (var fieldName in new[]
+                     {
+                         "_displayRefreshRate",
+                         "_animationRenderRate",
+                         "_isRendering",
+                         "_needToCommitChannel",
+                         "_commitPendingAfterRender",
+                         "_interlockState"
+                     })
+            {
+                var fieldValue = mediaContextType.GetField(
+                    fieldName,
+                    BindingFlags.Instance | BindingFlags.NonPublic)
+                    ?.GetValue(current);
+                result.Add($"{fieldName}={fieldValue ?? "unknown"}");
+            }
+            if (mediaContextType.GetField(
+                    "Rendering",
+                    BindingFlags.Instance | BindingFlags.NonPublic)
+                    ?.GetValue(current) is Delegate rendering)
+            {
+                result.AddRange(rendering.GetInvocationList().Select(handler =>
+                    $"Rendering={handler.Target?.GetType().FullName ?? "static"}.{handler.Method.Name}"));
+            }
+        }
+        catch (Exception exception)
+        {
+            result.Add($"Composition inspection failed: {exception.GetBaseException().Message}");
+        }
+        return result;
     }
 
     private static void CaptureAnimations(
