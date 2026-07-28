@@ -10,13 +10,13 @@ SCROLL-001 through SCROLL-005 replace the refresh-rate-dependent wheel loop with
 - Boundary input is left unhandled so a nested parent can continue scrolling.
 - Reduced-motion Windows settings bypass animation and scroll directly.
 - Active viewers are removed when hidden, unloaded, disabled, or settled; the global render callback detaches as soon as no targets remain.
-- Gallery and Songs page mutations are debounced until 80 ms after scrolling becomes idle and no thumb drag or smooth animation remains.
+- Gallery, sidebar, and Songs page mutations wait until scrolling becomes idle and no thumb drag or smooth animation remains. The wait persists for the full animation rather than abandoning the request after a fixed number of polls.
 - The large software `BlurEffect` was removed from Now Playing; its enlarged low-resolution background art remains cached beneath the dark gradient.
 
 ## Verification
 
 - `dotnet test Dextromethorphan.slnx -c Release --no-restore`
-- 95 tests pass, including refresh-rate equivalence, boundary handoff, and bounded long-frame convergence.
+- 103 tests pass, including refresh-rate equivalence, boundary handoff, bounded long-frame convergence, and long-running deferred-page waits.
 - 10k-track warm WPF sample:
 
 | Metric | Result |
@@ -30,3 +30,9 @@ SCROLL-001 through SCROLL-005 replace the refresh-rate-dependent wheel loop with
 | History / hidden view / paged Songs checks | Pass / Pass / Pass |
 
 This sample is inside the 60 Hz p95, 50 ms routine-frame, zero-long-stall, and 5% idle-CPU budgets. Final qualification uses the multi-run Gate 005 reports.
+
+## Paging regression â€” 2026-07-28
+
+The first idle-paging implementation waited for two 80 ms intervals. The exponential smooth-scroll response commonly remains active for 300â€“500 ms, so the pending request could return without adding a page. The header continued to report the full library while the gallery remained capped at its initial 28 cards; scrolling those cards off-screen made the library appear to disappear.
+
+The idle gate now polls until the latest scroll animation or pointer capture actually ends, unless a newer scroll request cancels it or the view becomes hidden. The performance workload additionally checks realized album/container mappings at the top, quarter, midpoint, and bottom of its 500-card traversal before verifying the return-to-top window.

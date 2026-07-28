@@ -435,13 +435,12 @@ public partial class MainWindow : Window
     {
         try
         {
-            await Task.Delay(80, cancellationToken);
-            if (!list.IsVisible || list.IsMouseCaptureWithin || SmoothScrollBehavior.IsAnimating(list))
-            {
-                await Task.Delay(80, cancellationToken);
-                cancellationToken.ThrowIfCancellationRequested();
-            }
-            if (!list.IsVisible || list.IsMouseCaptureWithin || SmoothScrollBehavior.IsAnimating(list)) return;
+            var available = await DeferredPageLoadGate.WaitForIdleAsync(
+                () => list.IsVisible,
+                () => list.IsMouseCaptureWithin || SmoothScrollBehavior.IsAnimating(list),
+                TimeSpan.FromMilliseconds(80),
+                cancellationToken);
+            if (!available) return;
             switch (target)
             {
                 case PageTarget.Gallery: ViewModel.LoadMoreGalleryGroups(); break;
@@ -771,11 +770,46 @@ public partial class MainWindow : Window
             intervals.Add(Stopwatch.GetElapsedTime(previous, rendered).TotalMilliseconds);
             previous = rendered;
         }
+        var metrics = PerformanceStatistics.Frames(intervals, ViewModel.GalleryGroups.Count);
+        await ValidateGalleryTraversalAsync(viewer, cancellationToken);
         viewer.ScrollToTop();
         await NextRenderedFrameTimestampAsync(cancellationToken);
         GalleryList.UpdateLayout();
         ValidateGalleryReturnToTop();
-        return PerformanceStatistics.Frames(intervals, ViewModel.GalleryGroups.Count);
+        return metrics;
+    }
+
+    private async Task ValidateGalleryTraversalAsync(
+        ScrollViewer viewer,
+        CancellationToken cancellationToken)
+    {
+        foreach (var offset in new[]
+                 {
+                     0d,
+                     viewer.ScrollableHeight * 0.25,
+                     viewer.ScrollableHeight * 0.5,
+                     viewer.ScrollableHeight
+                 })
+        {
+            viewer.ScrollToVerticalOffset(offset);
+            await NextRenderedFrameTimestampAsync(cancellationToken);
+            GalleryList.UpdateLayout();
+
+            var realized = 0;
+            var containers = new HashSet<ListBoxItem>();
+            for (var index = 0; index < ViewModel.GalleryGroups.Count; index++)
+            {
+                if (GalleryList.ItemContainerGenerator.ContainerFromIndex(index) is not ListBoxItem container)
+                    continue;
+                realized++;
+                if (!containers.Add(container))
+                    throw new InvalidOperationException($"Gallery virtualization reused one container for multiple indexes near {offset:F0}px.");
+                if (!ReferenceEquals(container.DataContext, ViewModel.GalleryGroups[index]))
+                    throw new InvalidOperationException($"Gallery virtualization mapped item {index} to the wrong card near {offset:F0}px.");
+            }
+            if (realized == 0)
+                throw new InvalidOperationException($"Gallery virtualization realized no cards near {offset:F0}px.");
+        }
     }
 
     private void ValidateGalleryReturnToTop()
