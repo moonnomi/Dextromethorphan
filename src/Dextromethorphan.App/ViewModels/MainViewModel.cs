@@ -140,14 +140,14 @@ public sealed class MainViewModel : ObservableObject
     public ObservableCollection<LibraryCardViewModel> GalleryGroups { get => _galleryGroups; private set => Set(ref _galleryGroups, value); }
     public IReadOnlyList<LibraryCardViewModel> ActiveGroups { get => _activeGroups; private set => Set(ref _activeGroups, value); }
     public IReadOnlyList<LibraryCardViewModel> SidebarCards { get => _sidebarCards; private set => Set(ref _sidebarCards, value); }
-    public ObservableCollection<LibraryCardViewModel> Albums { get; } = [];
-    public ObservableCollection<LibraryCardViewModel> Artists { get; } = [];
-    public ObservableCollection<LibraryCardViewModel> Genres { get; } = [];
-    public ObservableCollection<LibraryCardViewModel> Folders { get; } = [];
-    public ObservableCollection<LibraryCardViewModel> Playlists { get; } = [];
-    public ObservableCollection<QueueEntryViewModel> Queue { get; } = [];
-    public ObservableCollection<LyricLineViewModel> Lyrics { get; } = [];
-    public ObservableCollection<AudioDeviceInfo> OutputDevices { get; } = [];
+    public ObservableCollection<LibraryCardViewModel> Albums { get; } = new ObservableRangeCollection<LibraryCardViewModel>();
+    public ObservableCollection<LibraryCardViewModel> Artists { get; } = new ObservableRangeCollection<LibraryCardViewModel>();
+    public ObservableCollection<LibraryCardViewModel> Genres { get; } = new ObservableRangeCollection<LibraryCardViewModel>();
+    public ObservableCollection<LibraryCardViewModel> Folders { get; } = new ObservableRangeCollection<LibraryCardViewModel>();
+    public ObservableCollection<LibraryCardViewModel> Playlists { get; } = new ObservableRangeCollection<LibraryCardViewModel>();
+    public ObservableCollection<QueueEntryViewModel> Queue { get; } = new ObservableRangeCollection<QueueEntryViewModel>();
+    public ObservableCollection<LyricLineViewModel> Lyrics { get; } = new ObservableRangeCollection<LyricLineViewModel>();
+    public ObservableCollection<AudioDeviceInfo> OutputDevices { get; } = new ObservableRangeCollection<AudioDeviceInfo>();
 
     public Track? SelectedTrack
     {
@@ -324,7 +324,7 @@ public sealed class MainViewModel : ObservableObject
         Raise(nameof(ArtworkCacheMegabytes)); Raise(nameof(ArtworkCacheLimitText));
         await RefreshLibraryAsync(cancellationToken: _lifetime.Token);
         await RefreshArtworkCacheStatsAsync();
-        foreach (var device in await _audio.GetOutputDevicesAsync(_lifetime.Token)) OutputDevices.Add(device);
+        Replace(OutputDevices, await _audio.GetOutputDevicesAsync(_lifetime.Token));
         var profile = _settings.Current.OutputProfiles.FirstOrDefault(x => x.DeviceId == _settings.Current.ActiveOutputDeviceId) ?? _settings.Current.OutputProfiles[0];
         await _audio.SetPlaybackOptionsAsync(new AudioPlaybackOptions
         {
@@ -1000,11 +1000,11 @@ public sealed class MainViewModel : ObservableObject
 
     private void LoadLyrics(Track track)
     {
-        Lyrics.Clear();
         ActiveLyricLine = null;
         HasSyncedLyrics = false;
         if (string.IsNullOrWhiteSpace(track.Lyrics))
         {
+            Replace(Lyrics, []);
             ActiveLyric = "No lyrics found. Place an .lrc file beside the track.";
             Raise(nameof(HasLyrics));
             return;
@@ -1013,12 +1013,20 @@ public sealed class MainViewModel : ObservableObject
         HasSyncedLyrics = synced.Lines.Count > 0;
         if (!HasSyncedLyrics)
         {
-            foreach (var text in track.Lyrics.Replace("\r\n", "\n").Split('\n').Where(x => !string.IsNullOrWhiteSpace(x)))
-                Lyrics.Add(new LyricLineViewModel(new LyricLine(TimeSpan.Zero, null, text.Trim(), []), false));
+            Replace(
+                Lyrics,
+                track.Lyrics.Replace("\r\n", "\n")
+                    .Split('\n')
+                    .Where(x => !string.IsNullOrWhiteSpace(x))
+                    .Select(text => new LyricLineViewModel(new LyricLine(TimeSpan.Zero, null, text.Trim(), []), false)));
         }
         else
         {
-            foreach (var line in synced.Lines.Where(x => !string.IsNullOrWhiteSpace(x.Text))) Lyrics.Add(new LyricLineViewModel(line));
+            Replace(
+                Lyrics,
+                synced.Lines
+                    .Where(x => !string.IsNullOrWhiteSpace(x.Text))
+                    .Select(line => new LyricLineViewModel(line)));
         }
         ActiveLyric = Lyrics.FirstOrDefault()?.Text ?? "No lyrics";
         Raise(nameof(HasLyrics));
@@ -1088,13 +1096,12 @@ public sealed class MainViewModel : ObservableObject
 
     private void QueueOnChanged(object? sender, EventArgs e) => RunOnUi(() =>
     {
-        Queue.Clear();
-        foreach (var item in _queue.Items)
+        Replace(Queue, _queue.Items.Select(item =>
         {
             var artwork = ExistingArtwork(item.Track);
             if (artwork is null && _resolvedArtwork.TryGetValue(item.Track.Path, out var cached)) artwork = cached;
-            Queue.Add(new QueueEntryViewModel(item, artwork));
-        }
+            return new QueueEntryViewModel(item, artwork);
+        }));
         Raise(nameof(HasQueue));
         Raise(nameof(IsShuffleEnabled)); Raise(nameof(ShuffleText)); Raise(nameof(IsRepeatEnabled)); Raise(nameof(IsRepeatOne)); Raise(nameof(RepeatText));
         _systemMedia.Update(_audio.Snapshot, HasPreviousTrack(), HasNextTrack());
@@ -1258,7 +1265,12 @@ public sealed class MainViewModel : ObservableObject
     }
 
     private static string FormatTime(TimeSpan time) => time.ToString(time.TotalHours >= 1 ? @"h\:mm\:ss" : @"m\:ss");
-    private static void Replace<T>(ObservableCollection<T> target, IEnumerable<T> source) { target.Clear(); foreach (var item in source) target.Add(item); }
+    private static void Replace<T>(ObservableCollection<T> target, IEnumerable<T> source)
+    {
+        if (target is not ObservableRangeCollection<T> range)
+            throw new InvalidOperationException($"{target.GetType().Name} does not support range replacement.");
+        range.ReplaceRange(source);
+    }
     private static void RunOnUi(Action action) { if (Application.Current.Dispatcher.CheckAccess()) action(); else Application.Current.Dispatcher.BeginInvoke(action); }
 
     public async Task ShutdownAsync()
