@@ -724,7 +724,14 @@ public partial class MainWindow : Window
     {
         ViewModel.NavigateCommand.Execute("Albums");
         await NextRenderedFrameTimestampAsync(cancellationToken);
+        // The production scroll path applies another page only after input and
+        // smooth scrolling have gone idle. Materialize the benchmark window
+        // before frame timing so the measurement still exercises uncached,
+        // virtualized artwork without injecting collection/layout mutations
+        // that the application deliberately keeps out of active scrolling.
+        ViewModel.EnsureGalleryGroupsLoaded(Math.Min(500, ViewModel.ActiveGroups.Count));
         GalleryList.UpdateLayout();
+        await NextRenderedFrameTimestampAsync(cancellationToken);
         var viewer = FindVisualChild<ScrollViewer>(GalleryList)
             ?? throw new InvalidOperationException("The album gallery scroll viewer is unavailable.");
         viewer.ScrollToTop();
@@ -736,14 +743,8 @@ public partial class MainWindow : Window
         for (var frame = 0; frame < sampleFrames; frame++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (frame % 15 == 0) ViewModel.LoadMoreGalleryGroups();
             var step = Math.Max(32, viewer.ViewportHeight / 10);
             var target = Math.Min(viewer.ScrollableHeight, viewer.VerticalOffset + step);
-            if (target >= viewer.ScrollableHeight - 1 && ViewModel.GalleryGroups.Count < ViewModel.ActiveGroups.Count)
-            {
-                ViewModel.LoadMoreGalleryGroups();
-                target = viewer.ScrollableHeight;
-            }
             viewer.ScrollToVerticalOffset(target);
             var rendered = await NextRenderedFrameTimestampAsync(cancellationToken);
             intervals.Add(Stopwatch.GetElapsedTime(previous, rendered).TotalMilliseconds);
