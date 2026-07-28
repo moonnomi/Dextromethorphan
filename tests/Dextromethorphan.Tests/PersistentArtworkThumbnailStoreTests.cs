@@ -12,15 +12,17 @@ public sealed class PersistentArtworkThumbnailStoreTests
     [Theory]
     [InlineData(32, 64)]
     [InlineData(64, 64)]
-    [InlineData(65, 256)]
-    [InlineData(96, 256)]
+    [InlineData(65, 192)]
+    [InlineData(96, 192)]
+    [InlineData(192, 192)]
+    [InlineData(193, 256)]
     [InlineData(256, 256)]
     [InlineData(257, 640)]
     [InlineData(640, 640)]
     [InlineData(641, 1024)]
     [InlineData(900, 1024)]
     [InlineData(1200, 1024)]
-    public void RequestedWidthsMapToFourStableVariants(int requestedWidth, int expectedWidth)
+    public void RequestedWidthsMapToStableVariants(int requestedWidth, int expectedWidth)
     {
         Assert.Equal(expectedWidth, ArtworkThumbnailVariant.ForRequestedWidth(requestedWidth).PixelWidth);
     }
@@ -43,6 +45,7 @@ public sealed class PersistentArtworkThumbnailStoreTests
             Assert.False(first.Value.PersistentCacheHit);
             Assert.Equal(64, first.Value.Variant.PixelWidth);
             Assert.NotNull(firstProcess.GetOrCreate(source, 96, TestContext.Current.CancellationToken));
+            Assert.NotNull(firstProcess.GetOrCreate(source, 256, TestContext.Current.CancellationToken));
             Assert.NotNull(firstProcess.GetOrCreate(source, 640, TestContext.Current.CancellationToken));
             Assert.NotNull(firstProcess.GetOrCreate(source, 900, TestContext.Current.CancellationToken));
 
@@ -50,12 +53,12 @@ public sealed class PersistentArtworkThumbnailStoreTests
                 Path.Combine(paths.ArtworkCache, "thumbnails"),
                 "*.png",
                 SearchOption.TopDirectoryOnly).ToArray();
-            Assert.Equal(4, thumbnails.Length);
-            Assert.Equal([64, 256, 640, 1024], thumbnails.Select(ReadPixelWidth).Order().ToArray());
+            Assert.Equal(5, thumbnails.Length);
+            Assert.Equal([64, 192, 256, 640, 1024], thumbnails.Select(ReadPixelWidth).Order().ToArray());
 
             var generated = firstProcess.GetMetrics();
-            Assert.Equal(4, generated.SourceDecodes);
-            Assert.Equal(4, generated.VariantsGenerated);
+            Assert.Equal(5, generated.SourceDecodes);
+            Assert.Equal(5, generated.VariantsGenerated);
             Assert.Equal(0, generated.Failures);
 
             var nextProcess = new PersistentArtworkThumbnailStore(paths, new DeveloperDiagnostics());

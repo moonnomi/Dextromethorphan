@@ -54,6 +54,28 @@ public sealed class LibraryPlaylistTests : IDisposable
     }
 
     [Fact]
+    public async Task LibraryReadsShareRepeatedMetadataStrings()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var library = new SqliteLibraryRepository(new AppPaths(_root));
+        await library.InitializeAsync(cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        await library.UpsertBatchAsync([
+            Track("one.flac", "One", "Shared artist", "Shared genre", now) with { Album = "Shared album", ArtworkPath = "shared-cover.png" },
+            Track("two.flac", "Two", "Shared artist", "Shared genre", now) with { Album = "Shared album", ArtworkPath = "shared-cover.png" }
+        ], cancellationToken);
+
+        var tracks = await library.GetAllAsync(cancellationToken);
+
+        Assert.Equal(2, tracks.Count);
+        Assert.Same(tracks[0].Artist, tracks[1].Artist);
+        Assert.Same(tracks[0].Album, tracks[1].Album);
+        Assert.Same(tracks[0].Genre, tracks[1].Genre);
+        Assert.Same(tracks[0].Codec, tracks[1].Codec);
+        Assert.Same(tracks[0].ArtworkPath, tracks[1].ArtworkPath);
+    }
+
+    [Fact]
     public async Task ManualAndSmartPlaylistsReturnExpectedTracks()
     {
         var cancellationToken = TestContext.Current.CancellationToken;

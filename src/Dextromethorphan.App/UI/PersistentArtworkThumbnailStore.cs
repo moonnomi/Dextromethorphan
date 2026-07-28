@@ -292,6 +292,7 @@ internal readonly record struct ArtworkThumbnailResult(
 internal readonly record struct ArtworkThumbnailVariant(string FileLabel, int PixelWidth)
 {
     internal static readonly ArtworkThumbnailVariant Small = new("64", 64);
+    internal static readonly ArtworkThumbnailVariant Card = new("192", 192);
     internal static readonly ArtworkThumbnailVariant Gallery = new("256", 256);
     internal static readonly ArtworkThumbnailVariant Detail = new("640", 640);
     internal static readonly ArtworkThumbnailVariant NowPlaying = new("now-playing", 1024);
@@ -300,6 +301,7 @@ internal readonly record struct ArtworkThumbnailVariant(string FileLabel, int Pi
         requestedWidth switch
         {
             <= 64 => Small,
+            <= 192 => Card,
             <= 256 => Gallery,
             <= 640 => Detail,
             _ => NowPlaying

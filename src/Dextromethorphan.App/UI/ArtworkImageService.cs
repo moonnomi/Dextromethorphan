@@ -12,7 +12,7 @@ namespace Dextromethorphan.App.UI;
 
 public sealed class ArtworkImageService : IDisposable
 {
-    private const long DefaultBudgetBytes = 96L * 1024 * 1024;
+    private const long DefaultBudgetBytes = 16L * 1024 * 1024;
     private const int DecoderWorkers = 2;
     private readonly object _cacheGate = new();
     private readonly Dictionary<string, CacheEntry> _cache = new(StringComparer.OrdinalIgnoreCase);

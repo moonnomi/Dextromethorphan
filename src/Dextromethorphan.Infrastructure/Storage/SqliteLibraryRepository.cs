@@ -189,8 +189,10 @@ public sealed class SqliteLibraryRepository(AppPaths paths) : ILibraryRepository
     internal static async Task<IReadOnlyList<Track>> ReadManyAsync(SqliteCommand command, CancellationToken cancellationToken)
     {
         var tracks = new List<Track>();
+        var strings = new TrackStringPool();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken)) tracks.Add(ReadTrack(reader));
+        while (await reader.ReadAsync(cancellationToken))
+            tracks.Add(strings.Compact(ReadTrack(reader)));
         return tracks;
     }
 
@@ -207,6 +209,29 @@ public sealed class SqliteLibraryRepository(AppPaths paths) : ILibraryRepository
     private static double? NullableDouble(SqliteDataReader r, string name) { var i = r.GetOrdinal(name); return r.IsDBNull(i) ? null : r.GetDouble(i); }
     private static DateTimeOffset? NullableDate(SqliteDataReader r, string name) { var i = r.GetOrdinal(name); return r.IsDBNull(i) ? null : DateTimeOffset.FromUnixTimeMilliseconds(r.GetInt64(i)); }
     private static string? NullableString(SqliteDataReader r, string name) { var i = r.GetOrdinal(name); return r.IsDBNull(i) ? null : r.GetString(i); }
+
+    private sealed class TrackStringPool
+    {
+        private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);
+
+        public Track Compact(Track track) => track with
+        {
+            Artist = Shared(track.Artist),
+            AlbumArtist = Shared(track.AlbumArtist),
+            Album = Shared(track.Album),
+            Genre = Shared(track.Genre),
+            Codec = Shared(track.Codec),
+            ArtworkPath = track.ArtworkPath is null ? null : Shared(track.ArtworkPath)
+        };
+
+        private string Shared(string value)
+        {
+            if (value.Length == 0) return string.Empty;
+            if (_values.TryGetValue(value, out var existing)) return existing;
+            _values.Add(value, value);
+            return value;
+        }
+    }
 
     private static void AddTrackParameters(SqliteCommand c, Track t)
     {

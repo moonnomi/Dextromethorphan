@@ -128,7 +128,10 @@ internal sealed record ResourcePerformanceMetrics(
     int Gen2Collections,
     int ActiveArtworkSourcesAfterStartup,
     int ActiveArtworkSourcesAfterNavigation,
-    int ActiveArtworkSourcesAfterScroll);
+    int ActiveArtworkSourcesAfterScroll,
+    long PeakWorkingSetAfterStartupBytes,
+    long PeakWorkingSetAfterNavigationBytes,
+    long PeakWorkingSetAfterScrollBytes);
 internal sealed record CpuPerformanceMetrics(double IdlePercent, double? PlaybackPercent, string? PlaybackStatus);
 internal sealed record ScanPerformanceMetrics(int Files, int Imported, int Failed, double ElapsedMs, double FilesPerSecond);
 
@@ -157,6 +160,7 @@ internal static class PerformanceBenchmarkRunner
         var process = Process.GetCurrentProcess();
         process.Refresh();
         var startupWorkingSet = process.WorkingSet64;
+        var startupPeakWorkingSet = process.PeakWorkingSet64;
         var startupArtworkSources = window.ArtworkMetrics.ActiveImageSources;
 
         var tabSwitches = await window.MeasureTabSwitchPerformanceAsync(cancellationToken);
@@ -165,12 +169,15 @@ internal static class PerformanceBenchmarkRunner
         var pagedSongs = await window.MeasurePagedSongsPerformanceAsync(cancellationToken);
         process.Refresh();
         var navigationWorkingSet = process.WorkingSet64;
+        var navigationPeakWorkingSet = process.PeakWorkingSet64;
         var navigationArtworkSources = window.ArtworkMetrics.ActiveImageSources;
 
         var scroll = await window.MeasureAlbumScrollPerformanceAsync(cancellationToken);
         process.Refresh();
         var scrollWorkingSet = process.WorkingSet64;
+        var scrollPeakWorkingSet = process.PeakWorkingSet64;
         var scrollArtworkSources = window.ArtworkMetrics.ActiveImageSources;
+        await window.WaitForBackgroundIdleAsync(cancellationToken);
         var idleCpu = await MeasureCpuAsync(TimeSpan.FromSeconds(2), cancellationToken);
 
         ScanPerformanceMetrics? scan = null;
@@ -222,7 +229,10 @@ internal static class PerformanceBenchmarkRunner
                 GC.CollectionCount(2),
                 startupArtworkSources,
                 navigationArtworkSources,
-                scrollArtworkSources),
+                scrollArtworkSources,
+                startupPeakWorkingSet,
+                navigationPeakWorkingSet,
+                scrollPeakWorkingSet),
             Cpu = new CpuPerformanceMetrics(idleCpu, playbackCpu, playbackStatus),
             Scan = scan,
             WorkloadError = workloadError

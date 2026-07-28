@@ -40,6 +40,7 @@ public sealed class MainViewModel : ObservableObject
     private CancellationTokenSource? _queueArtworkCancellation;
     private CancellationTokenSource? _sessionSaveCancellation;
     private CancellationTokenSource? _volumeCancellation;
+    private Task _artworkResolutionTask = Task.CompletedTask;
     private IReadOnlyList<Track> _allTracks = [];
     private IReadOnlyList<LibraryCardViewModel> _activeGroups = [];
     private IReadOnlyList<LibraryCardViewModel> _sidebarCards = [];
@@ -603,7 +604,15 @@ public sealed class MainViewModel : ObservableObject
                 ["plannedCards"] = planned.Count,
                 ["unresolvedCards"] = cards.Length
             });
-        _ = ResolveCardArtworkAsync(cards, token);
+        _artworkResolutionTask = ResolveCardArtworkAsync(cards, token);
+    }
+
+    public async Task WaitForBackgroundWorkAsync(CancellationToken cancellationToken)
+    {
+        var artworkResolution = _artworkResolutionTask;
+        try { await artworkResolution.WaitAsync(TimeSpan.FromSeconds(5), cancellationToken); }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
+        catch (TimeoutException) { }
     }
 
     private async Task ResolveCardArtworkAsync(IReadOnlyList<LibraryCardViewModel> cards, CancellationToken cancellationToken)
@@ -659,8 +668,8 @@ public sealed class MainViewModel : ObservableObject
             case "Albums": ViewSubtitle = $"{Albums.Count:N0} albums in your library"; SetActiveGroups(Albums); RestoreGallerySelection(Albums); break;
             case "Artists": ViewSubtitle = $"{Artists.Count:N0} artists in your library"; SetActiveGroups(Artists); RestoreGallerySelection(Artists); break;
             case "Genres": ViewSubtitle = $"{Genres.Count:N0} genres in your library"; SetActiveGroups(Genres); RestoreGallerySelection(Genres); break;
-            case "Folders": ViewSubtitle = $"{Folders.Count:N0} folders across {_settings.Current.LibraryFolders.Count:N0} sources"; SidebarCards = Folders; SelectDefault(SidebarCards, resetSelection); break;
-            case "Playlists": ViewSubtitle = $"{Playlists.Count:N0} saved and smart playlists"; SidebarCards = Playlists; SelectDefault(SidebarCards, resetSelection); break;
+            case "Folders": ViewSubtitle = $"{Folders.Count:N0} folders across {_settings.Current.LibraryFolders.Count:N0} sources"; SidebarCards = Folders; SelectDefault(SidebarCards, resetSelection, selectFirst: true); break;
+            case "Playlists": ViewSubtitle = $"{Playlists.Count:N0} saved and smart playlists"; SidebarCards = Playlists; SelectDefault(SidebarCards, resetSelection, selectFirst: false); break;
             case "Favorites":
                 ViewSubtitle = "Tracks you have marked as loved";
                 SetBrowseTracks(_allTracks.Where(x => x.IsLoved).OrderBy(x => x.Artist).ThenBy(x => x.Album).ThenBy(x => x.TrackNumber), "Favorites", $"{_allTracks.Count(x => x.IsLoved):N0} loved tracks", PrimaryViewStateKey);
@@ -677,13 +686,23 @@ public sealed class MainViewModel : ObservableObject
         RestartActiveArtworkResolution();
     }
 
-    private void SelectDefault(IReadOnlyList<LibraryCardViewModel> cards, bool reset)
+    private void SelectDefault(IReadOnlyList<LibraryCardViewModel> cards, bool reset, bool selectFirst)
     {
         _cardSelections.TryGetValue(CurrentView, out var remembered);
         var selected = remembered is not null
             ? cards.FirstOrDefault(x => x.Key == remembered.Key && x.Kind == remembered.Kind)
             : null;
-        SelectGroupCore(selected ?? cards.FirstOrDefault(), false, rememberSelection: false);
+        selected ??= selectFirst ? cards.FirstOrDefault() : null;
+        if (selected is not null)
+        {
+            SelectGroupCore(selected, false, rememberSelection: false);
+        }
+        else if (cards.Count > 0)
+        {
+            if (SelectedCard is not null) SelectedCard.IsSelected = false;
+            SelectedCard = null;
+            SetBrowseTracks([], $"Select a {CurrentView.TrimEnd('s').ToLowerInvariant()}", $"Choose one of {cards.Count:N0} {CurrentView.ToLowerInvariant()} to see its tracks.", PrimaryViewStateKey);
+        }
         if (cards.Count == 0)
             SetBrowseTracks(
                 [],

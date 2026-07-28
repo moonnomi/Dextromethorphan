@@ -4,7 +4,7 @@ ART-009 adds a disk-backed thumbnail layer between extracted artwork and WPF ima
 
 ## Behavior
 
-- Artwork requests map to four stable sizes: 64, 256, 640, and 1024 pixels. The 1024-pixel file is the Now Playing variant.
+- Artwork requests map to five stable sizes: 64, 192, 256, 640, and 1024 pixels. The 192-pixel card variant keeps the common album-grid working set smaller, while 1024 pixels remains the Now Playing variant.
 - A missing variant is generated off the UI thread at the requested size and encoded as PNG with an atomic temporary-file move.
 - Generation is lazy per size. Album scrolling does not pay to create detail and Now Playing files that have not been requested.
 - A source-version identity determines the file name. Managed `.art` files already contain the media version in their name; external sources also include file length and modification time.
@@ -17,8 +17,8 @@ The persistent files live under `%APPDATA%\Dextromethorphan\artwork\thumbnails`.
 
 ## Verification
 
-- Ten mapping cases cover every boundary between the four fixed sizes.
-- A cross-process test generates all four variants, verifies their pixel widths, and proves a fresh store reuses the 1024-pixel file with zero source decodes.
+- Mapping cases cover every boundary between the five fixed sizes.
+- A cross-process test generates all five variants, verifies their pixel widths, and proves a fresh store reuses the 1024-pixel file with zero source decodes.
 - The complete Release suite passes: 66 tests.
 - A clean 10k-track fixture recorded:
   - 1,631.7 ms cold process-to-interactive;

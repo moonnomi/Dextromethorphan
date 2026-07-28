@@ -226,11 +226,21 @@ public partial class MainWindow : Window
 
         var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
         ViewTransitionHost.BeginAnimation(OpacityProperty, null);
-        ViewTransitionHost.BeginAnimation(OpacityProperty, new DoubleAnimation(0.76, 1, TimeSpan.FromMilliseconds(155)) { EasingFunction = ease });
+        ViewTransitionHost.Opacity = 1;
+        ViewTransitionHost.BeginAnimation(OpacityProperty, new DoubleAnimation(0.76, 1, TimeSpan.FromMilliseconds(155))
+        {
+            EasingFunction = ease,
+            FillBehavior = FillBehavior.Stop
+        });
         if (ViewTransitionHost.RenderTransform is TranslateTransform transform)
         {
             transform.BeginAnimation(TranslateTransform.YProperty, null);
-            transform.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(7, 0, TimeSpan.FromMilliseconds(175)) { EasingFunction = ease });
+            transform.Y = 0;
+            transform.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(7, 0, TimeSpan.FromMilliseconds(175))
+            {
+                EasingFunction = ease,
+                FillBehavior = FillBehavior.Stop
+            });
         }
     }
 
@@ -545,6 +555,17 @@ public partial class MainWindow : Window
         ViewModel.LoadMoreBrowseTracks();
         await NextRenderedFrameTimestampAsync(cancellationToken);
         return new PagedSongsPerformanceMetrics(sourceCount, initialCount, ViewModel.BrowseTracks.Count);
+    }
+
+    internal async Task WaitForBackgroundIdleAsync(CancellationToken cancellationToken)
+    {
+        await ViewModel.WaitForBackgroundWorkAsync(cancellationToken);
+        var timeout = Stopwatch.StartNew();
+        while (ArtworkMetrics.QueueDepth > 0 && timeout.Elapsed < TimeSpan.FromSeconds(5))
+            await Task.Delay(25, cancellationToken);
+        await _diagnostics.WaitForIdleAsync(cancellationToken);
+        await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ContextIdle, cancellationToken);
+        await Task.Delay(250, cancellationToken);
     }
 
     internal async Task<FramePerformanceMetrics> MeasureAlbumScrollPerformanceAsync(CancellationToken cancellationToken)

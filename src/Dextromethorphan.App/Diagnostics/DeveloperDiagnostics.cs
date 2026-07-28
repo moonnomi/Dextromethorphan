@@ -83,6 +83,7 @@ public sealed class DeveloperDiagnostics
     private Task? _writerTask;
     private string? _summaryPath;
     private int _droppedEvents;
+    private int _pendingEvents;
     private bool _completed;
 
     public DeveloperDiagnostics() => Current = this;
@@ -201,7 +202,18 @@ public sealed class DeveloperDiagnostics
     private void Enqueue(DiagnosticEvent value)
     {
         if (!Enabled || _completed || _channel is null) return;
-        if (!_channel.Writer.TryWrite(value)) Interlocked.Increment(ref _droppedEvents);
+        Interlocked.Increment(ref _pendingEvents);
+        if (_channel.Writer.TryWrite(value)) return;
+        Interlocked.Decrement(ref _pendingEvents);
+        Interlocked.Increment(ref _droppedEvents);
+    }
+
+    internal async Task WaitForIdleAsync(CancellationToken cancellationToken)
+    {
+        if (!Enabled) return;
+        var timeout = Stopwatch.StartNew();
+        while (Volatile.Read(ref _pendingEvents) > 0 && timeout.Elapsed < TimeSpan.FromSeconds(5))
+            await Task.Delay(10, cancellationToken);
     }
 
     private static bool IsUiThread()
@@ -210,14 +222,19 @@ public sealed class DeveloperDiagnostics
         catch { return false; }
     }
 
-    private static async Task WriteEventsAsync(ChannelReader<DiagnosticEvent> reader, string path)
+    private async Task WriteEventsAsync(ChannelReader<DiagnosticEvent> reader, string path)
     {
         await using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.Read, 64 * 1024, useAsync: true);
         await using var writer = new StreamWriter(stream);
         await foreach (var value in reader.ReadAllAsync())
+        {
             await writer.WriteLineAsync(JsonSerializer.Serialize(value, JsonOptions));
+            OnEventWritten();
+        }
         await writer.FlushAsync();
     }
+
+    private void OnEventWritten() => Interlocked.Decrement(ref _pendingEvents);
 
     private async Task WriteSummaryAsync()
     {
