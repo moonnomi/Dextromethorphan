@@ -193,6 +193,19 @@ public sealed class ArtworkImageService : IDisposable
             persistent.Failures);
     }
 
+    internal void ClearMemoryCache()
+    {
+        lock (_cacheGate)
+        {
+            _cache.Clear();
+            _lru.Clear();
+            _cacheBytes = 0;
+        }
+        _failures.Clear();
+        if (_diagnostics.Enabled)
+            _diagnostics.Mark("artwork", "thumbnail.memory-cache-cleared");
+    }
+
     public void Dispose()
     {
         if (ReferenceEquals(Current, this)) Current = null;

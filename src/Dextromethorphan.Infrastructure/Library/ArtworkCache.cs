@@ -67,10 +67,13 @@ public sealed class ArtworkCache(AppPaths paths, ISettingsService settings) : IA
         await _gate.WaitAsync(cancellationToken);
         try
         {
+            DeleteExpiredTemporaryFiles(cancellationToken);
             var files = new DirectoryInfo(paths.ArtworkCache)
                 .EnumerateFiles("*", SearchOption.AllDirectories)
                 .Where(x => !x.Extension.Equals(".tmp", StringComparison.OrdinalIgnoreCase))
-                .OrderByDescending(x => x.LastWriteTimeUtc).ToArray();
+                .OrderByDescending(x => x.LastWriteTimeUtc)
+                .ThenBy(x => x.FullName, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
             var limit = settings.Current.ArtworkCacheMegabytes * 1024L * 1024L;
             long retained = 0;
             foreach (var file in files)
@@ -80,13 +83,65 @@ public sealed class ArtworkCache(AppPaths paths, ISettingsService settings) : IA
                 if (retained <= limit) continue;
                 try { file.Delete(); } catch (IOException) { } catch (UnauthorizedAccessException) { }
             }
-            foreach (var temporary in new DirectoryInfo(paths.ArtworkCache).EnumerateFiles("*.tmp", SearchOption.AllDirectories))
-            {
-                if (temporary.LastWriteTimeUtc >= DateTime.UtcNow.AddHours(-1)) continue;
-                try { temporary.Delete(); } catch (IOException) { } catch (UnauthorizedAccessException) { }
-            }
         }
         finally { _gate.Release(); }
+    }
+
+    public async Task<ArtworkCacheStats> GetStatsAsync(CancellationToken cancellationToken = default)
+    {
+        paths.EnsureCreated();
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            long bytes = 0;
+            var originals = 0;
+            var thumbnails = 0;
+            var temporary = 0;
+            foreach (var file in new DirectoryInfo(paths.ArtworkCache).EnumerateFiles("*", SearchOption.AllDirectories))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (file.Extension.Equals(".tmp", StringComparison.OrdinalIgnoreCase))
+                {
+                    temporary++;
+                    continue;
+                }
+                bytes += file.Length;
+                if (file.DirectoryName?.Equals(Path.Combine(paths.ArtworkCache, "thumbnails"), StringComparison.OrdinalIgnoreCase) == true)
+                    thumbnails++;
+                else
+                    originals++;
+            }
+            return new ArtworkCacheStats(bytes, originals, thumbnails, temporary);
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task ClearAsync(CancellationToken cancellationToken = default)
+    {
+        paths.EnsureCreated();
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            foreach (var file in new DirectoryInfo(paths.ArtworkCache).EnumerateFiles("*", SearchOption.AllDirectories))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try { file.Delete(); }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+            }
+            _nextPrune = DateTimeOffset.MinValue;
+        }
+        finally { _gate.Release(); }
+    }
+
+    private void DeleteExpiredTemporaryFiles(CancellationToken cancellationToken)
+    {
+        foreach (var temporary in new DirectoryInfo(paths.ArtworkCache).EnumerateFiles("*.tmp", SearchOption.AllDirectories))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (temporary.LastWriteTimeUtc >= DateTime.UtcNow.AddHours(-1)) continue;
+            try { temporary.Delete(); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
     }
 
     private string? FindExistingCachePath(string mediaPath, DateTimeOffset modifiedAt)

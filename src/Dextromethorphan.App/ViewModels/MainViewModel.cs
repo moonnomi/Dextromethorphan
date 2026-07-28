@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
 using Dextromethorphan.App.Diagnostics;
+using Dextromethorphan.App.UI;
 using Dextromethorphan.Core.Abstractions;
 using Dextromethorphan.Core.Lyrics;
 using Dextromethorphan.Core.Models;
@@ -24,6 +25,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly ISystemMediaTransportService _systemMedia;
     private readonly DeveloperDiagnostics _diagnostics;
     private readonly ArtworkPropertyUpdateBatcher _artworkUpdates;
+    private readonly ArtworkImageService _artworkImages;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly ConcurrentDictionary<string, string?> _resolvedArtwork = new(StringComparer.OrdinalIgnoreCase);
     private readonly Stack<NavigationEntry> _backHistory = new();
@@ -62,6 +64,9 @@ public sealed class MainViewModel : ObservableObject
     private string _activeLyric = "Lyrics will appear here when available.";
     private LyricLineViewModel? _activeLyricLine;
     private bool _hasSyncedLyrics;
+    private bool _isArtworkCacheBusy;
+    private int _artworkCacheMegabytes = 512;
+    private string _artworkCacheStatus = "Calculating cache size…";
 
     public MainViewModel(
         ISettingsService settings,
@@ -75,11 +80,12 @@ public sealed class MainViewModel : ObservableObject
         IShortcutService shortcuts,
         ISystemMediaTransportService systemMedia,
         DeveloperDiagnostics diagnostics,
-        ArtworkPropertyUpdateBatcher artworkUpdates)
+        ArtworkPropertyUpdateBatcher artworkUpdates,
+        ArtworkImageService artworkImages)
     {
         _settings = settings; _repository = repository; _playlists = playlists; _scanner = scanner; _artwork = artwork;
         _audio = audio; _queue = queue; _sleepTimer = sleepTimer; _shortcuts = shortcuts; _systemMedia = systemMedia;
-        _diagnostics = diagnostics; _artworkUpdates = artworkUpdates;
+        _diagnostics = diagnostics; _artworkUpdates = artworkUpdates; _artworkImages = artworkImages;
         NavigateCommand = new RelayCommand(p => Navigate(p?.ToString()));
         SelectGroupCommand = new RelayCommand(p => SelectGroup(p as LibraryCardViewModel));
         CloseCollectionCommand = new RelayCommand(_ => CloseCollectionDetail());
@@ -99,6 +105,9 @@ public sealed class MainViewModel : ObservableObject
             ScheduleSessionSave();
         });
         ScanCommand = new AsyncRelayCommand(_ => ScanAsync(), _ => !_scanner.IsScanning && _settings.Current.LibraryFolders.Count > 0);
+        RefreshArtworkCacheCommand = new AsyncRelayCommand(_ => RefreshArtworkCacheStatsAsync(), _ => !IsArtworkCacheBusy);
+        ClearArtworkCacheCommand = new AsyncRelayCommand(_ => ClearArtworkCacheAsync(), _ => !IsArtworkCacheBusy);
+        RebuildArtworkCacheCommand = new AsyncRelayCommand(_ => RebuildArtworkCacheAsync(), _ => !IsArtworkCacheBusy && _allTracks.Count > 0);
         UndoQueueCommand = new RelayCommand(_ => _queue.Undo());
         ClearQueueCommand = new RelayCommand(_ => _queue.Replace([]));
         LoveCommand = new AsyncRelayCommand(_ => ToggleLoveAsync(), _ => CurrentTrack is not null);
@@ -183,6 +192,30 @@ public sealed class MainViewModel : ObservableObject
     public bool QueueVisible { get => _queueVisible; set { if (Set(ref _queueVisible, value)) _ = _settings.UpdateAsync(x => x.QueuePanelVisible = value); } }
     public bool AnimationsEnabled { get => _animationsEnabled; set { if (Set(ref _animationsEnabled, value)) _ = _settings.UpdateAsync(x => x.AnimationsEnabled = value); } }
     public bool DiagnosticsVisible { get => _diagnosticsVisible; set => Set(ref _diagnosticsVisible, value); }
+    public bool IsArtworkCacheBusy
+    {
+        get => _isArtworkCacheBusy;
+        private set
+        {
+            if (!Set(ref _isArtworkCacheBusy, value)) return;
+            RefreshArtworkCacheCommand.RaiseCanExecuteChanged();
+            ClearArtworkCacheCommand.RaiseCanExecuteChanged();
+            RebuildArtworkCacheCommand.RaiseCanExecuteChanged();
+        }
+    }
+    public string ArtworkCacheStatus { get => _artworkCacheStatus; private set => Set(ref _artworkCacheStatus, value); }
+    public int ArtworkCacheMegabytes
+    {
+        get => _artworkCacheMegabytes;
+        set
+        {
+            var normalized = Math.Clamp(value, 64, 4096);
+            if (!Set(ref _artworkCacheMegabytes, normalized)) return;
+            Raise(nameof(ArtworkCacheLimitText));
+            _ = UpdateArtworkCacheLimitAsync(normalized);
+        }
+    }
+    public string ArtworkCacheLimitText => $"{ArtworkCacheMegabytes:N0} MB maximum";
     public bool HasAudioDiagnostics => _audio.Diagnostics is not null;
     public string DiagnosticHeadline => _audio.Diagnostics is { IsBitPerfect: true } ? "Bit-perfect signal path" : _audio.Diagnostics is null ? "No active audio pipeline" : "Processed signal path";
     public string DiagnosticMode => _audio.Diagnostics is { } d ? $"{d.EffectiveMode} WASAPI · {d.PipelineMode}" : "Play a track to inspect the signal path";
@@ -230,6 +263,9 @@ public sealed class MainViewModel : ObservableObject
     public RelayCommand ToggleShuffleCommand { get; }
     public RelayCommand CycleRepeatCommand { get; }
     public AsyncRelayCommand ScanCommand { get; }
+    public AsyncRelayCommand RefreshArtworkCacheCommand { get; }
+    public AsyncRelayCommand ClearArtworkCacheCommand { get; }
+    public AsyncRelayCommand RebuildArtworkCacheCommand { get; }
     public RelayCommand UndoQueueCommand { get; }
     public RelayCommand ClearQueueCommand { get; }
     public AsyncRelayCommand LoveCommand { get; }
@@ -250,7 +286,10 @@ public sealed class MainViewModel : ObservableObject
         _queueVisible = _settings.Current.QueuePanelVisible; Raise(nameof(QueueVisible));
         _albumTileSize = _settings.Current.AlbumTileSize; Raise(nameof(AlbumTileSize)); Raise(nameof(GalleryItemWidth)); Raise(nameof(GalleryItemHeight));
         _animationsEnabled = _settings.Current.AnimationsEnabled; Raise(nameof(AnimationsEnabled));
+        _artworkCacheMegabytes = _settings.Current.ArtworkCacheMegabytes;
+        Raise(nameof(ArtworkCacheMegabytes)); Raise(nameof(ArtworkCacheLimitText));
         await RefreshLibraryAsync(cancellationToken: _lifetime.Token);
+        await RefreshArtworkCacheStatsAsync();
         foreach (var device in await _audio.GetOutputDevicesAsync(_lifetime.Token)) OutputDevices.Add(device);
         var profile = _settings.Current.OutputProfiles.FirstOrDefault(x => x.DeviceId == _settings.Current.ActiveOutputDeviceId) ?? _settings.Current.OutputProfiles[0];
         await _audio.SetPlaybackOptionsAsync(new AudioPlaybackOptions
@@ -297,6 +336,84 @@ public sealed class MainViewModel : ObservableObject
     public void StartSleepTimer(TimeSpan duration) => _sleepTimer.Start(duration);
     public void StopAtEndOfTrack() => _sleepTimer.StopAtEndOfTrack();
     public void CancelSleepTimer() => _sleepTimer.Cancel();
+
+    private async Task RefreshArtworkCacheStatsAsync()
+    {
+        var stats = await _artwork.GetStatsAsync(_lifetime.Token);
+        ArtworkCacheStatus =
+            $"{FormatBytes(stats.TotalBytes)} · {stats.OriginalFiles:N0} originals · {stats.ThumbnailFiles:N0} thumbnails" +
+            (stats.TemporaryFiles > 0 ? $" · {stats.TemporaryFiles:N0} temporary" : "");
+    }
+
+    private async Task ClearArtworkCacheAsync()
+    {
+        if (IsArtworkCacheBusy) return;
+        IsArtworkCacheBusy = true;
+        ArtworkCacheStatus = "Clearing artwork cache…";
+        try
+        {
+            _artworkCancellation?.Cancel();
+            _queueArtworkCancellation?.Cancel();
+            _artworkImages.ClearMemoryCache();
+            _resolvedArtwork.Clear();
+            await _artwork.ClearAsync(_lifetime.Token);
+            if (CurrentTrack is not null) CurrentTrack = CurrentTrack with { ArtworkPath = null };
+            await RefreshLibraryAsync(SearchText, _lifetime.Token);
+            await RefreshArtworkCacheStatsAsync();
+        }
+        finally { IsArtworkCacheBusy = false; }
+    }
+
+    private async Task RebuildArtworkCacheAsync()
+    {
+        if (IsArtworkCacheBusy) return;
+        IsArtworkCacheBusy = true;
+        ArtworkCacheStatus = "Clearing cache before rebuild…";
+        try
+        {
+            _artworkCancellation?.Cancel();
+            _queueArtworkCancellation?.Cancel();
+            _artworkImages.ClearMemoryCache();
+            _resolvedArtwork.Clear();
+            await _artwork.ClearAsync(_lifetime.Token);
+
+            var tracks = _allTracks.ToArray();
+            var rebuilt = new ConcurrentBag<Track>();
+            var completed = 0;
+            await Parallel.ForEachAsync(
+                tracks,
+                new ParallelOptions
+                {
+                    CancellationToken = _lifetime.Token,
+                    MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 2, 2, 4)
+                },
+                async (track, cancellationToken) =>
+                {
+                    var artwork = await _artwork.GetOrCreateAsync(track.Path, cancellationToken);
+                    if (artwork is not null) rebuilt.Add(track with { ArtworkPath = artwork });
+                    var current = Interlocked.Increment(ref completed);
+                    if (current == tracks.Length || current % 50 == 0)
+                        RunOnUi(() => ArtworkCacheStatus = $"Rebuilding artwork… {current:N0} / {tracks.Length:N0}");
+                });
+            if (!rebuilt.IsEmpty)
+                await _repository.UpsertBatchAsync(rebuilt.ToArray(), _lifetime.Token);
+            await RefreshLibraryAsync(SearchText, _lifetime.Token);
+            await RefreshArtworkCacheStatsAsync();
+        }
+        finally { IsArtworkCacheBusy = false; }
+    }
+
+    private async Task UpdateArtworkCacheLimitAsync(int megabytes)
+    {
+        await _settings.UpdateAsync(x => x.ArtworkCacheMegabytes = megabytes, _lifetime.Token);
+        await _artwork.PruneAsync(_lifetime.Token);
+        await RefreshArtworkCacheStatsAsync();
+    }
+
+    private static string FormatBytes(long bytes) =>
+        bytes >= 1_073_741_824
+            ? $"{bytes / 1_073_741_824d:0.00} GB"
+            : $"{bytes / 1_048_576d:0.0} MB";
 
     private async Task RefreshLibraryAsync(string query = "", CancellationToken cancellationToken = default)
     {

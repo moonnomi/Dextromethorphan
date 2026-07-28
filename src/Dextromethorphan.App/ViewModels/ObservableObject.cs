@@ -37,4 +37,5 @@ public sealed class AsyncRelayCommand(Func<object?, Task> execute, Func<object?,
         try { await execute(parameter); }
         finally { _running = false; CanExecuteChanged?.Invoke(this, EventArgs.Empty); }
     }
+    public void RaiseCanExecuteChanged() => CanExecuteChanged?.Invoke(this, EventArgs.Empty);
 }

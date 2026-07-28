@@ -54,7 +54,7 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 - [x] **P1 ART-009** Generate persistent 64, 256, 640, and Now Playing thumbnail variants so normal navigation never decodes original embedded artwork. See [the persistent artwork variant result](performance/ARTWORK-PERSISTENT-VARIANTS-2026-07-28.md).
 - [x] **P1 ART-010** Store the detected image format/extension and reject corrupt or decompression-bomb artwork safely. See [the artwork format and safety result](performance/ARTWORK-FORMAT-SAFETY-2026-07-28.md).
 - [x] **P1 ART-011** Add placeholders, fade-in, retry, and permanent-failure states without layout shifts. See [the artwork loading-state result](performance/ARTWORK-LOADING-STATES-2026-07-28.md).
-- [ ] **P1 ART-012** Prune memory and disk caches predictably; expose current size, clear-cache, and rebuild-cache actions.
+- [x] **P1 ART-012** Prune memory and disk caches predictably; expose current size, clear-cache, and rebuild-cache actions. See [the artwork cache management result](performance/ARTWORK-CACHE-MANAGEMENT-2026-07-28.md).
 - [ ] **P1 ART-013** Invalidate thumbnails when media modification time, embedded art, or an external cover changes.
 - [ ] **P2 ART-014** Support preferred external covers such as `cover`, `folder`, and `front` with deterministic precedence.
 

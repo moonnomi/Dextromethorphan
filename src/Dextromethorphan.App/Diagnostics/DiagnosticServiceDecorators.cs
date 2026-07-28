@@ -139,6 +139,12 @@ internal sealed class DiagnosticArtworkCache(IArtworkCache inner, DeveloperDiagn
         diagnostics.MeasureAsync("artwork", "cache.lookup", () => inner.GetOrCreateAsync(mediaPath, cancellationToken),
             new Dictionary<string, object?> { ["extension"] = Path.GetExtension(mediaPath) });
 
+    public Task<ArtworkCacheStats> GetStatsAsync(CancellationToken cancellationToken = default) =>
+        diagnostics.MeasureAsync("artwork", "cache.stats", () => inner.GetStatsAsync(cancellationToken));
+
+    public Task ClearAsync(CancellationToken cancellationToken = default) =>
+        diagnostics.MeasureAsync("artwork", "cache.clear", () => inner.ClearAsync(cancellationToken));
+
     public Task PruneAsync(CancellationToken cancellationToken = default) =>
         diagnostics.MeasureAsync("artwork", "cache.prune", () => inner.PruneAsync(cancellationToken));
 }

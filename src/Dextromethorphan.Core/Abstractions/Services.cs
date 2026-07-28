@@ -64,7 +64,18 @@ public interface IArtworkCache
 {
     Task<string?> StoreAsync(string mediaPath, DateTimeOffset modifiedAt, ReadOnlyMemory<byte> artwork, CancellationToken cancellationToken = default);
     Task<string?> GetOrCreateAsync(string mediaPath, CancellationToken cancellationToken = default);
+    Task<ArtworkCacheStats> GetStatsAsync(CancellationToken cancellationToken = default);
+    Task ClearAsync(CancellationToken cancellationToken = default);
     Task PruneAsync(CancellationToken cancellationToken = default);
+}
+
+public sealed record ArtworkCacheStats(
+    long TotalBytes,
+    int OriginalFiles,
+    int ThumbnailFiles,
+    int TemporaryFiles)
+{
+    public int TotalFiles => OriginalFiles + ThumbnailFiles;
 }
 
 public interface ILibraryScanner : IAsyncDisposable

@@ -57,7 +57,36 @@
             <ScrollViewer VerticalScrollBarVisibility="Auto" ui:SmoothScrollBehavior.Enabled="True"><StackPanel Margin="34,28"><TextBlock Text="Playback" FontSize="25" FontWeight="SemiBold"/><TextBlock Text="Transition and signal-path behavior" Foreground="{StaticResource TextMutedBrush}" Margin="0,4,0,22"/><Border Style="{StaticResource Card}" Padding="18"><StackPanel><TextBlock Text="Bit-perfect mode" FontWeight="SemiBold"/><TextBlock Text="Exclusive WASAPI with no DSP bypasses the shared Windows mixer. ReplayGain, crossfade, speed, pitch, fades, and software volume deliberately use the DSP path." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" Margin="0,6,0,0"/></StackPanel></Border></StackPanel></ScrollViewer>
         </TabItem>
         <TabItem Header="Library">
-            <ScrollViewer VerticalScrollBarVisibility="Auto" ui:SmoothScrollBehavior.Enabled="True"><StackPanel Margin="34,28"><TextBlock Text="Library" FontSize="25" FontWeight="SemiBold"/><TextBlock Text="Local, mounted, and SMB music sources" Foreground="{StaticResource TextMutedBrush}" Margin="0,4,0,22"/><Border Style="{StaticResource Card}" Padding="18"><StackPanel><TextBlock Text="Folder watching and indexed metadata are enabled."/><TextBlock Text="Use Add music folder in the main window to add another source." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" Margin="0,5,0,14"/><Button Style="{StaticResource PrimaryButton}" Command="{Binding ScanCommand}" Content="Rescan library" HorizontalAlignment="Left"/></StackPanel></Border></StackPanel></ScrollViewer>
+            <ScrollViewer VerticalScrollBarVisibility="Auto" ui:SmoothScrollBehavior.Enabled="True">
+                <StackPanel Margin="34,28">
+                    <TextBlock Text="Library" FontSize="25" FontWeight="SemiBold"/>
+                    <TextBlock Text="Local, mounted, and SMB music sources" Foreground="{StaticResource TextMutedBrush}" Margin="0,4,0,22"/>
+                    <Border Style="{StaticResource Card}" Padding="18">
+                        <StackPanel>
+                            <TextBlock Text="Folder watching and indexed metadata are enabled."/>
+                            <TextBlock Text="Use Add music folder in the main window to add another source." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" Margin="0,5,0,14"/>
+                            <Button Style="{StaticResource PrimaryButton}" Command="{Binding ScanCommand}" Content="Rescan library" HorizontalAlignment="Left"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Artwork cache" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding ArtworkCacheStatus}" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,5,0,14"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <Slider Minimum="64" Maximum="4096" TickFrequency="64" IsSnapToTickEnabled="True" Value="{Binding ArtworkCacheMegabytes}"/>
+                                <TextBlock Grid.Column="1" Text="{Binding ArtworkCacheLimitText}" Foreground="{StaticResource TextMutedBrush}" Margin="14,0,0,0" VerticalAlignment="Center"/>
+                            </Grid>
+                            <TextBlock Text="Clearing removes originals and thumbnails. Rebuild reads embedded covers from every available library file." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,9,0,12"/>
+                            <StackPanel Orientation="Horizontal">
+                                <Button Style="{StaticResource PrimaryButton}" Command="{Binding RebuildArtworkCacheCommand}" Content="Rebuild cache" Margin="0,0,8,0"/>
+                                <Button Command="{Binding ClearArtworkCacheCommand}" Content="Clear cache" Margin="0,0,8,0"/>
+                                <Button Command="{Binding RefreshArtworkCacheCommand}" Content="Refresh size"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
         </TabItem>
         <TabItem Header="Appearance">
             <ScrollViewer VerticalScrollBarVisibility="Auto" ui:SmoothScrollBehavior.Enabled="True"><StackPanel Margin="34,28"><TextBlock Text="Appearance" FontSize="25" FontWeight="SemiBold"/><TextBlock Text="Library density and panel behavior" Foreground="{StaticResource TextMutedBrush}" Margin="0,4,0,22"/><Border Style="{StaticResource Card}" Padding="18"><StackPanel><TextBlock Text="Collection cover size" FontWeight="SemiBold"/><Slider Minimum="110" Maximum="210" Value="{Binding AlbumTileSize}" Margin="0,12,0,6"/><CheckBox Content="Show queue panel" IsChecked="{Binding QueueVisible}" Margin="0,14,0,0"/><CheckBox Content="Use interface animations" IsChecked="{Binding AnimationsEnabled}" Margin="0,12,0,0"/><TextBlock Text="Animations use WPF composition transforms only and can be disabled instantly." Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="24,5,0,0"/></StackPanel></Border></StackPanel></ScrollViewer>

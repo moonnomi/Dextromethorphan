@@ -85,6 +85,57 @@ public sealed class PersistenceTests : IDisposable
         Assert.Equal(2, Directory.EnumerateFiles(paths.ArtworkCache, "*.png").Count());
     }
 
+    [Fact]
+    public async Task ArtworkCacheReportsPrunesAndClearsAllLayers()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var paths = new AppPaths(_root);
+        var settings = new JsonSettingsService(paths);
+        await settings.InitializeAsync(cancellationToken);
+        await settings.UpdateAsync(x => x.ArtworkCacheMegabytes = 64, cancellationToken);
+        paths.EnsureCreated();
+        var thumbnails = Path.Combine(paths.ArtworkCache, "thumbnails");
+        Directory.CreateDirectory(thumbnails);
+        var newer = Path.Combine(paths.ArtworkCache, "newer.jpg");
+        var older = Path.Combine(paths.ArtworkCache, "older.jpg");
+        var thumbnail = Path.Combine(thumbnails, "cover-256.png");
+        var temporary = Path.Combine(thumbnails, "abandoned.tmp");
+        SetSparseLength(newer, 40L * 1024 * 1024);
+        SetSparseLength(older, 40L * 1024 * 1024);
+        SetSparseLength(thumbnail, 1L * 1024 * 1024);
+        await File.WriteAllBytesAsync(temporary, [1, 2, 3], cancellationToken);
+        File.SetLastWriteTimeUtc(newer, DateTime.UtcNow);
+        File.SetLastWriteTimeUtc(thumbnail, DateTime.UtcNow.AddMinutes(-1));
+        File.SetLastWriteTimeUtc(older, DateTime.UtcNow.AddMinutes(-2));
+        File.SetLastWriteTimeUtc(temporary, DateTime.UtcNow.AddHours(-2));
+        var cache = new ArtworkCache(paths, settings);
+
+        var before = await cache.GetStatsAsync(cancellationToken);
+        Assert.Equal(2, before.OriginalFiles);
+        Assert.Equal(1, before.ThumbnailFiles);
+        Assert.Equal(1, before.TemporaryFiles);
+
+        await cache.PruneAsync(cancellationToken);
+        var pruned = await cache.GetStatsAsync(cancellationToken);
+        Assert.True(File.Exists(newer));
+        Assert.True(File.Exists(thumbnail));
+        Assert.False(File.Exists(older));
+        Assert.False(File.Exists(temporary));
+        Assert.Equal(41L * 1024 * 1024, pruned.TotalBytes);
+
+        await cache.ClearAsync(cancellationToken);
+        var cleared = await cache.GetStatsAsync(cancellationToken);
+        Assert.Equal(0, cleared.TotalFiles);
+        Assert.Equal(0, cleared.TotalBytes);
+        Assert.Equal(0, cleared.TemporaryFiles);
+    }
+
+    private static void SetSparseLength(string path, long length)
+    {
+        using var file = File.Create(path);
+        file.SetLength(length);
+    }
+
     public void Dispose()
     {
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
