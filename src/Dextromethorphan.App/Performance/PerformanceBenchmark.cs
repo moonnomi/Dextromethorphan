@@ -133,7 +133,16 @@ internal sealed record ResourcePerformanceMetrics(
     long PeakWorkingSetAfterStartupBytes,
     long PeakWorkingSetAfterNavigationBytes,
     long PeakWorkingSetAfterScrollBytes);
-internal sealed record CpuPerformanceMetrics(double IdlePercent, double? PlaybackPercent, string? PlaybackStatus);
+internal sealed record CpuPerformanceMetrics(
+    double IdlePercent,
+    double? PlaybackPercent,
+    string? PlaybackStatus,
+    IReadOnlyList<ThreadCpuPerformanceSample> IdleThreads);
+internal sealed record ThreadCpuPerformanceSample(
+    int ThreadId,
+    double CpuMs,
+    bool IsUiThread,
+    string State);
 internal sealed record ScanPerformanceMetrics(int Files, int Imported, int Failed, double ElapsedMs, double FilesPerSecond);
 internal sealed record ConcurrentWorkloadPerformanceMetrics(
     bool PlaybackAvailable,
@@ -202,7 +211,9 @@ internal static class PerformanceBenchmarkRunner
         var scrollPeakWorkingSet = process.PeakWorkingSet64;
         var scrollArtworkSources = window.ArtworkMetrics.ActiveImageSources;
         await window.WaitForBackgroundIdleAsync(cancellationToken);
-        var idleCpu = await MeasureCpuAsync(TimeSpan.FromSeconds(2), cancellationToken);
+        var idleCpu = await MeasureCpuDetailedAsync(
+            TimeSpan.FromSeconds(2),
+            cancellationToken);
 
         ScanPerformanceMetrics? scan = null;
         ConcurrentWorkloadPerformanceMetrics? concurrentWorkload = null;
@@ -264,7 +275,11 @@ internal static class PerformanceBenchmarkRunner
                 startupPeakWorkingSet,
                 navigationPeakWorkingSet,
                 scrollPeakWorkingSet),
-            Cpu = new CpuPerformanceMetrics(idleCpu, playbackCpu, playbackStatus),
+            Cpu = new CpuPerformanceMetrics(
+                idleCpu.Percent,
+                playbackCpu,
+                playbackStatus,
+                idleCpu.Threads),
             Scan = scan,
             ConcurrentWorkload = concurrentWorkload,
             WorkloadError = workloadError
@@ -310,13 +325,59 @@ internal static class PerformanceBenchmarkRunner
 
     private static async Task<double> MeasureCpuAsync(TimeSpan duration, CancellationToken cancellationToken)
     {
+        var sample = await MeasureCpuDetailedAsync(duration, cancellationToken);
+        return sample.Percent;
+    }
+
+    private static async Task<CpuMeasurement> MeasureCpuDetailedAsync(
+        TimeSpan duration,
+        CancellationToken cancellationToken)
+    {
         var process = Process.GetCurrentProcess();
+        process.Refresh();
+        var uiThreadId = NativeMethods.GetCurrentThreadId();
+        var threadCpu = CaptureThreadCpu(process);
         var cpuStart = process.TotalProcessorTime;
         var timer = Stopwatch.StartNew();
         await Task.Delay(duration, cancellationToken);
         process.Refresh();
         var cpu = process.TotalProcessorTime - cpuStart;
-        return Math.Round(cpu.TotalMilliseconds / timer.Elapsed.TotalMilliseconds / Environment.ProcessorCount * 100, 3);
+        var threads = CaptureThreadCpu(process)
+            .Select(pair => new ThreadCpuPerformanceSample(
+                pair.Key,
+                Math.Round(
+                    pair.Value.CpuMs - threadCpu.GetValueOrDefault(pair.Key).CpuMs,
+                    3),
+                pair.Key == uiThreadId,
+                pair.Value.State))
+            .Where(sample => sample.CpuMs > 0)
+            .OrderByDescending(sample => sample.CpuMs)
+            .Take(8)
+            .ToArray();
+        return new CpuMeasurement(
+            Math.Round(
+                cpu.TotalMilliseconds
+                    / timer.Elapsed.TotalMilliseconds
+                    / Environment.ProcessorCount
+                    * 100,
+                3),
+            threads);
+    }
+
+    private static Dictionary<int, ThreadCpuSnapshot> CaptureThreadCpu(Process process)
+    {
+        var result = new Dictionary<int, ThreadCpuSnapshot>();
+        foreach (ProcessThread thread in process.Threads)
+        {
+            try
+            {
+                result[thread.Id] = new ThreadCpuSnapshot(
+                    thread.TotalProcessorTime.TotalMilliseconds,
+                    thread.ThreadState.ToString());
+            }
+            catch (InvalidOperationException) { }
+        }
+        return result;
     }
 
     private static async Task<ScanPerformanceMetrics> MeasureScanAsync(
@@ -607,6 +668,17 @@ internal static class PerformanceBenchmarkRunner
 
     private static double Elapsed(DateTimeOffset start, DateTimeOffset end) =>
         Math.Round(Math.Max(0, (end - start).TotalMilliseconds), 3);
+
+    private sealed record CpuMeasurement(
+        double Percent,
+        IReadOnlyList<ThreadCpuPerformanceSample> Threads);
+    private readonly record struct ThreadCpuSnapshot(double CpuMs, string State);
+
+    private static class NativeMethods
+    {
+        [DllImport("kernel32.dll")]
+        internal static extern int GetCurrentThreadId();
+    }
 }
 
 internal static class PerformanceStatistics

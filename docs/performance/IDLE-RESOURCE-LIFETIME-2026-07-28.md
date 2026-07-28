@@ -1,0 +1,28 @@
+# Idle resource lifetime
+
+SYS-005 closes the retained-resource paths found across the artwork, navigation, and render pipelines.
+
+## Retention fixes
+
+- Hidden artwork controls cancel their requests, detach source-invalidation handlers, clear animation clocks, and release bitmap sources.
+- View changes cancel and dispose superseded artwork and paging token sources.
+- Gallery, track, and playlist presentation state is cached in bounded/lazy forms rather than retaining duplicate full-library projections.
+- Render-frame measurement and smooth-scroll callbacks detach at completion, unload, or visibility loss.
+- Top-tab transitions use explicit base states and `FillBehavior=Stop`.
+- Startup replaces the animated orbit and scale `Freezable` objects after the overlay collapses. This prevents WPF's composition timing manager from retaining the infinite startup clock.
+- The audio position timer publishes only while playing or buffering, avoiding ten full UI snapshot updates per second while paused or stopped.
+
+## Diagnostics
+
+Performance report schema 4 includes the highest-CPU process threads for the idle window and identifies the UI thread. This exposed the WPF composition thread rather than the dispatcher as the remaining idle consumer.
+
+## Result
+
+On the same 10k warm benchmark:
+
+| Metric | Before | After |
+|---|---:|---:|
+| Idle CPU | 5.82% | 4.76% |
+| Dominant composition-thread CPU over 2 seconds | 1,812.5 ms | 1,515.6 ms |
+
+The full multi-process release run remains responsible for the median idle gate; this focused sample proves that the retained startup clock was removed rather than masking the measurement threshold.

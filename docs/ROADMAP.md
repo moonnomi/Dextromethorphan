@@ -87,7 +87,7 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 - [ ] **P0 SYS-002** Coalesce scan progress updates so thousands of files cannot flood the dispatcher.
 - [ ] **P0 SYS-003** Add scan cancellation, pause/resume, and resumable checkpoints for large or network libraries.
 - [ ] **P0 SYS-004** Bound scanner memory and metadata concurrency independently for SSD, HDD, removable, and SMB sources.
-- [ ] **P0 SYS-005** Profile and eliminate event-handler, bitmap, cancellation-token, and view-model retention leaks.
+- [x] **P0 SYS-005** Profile and eliminate event-handler, bitmap, cancellation-token, and view-model retention leaks. See [the idle resource-lifetime result](performance/IDLE-RESOURCE-LIFETIME-2026-07-28.md).
 - [ ] **P1 SYS-006** Add an idle cleanup policy for thumbnails, navigation history, stale group state, and completed background jobs.
 - [ ] **P1 SYS-007** Hardware-test scan throughput and responsiveness at 10k, 50k, and 100k tracks.
 

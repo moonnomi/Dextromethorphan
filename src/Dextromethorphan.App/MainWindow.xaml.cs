@@ -124,7 +124,13 @@ public partial class MainWindow : Window
             scale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
             scale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
         }
-        if (StartupOrbit.RenderTransform is RotateTransform orbit) orbit.BeginAnimation(RotateTransform.AngleProperty, null);
+        if (StartupOrbit.RenderTransform is RotateTransform orbit)
+            orbit.BeginAnimation(RotateTransform.AngleProperty, null);
+        // Replace the formerly animated Freezables as well as clearing their
+        // clocks. WPF's composition timing manager can otherwise retain the
+        // forever-orbit clock after the startup overlay has been collapsed.
+        StartupBrand.RenderTransform = new ScaleTransform(1, 1);
+        StartupOrbit.RenderTransform = new RotateTransform();
     }
 
     private void ViewModelOnPropertyChanged(object? sender, PropertyChangedEventArgs e)

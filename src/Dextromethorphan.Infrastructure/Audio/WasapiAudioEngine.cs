@@ -33,7 +33,15 @@ public sealed class WasapiAudioEngine : IAudioEngine
     private bool _pipelineCompleted;
     private int _recovering;
 
-    public WasapiAudioEngine() => _positionTimer = new Timer(_ => Publish(), null, TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(100));
+    public WasapiAudioEngine() => _positionTimer = new Timer(
+        _ =>
+        {
+            if (_state is PlaybackState.Playing or PlaybackState.Buffering)
+                Publish();
+        },
+        null,
+        TimeSpan.FromMilliseconds(100),
+        TimeSpan.FromMilliseconds(100));
     public PlaybackSnapshot Snapshot => new(_track, _state, Position, Duration, _volume, _error, _diagnostics, _options.Speed, _gain?.Peak ?? 0);
     public AudioDiagnostics? Diagnostics => _diagnostics;
     public event EventHandler<PlaybackSnapshot>? StateChanged;

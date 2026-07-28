@@ -218,21 +218,19 @@
         <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RadioButton">
             <Grid Background="{TemplateBinding Background}"><Grid.RowDefinitions><RowDefinition/><RowDefinition Height="3"/></Grid.RowDefinitions>
                 <ContentPresenter x:Name="Label" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}" RenderTransformOrigin="0.5,0.5"><ContentPresenter.RenderTransform><TranslateTransform/></ContentPresenter.RenderTransform></ContentPresenter>
-                <Border x:Name="Indicator" Grid.Row="1" Height="3" CornerRadius="2,2,0,0" Background="{StaticResource AccentBrush}" Margin="8,0" Opacity="0" RenderTransformOrigin="0.5,0.5"><Border.RenderTransform><ScaleTransform ScaleX="0.35"/></Border.RenderTransform></Border>
+                <Border x:Name="Indicator" Grid.Row="1" Height="3" CornerRadius="2,2,0,0" Background="{StaticResource AccentBrush}" Margin="8,0" Opacity="0"/>
             </Grid>
             <ControlTemplate.Triggers>
                 <Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="{StaticResource TextBrush}"/><Setter Property="Background" Value="#0FFFFFFF"/></Trigger>
                 <MultiDataTrigger>
                     <MultiDataTrigger.Conditions><Condition Binding="{Binding IsChecked, RelativeSource={RelativeSource Self}}" Value="True"/><Condition Binding="{Binding AnimationsEnabled}" Value="True"/></MultiDataTrigger.Conditions>
-                    <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                    <Setter Property="Foreground" Value="{StaticResource TextBrush}"/><Setter TargetName="Indicator" Property="Opacity" Value="1"/>
                     <MultiDataTrigger.EnterActions><BeginStoryboard><Storyboard>
-                        <DoubleAnimation Storyboard.TargetName="Indicator" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.14"/>
-                        <DoubleAnimation Storyboard.TargetName="Indicator" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" To="1" Duration="0:0:0.2"><DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction></DoubleAnimation>
-                        <DoubleAnimation Storyboard.TargetName="Label" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)" From="2" To="0" Duration="0:0:0.18"><DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction></DoubleAnimation>
+                        <DoubleAnimation Storyboard.TargetName="Indicator" Storyboard.TargetProperty="Opacity" From="0" To="1" Duration="0:0:0.14" FillBehavior="Stop"/>
+                        <DoubleAnimation Storyboard.TargetName="Label" Storyboard.TargetProperty="(UIElement.RenderTransform).(TranslateTransform.Y)" From="2" To="0" Duration="0:0:0.18" FillBehavior="Stop"><DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction></DoubleAnimation>
                     </Storyboard></BeginStoryboard></MultiDataTrigger.EnterActions>
                     <MultiDataTrigger.ExitActions><BeginStoryboard><Storyboard>
-                        <DoubleAnimation Storyboard.TargetName="Indicator" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.1"/>
-                        <DoubleAnimation Storyboard.TargetName="Indicator" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" To="0.35" Duration="0:0:0.12"/>
+                        <DoubleAnimation Storyboard.TargetName="Indicator" Storyboard.TargetProperty="Opacity" From="1" To="0" Duration="0:0:0.1" FillBehavior="Stop"/>
                     </Storyboard></BeginStoryboard></MultiDataTrigger.ExitActions>
                 </MultiDataTrigger>
                 <MultiDataTrigger>
