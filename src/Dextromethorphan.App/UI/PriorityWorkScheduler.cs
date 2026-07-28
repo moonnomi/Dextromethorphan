@@ -67,7 +67,7 @@ internal sealed class PriorityWorkScheduler<TResult> : IDisposable, IAsyncDispos
 
         try
         {
-            return await request.Completion.Task.WaitAsync(cancellationToken);
+            return await request.Completion.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {

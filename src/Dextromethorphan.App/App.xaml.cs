@@ -25,6 +25,7 @@ public partial class App : Application
         .ConfigureServices(services =>
         {
             services.AddSingleton<DeveloperDiagnostics>();
+            services.AddSingleton<ArtworkPropertyUpdateBatcher>();
             services.AddSingleton<ArtworkImageService>();
             services.AddSingleton<PerformanceOverlayViewModel>();
             services.AddSingleton<AppPaths>();

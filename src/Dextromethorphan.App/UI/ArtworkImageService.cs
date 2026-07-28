@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media.Imaging;
 using Dextromethorphan.App.Diagnostics;
+using Dextromethorphan.App.ViewModels;
 
 namespace Dextromethorphan.App.UI;
 
@@ -18,6 +19,7 @@ public sealed class ArtworkImageService : IDisposable
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTimeOffset> _failures = new(StringComparer.OrdinalIgnoreCase);
     private readonly PriorityWorkScheduler<BitmapSource?> _scheduler;
     private readonly DeveloperDiagnostics _diagnostics;
+    private readonly ArtworkPropertyUpdateBatcher _artworkUpdates;
     private long _cacheBytes;
     private long _requests;
     private long _cacheHits;
@@ -25,9 +27,12 @@ public sealed class ArtworkImageService : IDisposable
     private long _decodes;
     private long _decodeFailures;
 
-    public ArtworkImageService(DeveloperDiagnostics diagnostics)
+    public ArtworkImageService(
+        DeveloperDiagnostics diagnostics,
+        ArtworkPropertyUpdateBatcher artworkUpdates)
     {
         _diagnostics = diagnostics;
+        _artworkUpdates = artworkUpdates;
         _scheduler = new PriorityWorkScheduler<BitmapSource?>(DecoderWorkers);
         Current = this;
     }
@@ -60,7 +65,7 @@ public sealed class ArtworkImageService : IDisposable
             key,
             priority,
             ct => Task.FromResult(Decode(key, path, size, ct)),
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
         var after = _scheduler.GetMetrics();
         if (after.Deduplicated > before.Deduplicated)
         {
@@ -69,6 +74,9 @@ public sealed class ArtworkImageService : IDisposable
         }
         return result;
     }
+
+    internal void EnqueuePropertyUpdate(Action update, CancellationToken cancellationToken) =>
+        _artworkUpdates.Enqueue(update, cancellationToken);
 
     private BitmapSource? Decode(string key, string path, int size, CancellationToken cancellationToken)
     {
@@ -308,10 +316,18 @@ public static class AsyncArtwork
         {
             try
             {
-                var bitmap = await ArtworkImageService.Current!.GetAsync(path, size, priority, cancellationToken);
-                if (bitmap is null || cancellationToken.IsCancellationRequested || version != _version || !image.IsLoaded || !image.IsVisible) return;
-                image.Source = bitmap;
-                image.RaiseEvent(new RoutedEventArgs(ArtworkLoadedEvent, image));
+                var service = ArtworkImageService.Current;
+                if (service is null) return;
+                var bitmap = await service.GetAsync(path, size, priority, cancellationToken).ConfigureAwait(false);
+                if (bitmap is null || cancellationToken.IsCancellationRequested) return;
+                service.EnqueuePropertyUpdate(
+                    () =>
+                    {
+                        if (version != _version || !image.IsLoaded || !image.IsVisible) return;
+                        image.Source = bitmap;
+                        image.RaiseEvent(new RoutedEventArgs(ArtworkLoadedEvent, image));
+                    },
+                    cancellationToken);
             }
             catch (OperationCanceledException) { }
         }

@@ -12,6 +12,7 @@ public sealed class PerformanceOverlayViewModel : ObservableObject, IDisposable
 {
     private const double StallThresholdMs = 50;
     private readonly ArtworkImageService _artwork;
+    private readonly ArtworkPropertyUpdateBatcher _artworkUpdates;
     private readonly DeveloperDiagnostics _diagnostics;
     private readonly Queue<double> _recentFrames = new();
     private Window? _owner;
@@ -33,9 +34,13 @@ public sealed class PerformanceOverlayViewModel : ObservableObject, IDisposable
     private string _garbageCollections = "—";
     private string _diagnosticsStatus = "Overlay only · file trace disabled";
 
-    public PerformanceOverlayViewModel(ArtworkImageService artwork, DeveloperDiagnostics diagnostics)
+    public PerformanceOverlayViewModel(
+        ArtworkImageService artwork,
+        ArtworkPropertyUpdateBatcher artworkUpdates,
+        DeveloperDiagnostics diagnostics)
     {
         _artwork = artwork;
+        _artworkUpdates = artworkUpdates;
         _diagnostics = diagnostics;
         ToggleCommand = new RelayCommand(_ => IsVisible = !IsVisible);
         ResetCommand = new RelayCommand(_ => Reset());
@@ -161,7 +166,8 @@ public sealed class PerformanceOverlayViewModel : ObservableObject, IDisposable
         UiStalls = $"{_uiStallCount:N0} over {StallThresholdMs:0} ms · worst {_worstFrameMs:0.0} ms";
 
         var artwork = _artwork.GetRuntimeMetrics();
-        ArtworkQueue = $"{artwork.Active:N0} decoding · {artwork.Queued:N0} queued · {artwork.DroppedBeforeDecode:N0} stale dropped";
+        var updates = _artworkUpdates.GetMetrics();
+        ArtworkQueue = $"{artwork.Active:N0} decoding · {artwork.Queued:N0} queued · {updates.Pending:N0} UI pending · {updates.Batches:N0} batches";
         ArtworkCache = $"{artwork.CacheEntries:N0} items · {FormatMegabytes(artwork.CacheBytes)} · {artwork.CacheHitRate:0}% hit";
 
         using var process = Process.GetCurrentProcess();

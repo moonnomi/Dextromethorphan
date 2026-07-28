@@ -50,7 +50,7 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 - [x] **P0 ART-005** Prioritize visible cards, the playing track, and queue entries; defer off-screen work. See [the prioritized artwork queue result](performance/ARTWORK-PRIORITY-2026-07-26.md).
 - [x] **P0 ART-006** Cancel stale artwork requests immediately when the query, tab, collection, or library generation changes.
 - [x] **P0 ART-007** Resolve artwork only for the active view instead of starting work for albums, artists, genres, folders, and playlists together. See [the active-view artwork result](performance/ARTWORK-ACTIVE-VIEW-2026-07-26.md).
-- [ ] **P0 ART-008** Coalesce artwork property changes into small dispatcher batches rather than one UI dispatch per card.
+- [x] **P0 ART-008** Coalesce artwork property changes into small dispatcher batches rather than one UI dispatch per card. See [the artwork dispatcher batching result](performance/ARTWORK-DISPATCH-BATCHING-2026-07-28.md).
 - [ ] **P1 ART-009** Generate persistent 64, 256, 640, and Now Playing thumbnail variants so normal navigation never decodes original embedded artwork.
 - [ ] **P1 ART-010** Store the detected image format/extension and reject corrupt or decompression-bomb artwork safely.
 - [ ] **P1 ART-011** Add placeholders, fade-in, retry, and permanent-failure states without layout shifts.

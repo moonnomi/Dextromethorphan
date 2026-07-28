@@ -23,6 +23,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly IShortcutService _shortcuts;
     private readonly ISystemMediaTransportService _systemMedia;
     private readonly DeveloperDiagnostics _diagnostics;
+    private readonly ArtworkPropertyUpdateBatcher _artworkUpdates;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly ConcurrentDictionary<string, string?> _resolvedArtwork = new(StringComparer.OrdinalIgnoreCase);
     private readonly Stack<NavigationEntry> _backHistory = new();
@@ -73,11 +74,12 @@ public sealed class MainViewModel : ObservableObject
         ISleepTimerService sleepTimer,
         IShortcutService shortcuts,
         ISystemMediaTransportService systemMedia,
-        DeveloperDiagnostics diagnostics)
+        DeveloperDiagnostics diagnostics,
+        ArtworkPropertyUpdateBatcher artworkUpdates)
     {
         _settings = settings; _repository = repository; _playlists = playlists; _scanner = scanner; _artwork = artwork;
         _audio = audio; _queue = queue; _sleepTimer = sleepTimer; _shortcuts = shortcuts; _systemMedia = systemMedia;
-        _diagnostics = diagnostics;
+        _diagnostics = diagnostics; _artworkUpdates = artworkUpdates;
         NavigateCommand = new RelayCommand(p => Navigate(p?.ToString()));
         SelectGroupCommand = new RelayCommand(p => SelectGroup(p as LibraryCardViewModel));
         CloseCollectionCommand = new RelayCommand(_ => CloseCollectionDetail());
@@ -422,7 +424,14 @@ public sealed class MainViewModel : ObservableObject
             await Parallel.ForEachAsync(cards, new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = cancellationToken }, async (card, ct) =>
             {
                 var path = await ResolveArtworkAsync(card.RepresentativeTrack!, ct);
-                if (path is not null) RunOnUi(() => { card.ArtworkPath = path; if (ReferenceEquals(card, SelectedCard)) Raise(nameof(HasDetailArtwork)); });
+                if (path is not null)
+                    _artworkUpdates.Enqueue(
+                        () =>
+                        {
+                            card.ArtworkPath = path;
+                            if (ReferenceEquals(card, SelectedCard)) Raise(nameof(HasDetailArtwork));
+                        },
+                        ct);
             });
         }
         catch (OperationCanceledException) { }
@@ -947,7 +956,10 @@ public sealed class MainViewModel : ObservableObject
                     artwork = await ResolveArtworkAsync(entry.Track, ct);
                     if (artwork is not null) break;
                 }
-                if (artwork is not null) RunOnUi(() => { foreach (var entry in entries) entry.ArtworkPath = artwork; });
+                if (artwork is not null)
+                    _artworkUpdates.Enqueue(
+                        () => { foreach (var entry in entries) entry.ArtworkPath = artwork; },
+                        ct);
             });
         }
         catch (OperationCanceledException) { }
