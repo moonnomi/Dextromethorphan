@@ -7,14 +7,17 @@ namespace Dextromethorphan.Infrastructure.Library;
 
 public sealed class ArtworkCache(AppPaths paths, ISettingsService settings) : IArtworkCache
 {
+    private static readonly string[] StoredExtensions =
+        [".jpg", ".png", ".gif", ".bmp", ".tiff", ".webp", ".art"];
     private readonly SemaphoreSlim _gate = new(1, 1);
     private DateTimeOffset _nextPrune = DateTimeOffset.MinValue;
 
     public async Task<string?> StoreAsync(string mediaPath, DateTimeOffset modifiedAt, ReadOnlyMemory<byte> artwork, CancellationToken cancellationToken = default)
     {
         if (artwork.IsEmpty) return null;
+        if (!ArtworkImageInspector.TryInspect(artwork.Span, out var image, out _)) return null;
         paths.EnsureCreated();
-        var target = CachePath(mediaPath, modifiedAt);
+        var target = CachePath(mediaPath, modifiedAt, image.Extension);
         await _gate.WaitAsync(cancellationToken);
         try
         {
@@ -39,11 +42,11 @@ public sealed class ArtworkCache(AppPaths paths, ISettingsService settings) : IA
     {
         if (!File.Exists(mediaPath)) return null;
         var modifiedAt = new DateTimeOffset(File.GetLastWriteTimeUtc(mediaPath), TimeSpan.Zero);
-        var target = CachePath(mediaPath, modifiedAt);
-        if (File.Exists(target))
+        var existing = FindExistingCachePath(mediaPath, modifiedAt);
+        if (existing is not null)
         {
-            try { File.SetLastWriteTimeUtc(target, DateTime.UtcNow); } catch (IOException) { }
-            return target;
+            try { File.SetLastWriteTimeUtc(existing, DateTime.UtcNow); } catch (IOException) { }
+            return existing;
         }
         return await Task.Run(async () =>
         {
@@ -86,10 +89,21 @@ public sealed class ArtworkCache(AppPaths paths, ISettingsService settings) : IA
         finally { _gate.Release(); }
     }
 
-    private string CachePath(string mediaPath, DateTimeOffset modifiedAt)
+    private string? FindExistingCachePath(string mediaPath, DateTimeOffset modifiedAt)
+    {
+        var prefix = CachePathPrefix(mediaPath, modifiedAt);
+        return StoredExtensions
+            .Select(extension => prefix + extension)
+            .FirstOrDefault(File.Exists);
+    }
+
+    private string CachePath(string mediaPath, DateTimeOffset modifiedAt, string extension) =>
+        CachePathPrefix(mediaPath, modifiedAt) + extension;
+
+    private string CachePathPrefix(string mediaPath, DateTimeOffset modifiedAt)
     {
         var identity = $"{Path.GetFullPath(mediaPath).ToUpperInvariant()}|{modifiedAt.UtcTicks}";
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity))).ToLowerInvariant();
-        return Path.Combine(paths.ArtworkCache, hash + ".art");
+        return Path.Combine(paths.ArtworkCache, hash);
     }
 }

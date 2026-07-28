@@ -70,7 +70,8 @@ public sealed class PersistenceTests : IDisposable
         await settings.InitializeAsync(cancellationToken);
         var cache = new ArtworkCache(paths, settings);
         var modifiedAt = new DateTimeOffset(2026, 7, 15, 10, 0, 0, TimeSpan.Zero);
-        var bytes = new byte[] { 1, 2, 3, 4, 5 };
+        var bytes = Convert.FromBase64String(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
 
         var first = await cache.StoreAsync(Path.Combine(_root, "song.flac"), modifiedAt, bytes, cancellationToken);
         var repeated = await cache.StoreAsync(Path.Combine(_root, "song.flac"), modifiedAt, bytes, cancellationToken);
@@ -79,8 +80,9 @@ public sealed class PersistenceTests : IDisposable
         Assert.NotNull(first);
         Assert.Equal(first, repeated);
         Assert.NotEqual(first, changed);
+        Assert.Equal(".png", Path.GetExtension(first));
         Assert.Equal(bytes, await File.ReadAllBytesAsync(first!, cancellationToken));
-        Assert.Equal(2, Directory.EnumerateFiles(paths.ArtworkCache, "*.art").Count());
+        Assert.Equal(2, Directory.EnumerateFiles(paths.ArtworkCache, "*.png").Count());
     }
 
     public void Dispose()

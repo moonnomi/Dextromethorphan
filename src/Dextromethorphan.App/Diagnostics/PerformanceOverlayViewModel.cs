@@ -169,7 +169,8 @@ public sealed class PerformanceOverlayViewModel : ObservableObject, IDisposable
         var updates = _artworkUpdates.GetMetrics();
         ArtworkQueue = $"{artwork.Active:N0} decoding · {artwork.Queued:N0} queued · {updates.Pending:N0} UI pending · {updates.Batches:N0} batches";
         ArtworkCache = $"{artwork.CacheEntries:N0} memory · {FormatMegabytes(artwork.CacheBytes)} · {artwork.CacheHitRate:0}% RAM hit\n" +
-            $"{artwork.PersistentVariantsGenerated:N0} variants · {artwork.PersistentHitRate:0}% disk hit · {artwork.PersistentSourceDecodes:N0} original decodes";
+            $"{artwork.PersistentVariantsGenerated:N0} variants · {artwork.PersistentHitRate:0}% disk hit · " +
+            $"{artwork.PersistentSourceDecodes:N0} original decodes · {artwork.PersistentFailures:N0} rejected";
 
         using var process = Process.GetCurrentProcess();
         process.Refresh();

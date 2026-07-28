@@ -6,6 +6,7 @@ using System.Text;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Dextromethorphan.App.Diagnostics;
+using Dextromethorphan.Infrastructure.Library;
 using Dextromethorphan.Infrastructure.Storage;
 
 namespace Dextromethorphan.App.UI;
@@ -57,7 +58,9 @@ public sealed class PersistentArtworkThumbnailStore
                     return new ArtworkThumbnailResult(target, variant, true);
                 }
 
-                GenerateVariant(source, variant, cancellationToken);
+                var rejection = GenerateVariant(source, variant, cancellationToken);
+                if (rejection != ArtworkImageRejectionReason.None)
+                    return ArtworkThumbnailResult.Rejected(variant, rejection);
                 return File.Exists(target)
                     ? new ArtworkThumbnailResult(target, variant, false)
                     : null;
@@ -84,7 +87,7 @@ public sealed class PersistentArtworkThumbnailStore
         Interlocked.Read(ref _variantsGenerated),
         Interlocked.Read(ref _failures));
 
-    private void GenerateVariant(
+    private ArtworkImageRejectionReason GenerateVariant(
         ArtworkSource source,
         ArtworkThumbnailVariant variant,
         CancellationToken cancellationToken)
@@ -97,6 +100,25 @@ public sealed class PersistentArtworkThumbnailStore
         Exception? error = null;
         try
         {
+            if (!ArtworkImageInspector.TryInspectFile(
+                    source.Path,
+                    out var inspected,
+                    out var rejection,
+                    cancellationToken))
+            {
+                Interlocked.Increment(ref _failures);
+                _diagnostics.Mark(
+                    "artwork",
+                    "thumbnail.source-rejected",
+                    new Dictionary<string, object?>
+                    {
+                        ["extension"] = Path.GetExtension(source.Path),
+                        ["reason"] = rejection.ToString(),
+                        ["encodedBytes"] = new FileInfo(source.Path).Length
+                    });
+                return rejection;
+            }
+
             using var stream = File.Open(source.Path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             var decoded = new BitmapImage();
             decoded.BeginInit();
@@ -107,12 +129,33 @@ public sealed class PersistentArtworkThumbnailStore
             decoded.EndInit();
             decoded.Freeze();
             Interlocked.Increment(ref _sourceDecodes);
+            if (decoded.PixelWidth < 1 || decoded.PixelHeight < 1
+                || decoded.PixelWidth > ArtworkImageInspector.MaximumDimension
+                || decoded.PixelHeight > ArtworkImageInspector.MaximumDimension
+                || (long)decoded.PixelWidth * decoded.PixelHeight > 16L * 1024 * 1024)
+            {
+                Interlocked.Increment(ref _failures);
+                _diagnostics.Mark(
+                    "artwork",
+                    "thumbnail.source-rejected",
+                    new Dictionary<string, object?>
+                    {
+                        ["extension"] = inspected.Extension,
+                        ["reason"] = "DecoderDimensionLimit",
+                        ["headerWidth"] = inspected.Width,
+                        ["headerHeight"] = inspected.Height,
+                        ["decoderWidth"] = decoded.PixelWidth,
+                        ["decoderHeight"] = decoded.PixelHeight
+                    });
+                return ArtworkImageRejectionReason.CorruptStructure;
+            }
 
             cancellationToken.ThrowIfCancellationRequested();
             var target = VariantPath(source.Identity, variant);
-            if (File.Exists(target)) return;
+            if (File.Exists(target)) return ArtworkImageRejectionReason.None;
             WriteVariant(decoded, target, cancellationToken);
             Interlocked.Increment(ref _variantsGenerated);
+            return ArtworkImageRejectionReason.None;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
             or NotSupportedException or ArgumentException or InvalidOperationException or FileFormatException)
@@ -198,11 +241,12 @@ public sealed class PersistentArtworkThumbnailStore
 
     private bool IsManagedOriginal(string fullPath)
     {
-        if (!Path.GetExtension(fullPath).Equals(".art", StringComparison.OrdinalIgnoreCase)) return false;
         var cacheRoot = Path.GetFullPath(_paths.ArtworkCache)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-            + Path.DirectorySeparatorChar;
-        return fullPath.StartsWith(cacheRoot, StringComparison.OrdinalIgnoreCase);
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var directory = Path.GetDirectoryName(fullPath)?.TrimEnd(
+            Path.DirectorySeparatorChar,
+            Path.AltDirectorySeparatorChar);
+        return directory?.Equals(cacheRoot, StringComparison.OrdinalIgnoreCase) == true;
     }
 
     private static bool TryUseExisting(string path)
@@ -232,7 +276,15 @@ public sealed class PersistentArtworkThumbnailStore
 internal readonly record struct ArtworkThumbnailResult(
     string Path,
     ArtworkThumbnailVariant Variant,
-    bool PersistentCacheHit);
+    bool PersistentCacheHit,
+    bool SourceRejected = false,
+    ArtworkImageRejectionReason Rejection = ArtworkImageRejectionReason.None)
+{
+    internal static ArtworkThumbnailResult Rejected(
+        ArtworkThumbnailVariant variant,
+        ArtworkImageRejectionReason rejection) =>
+        new("", variant, false, true, rejection);
+}
 
 internal readonly record struct ArtworkThumbnailVariant(string FileLabel, int PixelWidth)
 {

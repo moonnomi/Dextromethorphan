@@ -96,6 +96,12 @@ public sealed class ArtworkImageService : IDisposable
         try
         {
             var prepared = _persistentThumbnails.GetOrCreate(path, requestedSize, cancellationToken);
+            if (prepared is { SourceRejected: true })
+            {
+                Interlocked.Increment(ref _decodeFailures);
+                _failures[key] = DateTimeOffset.UtcNow;
+                return null;
+            }
             var decodePath = prepared?.Path ?? path;
             if (!File.Exists(decodePath))
             {
