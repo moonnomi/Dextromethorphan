@@ -39,6 +39,7 @@ public partial class MainWindow : Window
     private bool _restoringScrollState;
     private CancellationTokenSource? _galleryPageCancellation;
     private CancellationTokenSource? _trackPageCancellation;
+    private int _viewTransitionAnimationVersion;
 
     public MainWindow(
         MainViewModel viewModel,
@@ -224,8 +225,10 @@ public partial class MainWindow : Window
 
     private void AnimateViewTransition()
     {
+        var animationVersion = ++_viewTransitionAnimationVersion;
         if (!ViewModel.AnimationsEnabled || StartupOverlay.Visibility == Visibility.Visible)
         {
+            ReleaseViewTransitionAnimations(animationVersion);
             ViewTransitionHost.Opacity = 1;
             return;
         }
@@ -233,21 +236,41 @@ public partial class MainWindow : Window
         var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
         ViewTransitionHost.BeginAnimation(OpacityProperty, null);
         ViewTransitionHost.Opacity = 1;
-        ViewTransitionHost.BeginAnimation(OpacityProperty, new DoubleAnimation(0.76, 1, TimeSpan.FromMilliseconds(155))
+        var opacityAnimation = new DoubleAnimation(0.76, 1, TimeSpan.FromMilliseconds(155))
         {
             EasingFunction = ease,
             FillBehavior = FillBehavior.Stop
-        });
+        };
+        ViewTransitionHost.BeginAnimation(OpacityProperty, opacityAnimation);
         if (ViewTransitionHost.RenderTransform is TranslateTransform transform)
         {
             transform.BeginAnimation(TranslateTransform.YProperty, null);
             transform.Y = 0;
-            transform.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(7, 0, TimeSpan.FromMilliseconds(175))
+            var translationAnimation = new DoubleAnimation(7, 0, TimeSpan.FromMilliseconds(175))
             {
                 EasingFunction = ease,
                 FillBehavior = FillBehavior.Stop
-            });
+            };
+            translationAnimation.Completed += (_, _) =>
+                ReleaseViewTransitionAnimations(animationVersion);
+            transform.BeginAnimation(
+                TranslateTransform.YProperty,
+                translationAnimation);
         }
+        else
+            opacityAnimation.Completed += (_, _) =>
+                ReleaseViewTransitionAnimations(animationVersion);
+    }
+
+    private void ReleaseViewTransitionAnimations(int animationVersion)
+    {
+        if (animationVersion != _viewTransitionAnimationVersion) return;
+        ViewTransitionHost.BeginAnimation(OpacityProperty, null);
+        ViewTransitionHost.Opacity = 1;
+        if (ViewTransitionHost.RenderTransform is not TranslateTransform transform)
+            return;
+        transform.BeginAnimation(TranslateTransform.YProperty, null);
+        transform.Y = 0;
     }
 
     protected override void OnSourceInitialized(EventArgs e)

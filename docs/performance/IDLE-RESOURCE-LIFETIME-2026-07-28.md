@@ -9,6 +9,7 @@ SYS-005 closes the retained-resource paths found across the artwork, navigation,
 - Gallery, track, and playlist presentation state is cached in bounded/lazy forms rather than retaining duplicate full-library projections.
 - Render-frame measurement and smooth-scroll callbacks detach at completion, unload, or visibility loss.
 - Top-tab transitions use explicit base states and `FillBehavior=Stop`.
+- View transitions and artwork fades explicitly detach their clocks in their `Completed` callbacks, guarded by request/transition versions so an older completion cannot cancel a newer animation.
 - Startup replaces the animated orbit and scale `Freezable` objects after the overlay collapses. This prevents WPF's composition timing manager from retaining the infinite startup clock.
 - The audio position timer publishes only while playing or buffering, avoiding ten full UI snapshot updates per second while paused or stopped.
 
@@ -25,4 +26,4 @@ On the same 10k warm benchmark:
 | Idle CPU | 5.82% | 4.76% |
 | Dominant composition-thread CPU over 2 seconds | 1,812.5 ms | 1,515.6 ms |
 
-The full multi-process release run remains responsible for the median idle gate; this focused sample proves that the retained startup clock was removed rather than masking the measurement threshold.
+A follow-up that detached completed finite clocks reduced the focused sample again to 3.78% idle CPU and 1,187.5 ms on the composition thread. The full multi-process release run remains responsible for the median idle gate; these focused samples prove that retained timing resources were removed rather than masking the measurement threshold.

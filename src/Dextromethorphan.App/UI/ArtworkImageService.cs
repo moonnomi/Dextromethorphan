@@ -626,6 +626,13 @@ public static class AsyncArtwork
                 EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut },
                 FillBehavior = FillBehavior.Stop
             };
+            var revealVersion = _version;
+            animation.Completed += (_, _) =>
+            {
+                if (revealVersion != _version) return;
+                image.BeginAnimation(UIElement.OpacityProperty, null);
+                image.Opacity = 1;
+            };
             image.BeginAnimation(UIElement.OpacityProperty, animation, HandoffBehavior.SnapshotAndReplace);
         }
     }
