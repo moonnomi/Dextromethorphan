@@ -108,12 +108,16 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     private void CleanupItems(int startIndex, int endIndex)
     {
         var generator = ItemContainerGenerator;
+        var recyclingGenerator = generator as IRecyclingItemContainerGenerator;
         for (var childIndex = InternalChildren.Count - 1; childIndex >= 0; childIndex--)
         {
             var position = new GeneratorPosition(childIndex, 0);
             var itemIndex = generator.IndexFromGeneratorPosition(position);
             if (itemIndex >= startIndex && itemIndex <= endIndex) continue;
-            generator.Remove(position, 1);
+            if (recyclingGenerator is not null)
+                recyclingGenerator.Recycle(position, 1);
+            else
+                generator.Remove(position, 1);
             RemoveInternalChildRange(childIndex, 1);
         }
     }
@@ -154,9 +158,15 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         var maximum = Math.Max(0, ExtentHeight - ViewportHeight);
         var clamped = Math.Clamp(offset, 0, maximum);
         if (Math.Abs(clamped - _offset.Y) < 0.01) return;
+        var itemHeight = Math.Max(1, ItemHeight);
+        var previousRow = (int)Math.Floor(_offset.Y / itemHeight);
+        var nextRow = (int)Math.Floor(clamped / itemHeight);
         _offset.Y = clamped;
         ScrollOwner?.InvalidateScrollInfo();
-        InvalidateMeasure();
+        if (previousRow == nextRow)
+            InvalidateArrange();
+        else
+            InvalidateMeasure();
     }
 
     public Rect MakeVisible(Visual visual, Rect rectangle)
