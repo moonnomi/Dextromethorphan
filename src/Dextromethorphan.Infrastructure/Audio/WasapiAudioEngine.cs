@@ -21,8 +21,8 @@ public sealed class WasapiAudioEngine : IAudioEngine
     private MMDevice? _outputDevice;
     private DirectGaplessWaveProvider? _direct;
     private TransitionSampleProvider? _transition;
-    private VariableRateSampleProvider? _rate;
-    private SmbPitchShiftingSampleProvider? _pitch;
+    private SoundTouchSampleProvider? _tempo;
+    private SoundTouchSampleProvider? _nextTempo;
     private FadeEnvelopeSampleProvider? _fade;
     private GainLimiterSampleProvider? _gain;
     private TimingWaveProvider? _timedProvider;
@@ -75,7 +75,14 @@ public sealed class WasapiAudioEngine : IAudioEngine
     public event EventHandler? PlaybackEnded;
     public event EventHandler<AudioEndpointChangedEventArgs>? OutputDevicesChanged;
 
-    private TimeSpan Position => _direct?.Position ?? (_transition is null ? TimeSpan.Zero : TimeSpan.FromSeconds(_transition.PositionSamples / (double)(_transition.WaveFormat.SampleRate * _transition.WaveFormat.Channels)));
+    private TimeSpan Position => _direct?.Position
+        ?? (_transition is null
+            ? TimeSpan.Zero
+            : TimeSpan.FromSeconds(
+                _transition.PositionSamples
+                / (double)(_transition.WaveFormat.SampleRate
+                           * _transition.WaveFormat.Channels)
+                * (_tempo?.Speed ?? 1)));
     private TimeSpan Duration => _direct?.Duration ?? _track?.Duration ?? TimeSpan.Zero;
 
     public Task<IReadOnlyList<AudioDeviceInfo>> GetOutputDevicesAsync(CancellationToken cancellationToken = default)
@@ -243,6 +250,12 @@ public sealed class WasapiAudioEngine : IAudioEngine
         try
         {
             var effectiveVolume = EffectiveSoftwareVolume();
+            var tempoSettingsChanged =
+                Math.Abs(_options.Speed - options.Speed) > 0.0001
+                || Math.Abs(
+                    _options.PitchSemitones
+                    - options.PitchSemitones) > 0.0001
+                || _options.PreservePitch != options.PreservePitch;
             var requiredModeChanged =
                 _options.RequiresDsp(effectiveVolume)
                 != options.RequiresDsp(effectiveVolume);
@@ -252,6 +265,7 @@ public sealed class WasapiAudioEngine : IAudioEngine
             _options.CrossfadeSeconds = Math.Clamp(_options.CrossfadeSeconds, 0, 10);
             if (_track is not null
                 && (requiredModeChanged
+                    || tempoSettingsChanged
                     || _direct is not null
                     && _options.RequiresDsp(effectiveVolume)))
                 await RebuildAtCurrentPositionAsync(cancellationToken);
@@ -329,13 +343,46 @@ public sealed class WasapiAudioEngine : IAudioEngine
                 rate,
                 channels);
             var normalized = AudioDecoderFactory.Normalize(decoded, target);
-            var initialPositionSamples = (long)Math.Round(decoded.Reader.CurrentTime.TotalSeconds * target.SampleRate * target.Channels);
-            _transition = new TransitionSampleProvider(normalized, AudioDecoderFactory.TotalSamples(decoded, target), _options.TransitionMode == TransitionMode.Crossfade ? _options.CrossfadeSeconds : 0, decoded, initialPositionSamples);
+            var totalInputSamples = AudioDecoderFactory.TotalSamples(
+                decoded,
+                target);
+            var initialInputSamples = (long)Math.Round(
+                decoded.Reader.CurrentTime.TotalSeconds
+                * target.SampleRate
+                * target.Channels);
+            ISampleProvider processed = normalized;
+            var transitionTotalSamples = totalInputSamples;
+            var initialPositionSamples = initialInputSamples;
+            if (NeedsTempoProcessing())
+            {
+                _tempo = new SoundTouchSampleProvider(
+                    normalized,
+                    Math.Max(0, totalInputSamples - initialInputSamples),
+                    _options.Speed,
+                    _options.PitchSemitones,
+                    _options.PreservePitch);
+                processed = _tempo;
+                initialPositionSamples = AlignSamples(
+                    (long)Math.Round(
+                        initialInputSamples / _options.Speed),
+                    target.Channels);
+                transitionTotalSamples = initialPositionSamples
+                                         + _tempo.MaximumOutputFrames
+                                         * target.Channels;
+            }
+            _transition = new TransitionSampleProvider(
+                processed,
+                transitionTotalSamples,
+                _options.TransitionMode == TransitionMode.Crossfade
+                    ? _options.CrossfadeSeconds
+                    : 0,
+                decoded,
+                initialPositionSamples);
             _transition.SourceChanged += OnPipelineSourceChanged;
             _transition.Completed += OnPipelineCompleted;
-            _rate = new VariableRateSampleProvider(_transition);
-            _pitch = new SmbPitchShiftingSampleProvider(_rate);
-            _fade = new FadeEnvelopeSampleProvider(_pitch, () => (Position, Duration));
+            _fade = new FadeEnvelopeSampleProvider(
+                _transition,
+                () => (Position, Duration));
             _gain = new GainLimiterSampleProvider(_fade) { PreventClipping = _options.PreventClipping };
             UpdateDspParameters();
             waveProvider =
@@ -376,7 +423,31 @@ public sealed class WasapiAudioEngine : IAudioEngine
             if (_direct.CanQueue(decoded.Reader.WaveFormat)) _direct.QueueNext(decoded.Reader, decoded); else _incompatibleNext = decoded;
         }
         else if (_transition is not null)
-            _transition.QueueNext(AudioDecoderFactory.Normalize(decoded, _transition.WaveFormat), AudioDecoderFactory.TotalSamples(decoded, _transition.WaveFormat), decoded);
+        {
+            var normalized = AudioDecoderFactory.Normalize(
+                decoded,
+                _transition.WaveFormat);
+            ISampleProvider processed = normalized;
+            var totalSamples = AudioDecoderFactory.TotalSamples(
+                decoded,
+                _transition.WaveFormat);
+            if (NeedsTempoProcessing())
+            {
+                _nextTempo = new SoundTouchSampleProvider(
+                    normalized,
+                    totalSamples,
+                    _options.Speed,
+                    _options.PitchSemitones,
+                    _options.PreservePitch);
+                processed = _nextTempo;
+                totalSamples = _nextTempo.MaximumOutputFrames
+                               * _transition.WaveFormat.Channels;
+            }
+            _transition.QueueNext(
+                processed,
+                totalSamples,
+                decoded);
+        }
         else decoded.Dispose();
         await Task.CompletedTask;
     }
@@ -481,7 +552,15 @@ public sealed class WasapiAudioEngine : IAudioEngine
             output.Name,
             output.Fallback,
             output.FallbackReason,
-            _recoveryAttempts);
+            _recoveryAttempts,
+            Processor: _tempo is null
+                ? "None"
+                : "SoundTouch.Net 2.3.2 (high-quality mode)",
+            ProcessingLatencyMilliseconds:
+                _tempo?.ProcessingLatencyMilliseconds ?? 0,
+            TimelineClock: _tempo is null
+                ? "Decoded source frames"
+                : "Presented output frames × media speed");
     }
 
     private string DspReason()
@@ -502,13 +581,6 @@ public sealed class WasapiAudioEngine : IAudioEngine
     private void UpdateDspParameters()
     {
         if (_transition is not null) _transition.CrossfadeSeconds = _options.TransitionMode == TransitionMode.Crossfade ? _options.CrossfadeSeconds : 0;
-        if (_rate is not null) _rate.Rate = _options.Speed;
-        if (_pitch is not null)
-        {
-            var requestedPitch = Math.Pow(2, _options.PitchSemitones / 12d);
-            var correction = _options.PreservePitch ? requestedPitch / _options.Speed : requestedPitch;
-            _pitch.PitchFactor = (float)Math.Clamp(correction, 0.5, 2);
-        }
         if (_gain is not null) { _gain.PreventClipping = _options.PreventClipping; UpdateGain(); }
         if (_fade is not null) { _fade.FadeInSeconds = Math.Clamp(_options.FadeInSeconds, 0, 10); _fade.FadeOutSeconds = Math.Clamp(_options.FadeOutSeconds, 0, 10); }
     }
@@ -527,6 +599,8 @@ public sealed class WasapiAudioEngine : IAudioEngine
         if (previous is null || current is null) return;
         _track = current;
         _nextTrack = null;
+        _tempo = _nextTempo;
+        _nextTempo = null;
         UpdateGain();
         TrackTransitioned?.Invoke(this, new TrackTransitionedEventArgs(previous, current, _transition?.CrossfadeSeconds > 0));
         Publish();
@@ -656,6 +730,13 @@ public sealed class WasapiAudioEngine : IAudioEngine
 
     private static AudioFormatInfo FormatInfo(WaveFormat format) => new(format.SampleRate, format.BitsPerSample, format.Channels, format.Encoding.ToString());
 
+    private bool NeedsTempoProcessing() =>
+        Math.Abs(_options.Speed - 1) > 0.0001
+        || Math.Abs(_options.PitchSemitones) > 0.0001;
+
+    private static long AlignSamples(long samples, int channels) =>
+        samples - samples % channels;
+
     private double EffectiveSoftwareVolume() =>
         _profile.VolumeControl == VolumeControlMode.Software
         && !UsesHardwareVolume(_profile)
@@ -737,7 +818,7 @@ public sealed class WasapiAudioEngine : IAudioEngine
         if (_direct is not null) { _direct.SourceChanged -= OnPipelineSourceChanged; _direct.Completed -= OnPipelineCompleted; _direct.Dispose(); _direct = null; }
         if (_transition is not null) { _transition.SourceChanged -= OnPipelineSourceChanged; _transition.Completed -= OnPipelineCompleted; _transition.Dispose(); _transition = null; }
         _incompatibleNext?.Dispose(); _incompatibleNext = null;
-        _rate = null; _pitch = null; _fade = null; _gain = null;
+        _tempo = null; _nextTempo = null; _fade = null; _gain = null;
         _timedProvider = null;
     }
 

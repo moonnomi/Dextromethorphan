@@ -176,6 +176,50 @@ public sealed class DspQualificationTests
         Assert.Equal(-20, result, precision: 8);
     }
 
+    [Fact]
+    public void TempoProcessingFeedsGaplessTransitionInOutputTime()
+    {
+        const int sampleRate = 48_000;
+        const double speed = 1.5;
+        var firstInput = Enumerable.Repeat(0.2f, sampleRate * 2).ToArray();
+        var secondInput = Enumerable.Repeat(0.4f, sampleRate).ToArray();
+        var first = new SoundTouchSampleProvider(
+            new ChunkedSampleProvider(
+                firstInput,
+                sampleRate,
+                1,
+                997),
+            firstInput.Length,
+            speed,
+            pitchSemitones: 0,
+            preservePitch: true);
+        var second = new SoundTouchSampleProvider(
+            new ChunkedSampleProvider(
+                secondInput,
+                sampleRate,
+                1,
+                733),
+            secondInput.Length,
+            speed,
+            pitchSemitones: 0,
+            preservePitch: true);
+        using var transition = new TransitionSampleProvider(
+            first,
+            first.MaximumOutputFrames);
+        transition.QueueNext(
+            second,
+            second.MaximumOutputFrames);
+
+        var output = Drain(transition, [257, 2048, 510]);
+
+        Assert.Equal(
+            first.MaximumOutputFrames + second.MaximumOutputFrames,
+            output.LongLength);
+        Assert.All(
+            output.Skip(sampleRate / 4).Take(sampleRate),
+            sample => Assert.True(Math.Abs(sample) > 0.05f));
+    }
+
     private static Track TrackFor(string file) =>
         new()
         {

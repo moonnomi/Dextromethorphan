@@ -87,6 +87,6 @@ The current focus is playback reliability, audio diagnostics, and interaction po
 <details>
 <summary>Third-party software and licenses</summary>
 
-NAudio and NVorbis are MIT licensed; BunLabs.NAudio.Flac is MS-PL; Microsoft.Data.Sqlite is MIT; SQLitePCLRaw is Apache-2.0; and TagLibSharp is LGPL-2.1. Replace `ITrackMetadataReader` and the managed FLAC adapter if a permissive-only distribution policy is required.
+NAudio and NVorbis are MIT licensed; BunLabs.NAudio.Flac is MS-PL; Microsoft.Data.Sqlite is MIT; SQLitePCLRaw is Apache-2.0; and TagLibSharp and SoundTouch.Net are LGPL-2.1. The SoundTouch license is copied into release output under `licenses`. Replace the LGPL/MS-PL components if a permissive-only distribution policy is required.
 
 </details>

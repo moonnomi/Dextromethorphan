@@ -50,7 +50,10 @@ public sealed record AudioDiagnostics(
     int RecoveryAttempts = 0,
     long Underruns = 0,
     double LastCallbackMilliseconds = 0,
-    double MaximumCallbackMilliseconds = 0);
+    double MaximumCallbackMilliseconds = 0,
+    string Processor = "None",
+    double ProcessingLatencyMilliseconds = 0,
+    string TimelineClock = "Source position");
 
 public sealed record PlaybackSnapshot(
     Track? Track,

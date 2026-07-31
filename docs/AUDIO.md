@@ -34,7 +34,9 @@ Normal playback never assigns `WasapiOut.Volume`: NAudio maps that property to W
 
 ## Speed and pitch
 
-The DSP graph uses a variable-rate interpolator followed by NAudio's FFT pitch shifter. Pitch preservation applies inverse-rate correction; independent semitone adjustment is composed with it. This is functional but remains a candidate for a higher-quality tempo library after listening and latency tests.
+The DSP graph uses SoundTouch.Net 2.3.2 in high-quality mode: quick seek is disabled, the anti-alias filter is enabled, and its filter length is increased to 64 taps. Tempo and pitch are independent when pitch preservation is enabled. With preservation disabled, speed changes pitch naturally and the semitone control remains an additional shift.
+
+SoundTouch runs per track before the gapless/crossfade provider, so crossfade duration remains measured in real output seconds. The media clock is derived from frames actually handed to the output multiplied by playback speed, rather than from decoded input buffered ahead by the processor. Diagnostics expose the processor, its reported average latency, and the timeline clock. Unity speed/pitch bypasses SoundTouch entirely.
 
 ## DSD over PCM
 
@@ -44,10 +46,10 @@ DoP requires an exclusive DAC and `DsdMode: "Dop"`. ReplayGain, crossfade, fades
 
 ## Decoder coverage
 
-- Managed/built-in: WAV, AIFF, MP3, Ogg Vorbis, DSF/DFF-to-DoP.
-- Windows Media Foundation: FLAC, AAC/M4A, ALAC, WMA, Opus and other installed transforms.
-- Pending independent coverage: guaranteed FLAC/ALAC/AAC/Opus on clean Windows and DST-compressed DSDIFF.
+- Managed/built-in: WAV, AIFF, MP3, FLAC, Ogg Vorbis, Opus, and DSF/DFF-to-DoP.
+- Windows Media Foundation with startup capability probes: AAC/M4A, ALAC, WMA, and other installed transforms.
+- Pending independent coverage: DST-compressed DSDIFF.
 
 ## Verification
 
-Automated tests cover callback-spanning gapless joins, crossfade output, variable-rate consumption, ReplayGain peak math, clipping guard behavior, sleep-at-end state, and exact DSF/DoP payload/marker framing. USB-driver exclusive behavior and DAC interpretation require a physical hardware matrix.
+Automated tests cover callback-spanning gapless joins, crossfade output, SoundTouch tempo/pitch frequency and duration behavior, measured processing displacement, ReplayGain analysis and peak math, clipping guard behavior, sleep-at-end state, and exact DSF/DoP payload/marker framing. USB-driver exclusive behavior and DAC interpretation require a physical hardware matrix.

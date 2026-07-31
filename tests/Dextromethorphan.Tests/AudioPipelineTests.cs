@@ -67,16 +67,110 @@ public sealed class AudioPipelineTests
     }
 
     [Fact]
-    public void VariableRateConsumesSourceAtRequestedSpeed()
+    public void SoundTouchChangesTempoWithoutChangingPitch()
     {
-        var source = new ArraySampleProvider(Enumerable.Range(0, 12).Select(x => (float)x).ToArray(), 10, 1);
-        var provider = new VariableRateSampleProvider(source) { Rate = 1.5 };
-        var output = new float[5];
+        const int sampleRate = 48_000;
+        const int inputFrames = sampleRate * 2;
+        var source = new ArraySampleProvider(
+            Sine(inputFrames, sampleRate, 997),
+            sampleRate,
+            1);
+        var provider = new SoundTouchSampleProvider(
+            source,
+            inputFrames,
+            speed: 1.25,
+            pitchSemitones: 0,
+            preservePitch: true);
 
-        var read = provider.Read(output, 0, output.Length);
+        var output = Drain(provider);
 
-        Assert.Equal(5, read);
-        Assert.Equal(new float[] { 0, 1.5f, 3, 4.5f, 6 }, output);
+        Assert.Equal(76_800, output.Length);
+        Assert.InRange(
+            EstimateFrequency(output, sampleRate),
+            985,
+            1_010);
+        Assert.Equal(output.Length, provider.OutputFrames);
+        Assert.InRange(provider.ProcessingLatencyMilliseconds, 1, 100);
+    }
+
+    [Fact]
+    public void SoundTouchChangesPitchWithoutChangingDuration()
+    {
+        const int sampleRate = 48_000;
+        const int inputFrames = sampleRate * 2;
+        var provider = new SoundTouchSampleProvider(
+            new ArraySampleProvider(
+                Sine(inputFrames, sampleRate, 440),
+                sampleRate,
+                1),
+            inputFrames,
+            speed: 1,
+            pitchSemitones: 12,
+            preservePitch: true);
+
+        var output = Drain(provider);
+
+        Assert.Equal(inputFrames, output.Length);
+        Assert.InRange(
+            EstimateFrequency(output, sampleRate),
+            860,
+            900);
+    }
+
+    [Fact]
+    public void SoundTouchReportsAndBoundsMeasuredTimelineDisplacement()
+    {
+        const int sampleRate = 48_000;
+        const int inputFrames = sampleRate * 2;
+        const int impulseFrame = sampleRate;
+        var impulse = new float[inputFrames];
+        impulse[impulseFrame] = 1;
+        var provider = new SoundTouchSampleProvider(
+            new ArraySampleProvider(impulse, sampleRate, 1),
+            inputFrames,
+            speed: 1.25,
+            pitchSemitones: 0,
+            preservePitch: true);
+
+        var output = Drain(provider);
+        var outputImpulse = Array.IndexOf(output, output.Max());
+        var presentedMediaFrame = outputImpulse * provider.Speed;
+        var errorMilliseconds = Math.Abs(
+            presentedMediaFrame - impulseFrame) * 1000 / sampleRate;
+
+        Assert.InRange(outputImpulse, 0, output.Length - 1);
+        Assert.InRange(
+            errorMilliseconds,
+            0,
+            provider.ProcessingLatencyMilliseconds + 10);
+        Assert.InRange(provider.InitialLatencyFrames, 1, sampleRate / 5);
+    }
+
+    [Theory]
+    [InlineData(0.5)]
+    [InlineData(1.5)]
+    public void SoundTouchSupportsConfiguredSpeedBounds(double speed)
+    {
+        const int sampleRate = 48_000;
+        var provider = new SoundTouchSampleProvider(
+            new ArraySampleProvider(
+                Sine(sampleRate, sampleRate, 440),
+                sampleRate,
+                1),
+            sampleRate,
+            speed,
+            pitchSemitones: 0,
+            preservePitch: true);
+
+        var output = Drain(provider);
+
+        Assert.Equal(
+            (int)Math.Ceiling(sampleRate / speed),
+            output.Length);
+        Assert.InRange(
+            EstimateFrequency(output, sampleRate),
+            420,
+            460);
     }
 
     [Fact]
@@ -158,6 +252,44 @@ public sealed class AudioPipelineTests
     }
 
     private static Track NewTrack() => new() { Path = "test.flac", Title = "Test" };
+
+    private static float[] Sine(
+        int frames,
+        int sampleRate,
+        double frequency) =>
+        Enumerable.Range(0, frames)
+            .Select(frame => (float)(
+                0.5 * Math.Sin(
+                    2 * Math.PI * frequency * frame / sampleRate)))
+            .ToArray();
+
+    private static float[] Drain(ISampleProvider provider)
+    {
+        var output = new List<float>();
+        var buffer = new float[2048];
+        while (true)
+        {
+            var read = provider.Read(buffer, 0, buffer.Length);
+            if (read == 0) break;
+            output.AddRange(buffer.AsSpan(0, read).ToArray());
+        }
+        return output.ToArray();
+    }
+
+    private static double EstimateFrequency(
+        IReadOnlyList<float> samples,
+        int sampleRate)
+    {
+        var start = samples.Count / 4;
+        var end = samples.Count * 3 / 4;
+        var crossings = 0;
+        for (var index = start + 1; index < end; index++)
+        {
+            if (samples[index - 1] <= 0 && samples[index] > 0)
+                crossings++;
+        }
+        return crossings * sampleRate / (double)(end - start);
+    }
 
     private static void WriteChunk(Stream destination, string id, Action<MemoryStream> write)
     {

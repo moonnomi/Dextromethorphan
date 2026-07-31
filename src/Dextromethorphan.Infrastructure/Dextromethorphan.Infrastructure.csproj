@@ -8,10 +8,17 @@
     <PackageReference Include="Concentus.Oggfile" />
     <PackageReference Include="TagLibSharp" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />
+    <PackageReference Include="SoundTouch.Net" GeneratePathProperty="true" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Audio/Probes/*">
       <LogicalName>Dextromethorphan.Infrastructure.Audio.Probes.%(Filename)%(Extension)</LogicalName>
     </EmbeddedResource>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="$(PkgSoundTouch_Net)/LICENSE/LICENSE"
+          Link="licenses/SoundTouch.Net-LGPL-2.1.txt"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

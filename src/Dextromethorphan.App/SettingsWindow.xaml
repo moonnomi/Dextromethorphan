@@ -147,7 +147,34 @@
                             </Grid>
                             <CheckBox Content="Prevent digital clipping with the sample-peak guard" IsChecked="{Binding PreventClipping}" Margin="0,14,0,0"/>
                             <TextBlock Text="This is a sample-peak safety guard, not an oversampled true-peak limiter. DoP playback bypasses all ReplayGain processing." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" FontSize="9" Margin="24,4,0,0"/>
-                            <Button Style="{StaticResource PrimaryButton}" Content="Save processing" Click="SaveReplayGain_Click" HorizontalAlignment="Left" Margin="0,16,0,0"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Tempo and pitch" FontWeight="SemiBold"/>
+                            <TextBlock Text="High-quality SoundTouch processing replaces the old linear/FFT path. Changes rebuild the stream at the current media position." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,5,0,14"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="18"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <TextBlock Text="Speed" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding PlaybackSpeed, StringFormat={}{0:0.00}×}" Foreground="{StaticResource AccentBrush}" FontSize="10"/>
+                                    </Grid>
+                                    <Slider Minimum="0.5" Maximum="1.5" TickFrequency="0.05" Value="{Binding PlaybackSpeed}" Margin="0,5,0,0"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <TextBlock Text="Pitch" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding PitchSemitones, StringFormat={}{0:+0.0;-0.0;0.0} st}" Foreground="{StaticResource AccentBrush}" FontSize="10"/>
+                                    </Grid>
+                                    <Slider Minimum="-12" Maximum="12" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding PitchSemitones}" Margin="0,5,0,0"/>
+                                </StackPanel>
+                            </Grid>
+                            <CheckBox Content="Preserve pitch when changing speed" IsChecked="{Binding PreservePitch}" Margin="0,14,0,0"/>
+                            <TextBlock Text="SoundTouch is used only when speed or pitch differs from normal. Mono and stereo are supported; DoP remains unprocessed." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" FontSize="9" Margin="24,4,0,0"/>
+                            <Button Style="{StaticResource PrimaryButton}" Content="Save playback processing" Click="SaveReplayGain_Click" HorizontalAlignment="Left" Margin="0,16,0,0"/>
                         </StackPanel>
                     </Border>
                     <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">

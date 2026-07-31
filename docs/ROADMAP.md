@@ -167,9 +167,9 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 - [x] **P0 DSP-002** Verify crossfade timing and equal-power behavior across differing rates/channels and very short tracks.
 - [x] **P0 DSP-003** Add ReplayGain scanner/analysis for files missing tags, using an EBU R128-compatible implementation.
 - [x] **P0 DSP-004** Add album/track gain, preamp, clipping prevention, and processing-state controls to Settings.
-- [ ] **P1 DSP-005** Replace the current interpolator/FFT pitch path with a reviewed high-quality tempo/pitch engine after listening, latency, and license evaluation.
+- [x] **P1 DSP-005** Replace the current interpolator/FFT pitch path with a reviewed high-quality tempo/pitch engine after listening, latency, and license evaluation.
 - [x] **P1 DSP-006** Add an oversampled true-peak limiter or clearly label the current sample-peak guard.
-- [ ] **P1 DSP-007** Measure processing latency and keep timeline, lyrics, and SMTC position aligned.
+- [x] **P1 DSP-007** Measure processing latency and keep timeline, lyrics, and SMTC position aligned.
 - [x] **P1 DSP-008** Add optional loudness/peak analysis jobs that are cancellable and do not degrade playback.
 
 ### Hardware qualification

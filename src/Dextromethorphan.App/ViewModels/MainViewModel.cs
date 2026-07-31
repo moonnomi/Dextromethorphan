@@ -120,6 +120,9 @@ public sealed class MainViewModel : ObservableObject
     private ReplayGainMode _replayGainMode = ReplayGainMode.Track;
     private double _replayGainPreampDb;
     private bool _preventClipping = true;
+    private double _playbackSpeed = 1;
+    private double _pitchSemitones;
+    private bool _preservePitch = true;
     private bool _isReplayGainAnalysisBusy;
     private double _replayGainAnalysisProgress;
     private string _replayGainAnalysisStatus =
@@ -299,6 +302,21 @@ public sealed class MainViewModel : ObservableObject
         get => _preventClipping;
         set => Set(ref _preventClipping, value);
     }
+    public double PlaybackSpeed
+    {
+        get => _playbackSpeed;
+        set => Set(ref _playbackSpeed, Math.Clamp(value, 0.5, 1.5));
+    }
+    public double PitchSemitones
+    {
+        get => _pitchSemitones;
+        set => Set(ref _pitchSemitones, Math.Clamp(value, -12, 12));
+    }
+    public bool PreservePitch
+    {
+        get => _preservePitch;
+        set => Set(ref _preservePitch, value);
+    }
     public bool IsReplayGainAnalysisBusy
     {
         get => _isReplayGainAnalysisBusy;
@@ -453,7 +471,10 @@ public sealed class MainViewModel : ObservableObject
             : diagnostics.EffectiveDevice
         : "—";
     public string DiagnosticTiming => _audio.Diagnostics is { } diagnostics
-        ? $"last {diagnostics.LastCallbackMilliseconds:0.###} ms · max {diagnostics.MaximumCallbackMilliseconds:0.###} ms · {diagnostics.Underruns} underruns · {diagnostics.RecoveryAttempts} recovery attempts"
+        ? $"last {diagnostics.LastCallbackMilliseconds:0.###} ms · max {diagnostics.MaximumCallbackMilliseconds:0.###} ms · {diagnostics.Underruns} underruns · {diagnostics.RecoveryAttempts} recovery attempts" +
+          (diagnostics.ProcessingLatencyMilliseconds > 0
+              ? $" · {diagnostics.Processor} · {diagnostics.ProcessingLatencyMilliseconds:0.#} ms processing latency · {diagnostics.TimelineClock}"
+              : string.Empty)
         : "—";
     public string DiagnosticReason => _audio.Diagnostics?.Reason ?? "Start playback to see decoder, format conversion, WASAPI mode, and bit-perfect status.";
     public bool IsShuffleEnabled => _queue.Shuffle;
@@ -550,9 +571,15 @@ public sealed class MainViewModel : ObservableObject
         _replayGainMode = _settings.Current.ReplayGainMode;
         _replayGainPreampDb = _settings.Current.ReplayGainPreampDb;
         _preventClipping = _settings.Current.PreventClipping;
+        _playbackSpeed = _settings.Current.PlaybackSpeed;
+        _pitchSemitones = _settings.Current.PitchSemitones;
+        _preservePitch = _settings.Current.PreservePitch;
         Raise(nameof(ReplayGainMode));
         Raise(nameof(ReplayGainPreampDb));
         Raise(nameof(PreventClipping));
+        Raise(nameof(PlaybackSpeed));
+        Raise(nameof(PitchSemitones));
+        Raise(nameof(PreservePitch));
         _shortcuts.Refresh(_settings.Current.Shortcuts);
         StatusText = IsSafeMode
             ? "Safe mode · session restore and visual effects are disabled"
@@ -587,6 +614,9 @@ public sealed class MainViewModel : ObservableObject
                 settings.ReplayGainMode = ReplayGainMode;
                 settings.ReplayGainPreampDb = ReplayGainPreampDb;
                 settings.PreventClipping = PreventClipping;
+                settings.PlaybackSpeed = PlaybackSpeed;
+                settings.PitchSemitones = PitchSemitones;
+                settings.PreservePitch = PreservePitch;
             },
             _lifetime.Token);
         await _audio.SetPlaybackOptionsAsync(
@@ -597,7 +627,9 @@ public sealed class MainViewModel : ObservableObject
             $"{ReplayGainPreampDb:+0.0;-0.0;0.0} dB preamp · " +
             (PreventClipping
                 ? "sample-peak guard on"
-                : "sample-peak guard off");
+                : "sample-peak guard off") +
+            $" · {PlaybackSpeed:0.00}× speed · " +
+            $"{PitchSemitones:+0.0;-0.0;0.0} semitones";
     }
 
     public async Task AnalyzeMissingReplayGainAsync()
@@ -670,9 +702,9 @@ public sealed class MainViewModel : ObservableObject
                 : _settings.Current.CrossfadeSeconds,
             FadeInSeconds = _settings.Current.FadeInSeconds,
             FadeOutSeconds = _settings.Current.FadeOutSeconds,
-            Speed = _settings.Current.PlaybackSpeed,
-            PitchSemitones = _settings.Current.PitchSemitones,
-            PreservePitch = _settings.Current.PreservePitch
+            Speed = PlaybackSpeed,
+            PitchSemitones = PitchSemitones,
+            PreservePitch = PreservePitch
         };
     }
 
@@ -1885,6 +1917,12 @@ public sealed class MainViewModel : ObservableObject
             !IsSafeMode && _settings.Current.AnimationsEnabled;
         _artworkCacheMegabytes =
             _settings.Current.ArtworkCacheMegabytes;
+        _replayGainMode = _settings.Current.ReplayGainMode;
+        _replayGainPreampDb = _settings.Current.ReplayGainPreampDb;
+        _preventClipping = _settings.Current.PreventClipping;
+        _playbackSpeed = _settings.Current.PlaybackSpeed;
+        _pitchSemitones = _settings.Current.PitchSemitones;
+        _preservePitch = _settings.Current.PreservePitch;
         Raise(nameof(Volume));
         Raise(nameof(QueueVisible));
         Raise(nameof(AlbumTileSize));
@@ -1893,6 +1931,12 @@ public sealed class MainViewModel : ObservableObject
         Raise(nameof(AnimationsEnabled));
         Raise(nameof(ArtworkCacheMegabytes));
         Raise(nameof(ArtworkCacheLimitText));
+        Raise(nameof(ReplayGainMode));
+        Raise(nameof(ReplayGainPreampDb));
+        Raise(nameof(PreventClipping));
+        Raise(nameof(PlaybackSpeed));
+        Raise(nameof(PitchSemitones));
+        Raise(nameof(PreservePitch));
         _shortcuts.Refresh(_settings.Current.Shortcuts);
         _scanner.StopWatching();
         _scanner.StartWatching(_settings.Current.LibraryFolders);
@@ -1903,6 +1947,9 @@ public sealed class MainViewModel : ObservableObject
                       ?? _settings.Current.OutputProfiles[0];
         await _audio.ConfigureOutputAsync(
             profile,
+            _lifetime.Token);
+        await _audio.SetPlaybackOptionsAsync(
+            CurrentPlaybackOptions(),
             _lifetime.Token);
         await _audio.SetVolumeAsync(
             _volume,
