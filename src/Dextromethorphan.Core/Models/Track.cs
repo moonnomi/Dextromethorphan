@@ -4,6 +4,10 @@ public sealed record Track
 {
     public long Id { get; init; }
     public required string Path { get; init; }
+    public string? MediaPath { get; init; }
+    public string? CueSheetPath { get; init; }
+    public TimeSpan SegmentStart { get; init; }
+    public TimeSpan? SegmentEnd { get; init; }
     public required string Title { get; init; }
     public string Artist { get; init; } = "Unknown artist";
     public string AlbumArtist { get; init; } = "";
@@ -33,6 +37,11 @@ public sealed record Track
     public string? ArtworkPath { get; init; }
     public string Lyrics { get; init; } = "";
     public bool IsMissing { get; init; }
+
+    public string EffectiveMediaPath =>
+        string.IsNullOrWhiteSpace(MediaPath) ? Path : MediaPath;
+    public bool IsCueTrack =>
+        !string.IsNullOrWhiteSpace(CueSheetPath);
 
     public string DisplayArtist => string.IsNullOrWhiteSpace(Artist) ? "Unknown artist" : Artist;
     public string DisplayAlbum => string.IsNullOrWhiteSpace(Album) ? "Unknown album" : Album;

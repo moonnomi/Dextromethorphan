@@ -10,7 +10,7 @@ public sealed class SqliteLibraryRepository(
     AppPaths paths,
     IApplicationLog? applicationLog = null) : ILibraryRepository
 {
-    public const int CurrentSchemaVersion = 4;
+    public const int CurrentSchemaVersion = 5;
     internal string ConnectionString => new SqliteConnectionStringBuilder
     {
         DataSource = paths.DatabaseFile,
@@ -200,6 +200,12 @@ public sealed class SqliteLibraryRepository(
                     cancellationToken,
                     sqliteTransaction);
                 break;
+            case 5:
+                await EnsureCueColumnsAsync(
+                    connection,
+                    cancellationToken,
+                    sqliteTransaction);
+                break;
             default:
                 throw new InvalidOperationException($"Unknown database migration {version}.");
         }
@@ -222,6 +228,10 @@ public sealed class SqliteLibraryRepository(
             "tracks",
             "artwork_path",
             "TEXT",
+            cancellationToken,
+            sqliteTransaction);
+        await EnsureCueColumnsAsync(
+            connection,
             cancellationToken,
             sqliteTransaction);
         await EnsureColumnAsync(
@@ -302,19 +312,66 @@ public sealed class SqliteLibraryRepository(
         await transaction.CommitAsync(cancellationToken);
     }
 
+    public async Task ReconcileCueSheetAsync(
+        string cueSheetPath,
+        IReadOnlyCollection<Track> tracks,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedCue = CanonicalPath.Normalize(cueSheetPath);
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(
+            cancellationToken);
+        var sqliteTransaction = (SqliteTransaction)transaction;
+        foreach (var track in tracks)
+            await UpsertTrackAsync(
+                connection,
+                track,
+                sqliteTransaction,
+                cancellationToken);
+
+        await using var stale = connection.CreateCommand();
+        stale.Transaction = sqliteTransaction;
+        stale.CommandText = """
+            UPDATE tracks
+            SET is_missing=1, updated_at=$now
+            WHERE cue_sheet_path=$cue COLLATE NOCASE
+              AND path NOT IN (SELECT value FROM json_each($retained))
+            """;
+        stale.Parameters.AddWithValue("$cue", normalizedCue);
+        stale.Parameters.AddWithValue(
+            "$retained",
+            System.Text.Json.JsonSerializer.Serialize(
+                tracks.Select(track => CanonicalPath.Normalize(track.Path))));
+        stale.Parameters.AddWithValue(
+            "$now",
+            DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        await stale.ExecuteNonQueryAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
     public async Task RemoveMissingAsync(IReadOnlyCollection<string> roots, CancellationToken cancellationToken = default)
     {
         if (roots.Count == 0) return;
         await using var connection = await OpenAsync(cancellationToken);
         await using var select = connection.CreateCommand();
-        select.CommandText = "SELECT id, path FROM tracks";
+        select.CommandText =
+            "SELECT id, path, media_path, cue_sheet_path FROM tracks";
         var missing = new List<long>();
         await using (var reader = await select.ExecuteReaderAsync(cancellationToken))
         {
             while (await reader.ReadAsync(cancellationToken))
             {
                 var path = reader.GetString(1);
-                if (roots.Any(root => IsWithin(path, root)) && !File.Exists(path)) missing.Add(reader.GetInt64(0));
+                var mediaPath = reader.IsDBNull(2)
+                    ? path
+                    : reader.GetString(2);
+                var cuePath = reader.IsDBNull(3)
+                    ? null
+                    : reader.GetString(3);
+                if (roots.Any(root => IsWithin(path, root))
+                    && (!File.Exists(mediaPath)
+                        || cuePath is not null && !File.Exists(cuePath)))
+                    missing.Add(reader.GetInt64(0));
             }
         }
         if (missing.Count == 0) return;
@@ -345,6 +402,8 @@ public sealed class SqliteLibraryRepository(
             UPDATE tracks
             SET is_missing=1, updated_at=$now
             WHERE path=$path COLLATE NOCASE
+               OR media_path=$path COLLATE NOCASE
+               OR cue_sheet_path=$path COLLATE NOCASE
             """;
         command.Parameters.AddWithValue(
             "$now",
@@ -571,6 +630,7 @@ public sealed class SqliteLibraryRepository(
     internal static Track ReadTrack(SqliteDataReader r) => new()
     {
         Id = r.GetInt64(r.GetOrdinal("id")), Path = r.GetString(r.GetOrdinal("path")), Title = r.GetString(r.GetOrdinal("title")),
+        MediaPath = NullableString(r, "media_path"), CueSheetPath = NullableString(r, "cue_sheet_path"), SegmentStart = TimeSpan.FromMilliseconds(r.GetInt64(r.GetOrdinal("segment_start_ms"))), SegmentEnd = NullableMilliseconds(r, "segment_end_ms"),
         Artist = r.GetString(r.GetOrdinal("artist")), AlbumArtist = r.GetString(r.GetOrdinal("album_artist")), Album = r.GetString(r.GetOrdinal("album")), Genre = r.GetString(r.GetOrdinal("genre")), Comment = r.GetString(r.GetOrdinal("comment")),
         Year = r.GetInt32(r.GetOrdinal("year")), TrackNumber = r.GetInt32(r.GetOrdinal("track_number")), DiscNumber = r.GetInt32(r.GetOrdinal("disc_number")), Duration = TimeSpan.FromMilliseconds(r.GetInt64(r.GetOrdinal("duration_ms"))),
         Bitrate = r.GetInt32(r.GetOrdinal("bitrate")), SampleRate = r.GetInt32(r.GetOrdinal("sample_rate")), BitsPerSample = r.GetInt32(r.GetOrdinal("bits_per_sample")), Channels = r.GetInt32(r.GetOrdinal("channels")), Codec = r.GetString(r.GetOrdinal("codec")),
@@ -582,6 +642,7 @@ public sealed class SqliteLibraryRepository(
     private static double? NullableDouble(SqliteDataReader r, string name) { var i = r.GetOrdinal(name); return r.IsDBNull(i) ? null : r.GetDouble(i); }
     private static DateTimeOffset? NullableDate(SqliteDataReader r, string name) { var i = r.GetOrdinal(name); return r.IsDBNull(i) ? null : DateTimeOffset.FromUnixTimeMilliseconds(r.GetInt64(i)); }
     private static string? NullableString(SqliteDataReader r, string name) { var i = r.GetOrdinal(name); return r.IsDBNull(i) ? null : r.GetString(i); }
+    private static TimeSpan? NullableMilliseconds(SqliteDataReader r, string name) { var i = r.GetOrdinal(name); return r.IsDBNull(i) ? null : TimeSpan.FromMilliseconds(r.GetInt64(i)); }
 
     private sealed class TrackStringPool
     {
@@ -594,6 +655,12 @@ public sealed class SqliteLibraryRepository(
             Album = Shared(track.Album),
             Genre = Shared(track.Genre),
             Codec = Shared(track.Codec),
+            MediaPath = track.MediaPath is null
+                ? null
+                : Shared(track.MediaPath),
+            CueSheetPath = track.CueSheetPath is null
+                ? null
+                : Shared(track.CueSheetPath),
             ArtworkPath = track.ArtworkPath is null ? null : Shared(track.ArtworkPath)
         };
 
@@ -683,6 +750,8 @@ public sealed class SqliteLibraryRepository(
         command.CommandText = """
             UPDATE tracks SET
               path=$path,title=$title,artist=$artist,album_artist=$album_artist,
+              media_path=$media_path,cue_sheet_path=$cue_sheet_path,
+              segment_start_ms=$segment_start_ms,segment_end_ms=$segment_end_ms,
               album=$album,genre=$genre,comment=$comment,year=$year,
               track_number=$track_number,disc_number=$disc_number,
               duration_ms=$duration_ms,bitrate=$bitrate,sample_rate=$sample_rate,
@@ -705,7 +774,7 @@ public sealed class SqliteLibraryRepository(
     {
         var values = new Dictionary<string, object?>
         {
-            ["$path"] = CanonicalPath.Normalize(t.Path), ["$title"] = t.Title, ["$artist"] = t.Artist, ["$album_artist"] = t.AlbumArtist, ["$album"] = t.Album, ["$genre"] = t.Genre, ["$comment"] = t.Comment,
+            ["$path"] = CanonicalPath.Normalize(t.Path), ["$media_path"] = t.MediaPath is null ? null : CanonicalPath.Normalize(t.MediaPath), ["$cue_sheet_path"] = t.CueSheetPath is null ? null : CanonicalPath.Normalize(t.CueSheetPath), ["$segment_start_ms"] = (long)t.SegmentStart.TotalMilliseconds, ["$segment_end_ms"] = t.SegmentEnd is null ? null : (long)t.SegmentEnd.Value.TotalMilliseconds, ["$title"] = t.Title, ["$artist"] = t.Artist, ["$album_artist"] = t.AlbumArtist, ["$album"] = t.Album, ["$genre"] = t.Genre, ["$comment"] = t.Comment,
             ["$year"] = t.Year, ["$track_number"] = t.TrackNumber, ["$disc_number"] = t.DiscNumber, ["$duration_ms"] = (long)t.Duration.TotalMilliseconds, ["$bitrate"] = t.Bitrate, ["$sample_rate"] = t.SampleRate,
             ["$bits_per_sample"] = t.BitsPerSample, ["$channels"] = t.Channels, ["$codec"] = t.Codec, ["$replaygain_track"] = t.ReplayGainTrackDb, ["$replaygain_album"] = t.ReplayGainAlbumDb,
             ["$replay_peak"] = t.ReplayPeak, ["$rating"] = t.Rating, ["$loved"] = t.IsLoved ? 1 : 0, ["$play_count"] = t.PlayCount, ["$last_played_at"] = t.LastPlayedAt?.ToUnixTimeMilliseconds(),
@@ -781,9 +850,25 @@ public sealed class SqliteLibraryRepository(
         await alter.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    private static async Task EnsureCueColumnsAsync(
+        SqliteConnection connection,
+        CancellationToken cancellationToken,
+        SqliteTransaction transaction)
+    {
+        await EnsureColumnAsync(connection, "tracks", "media_path", "TEXT", cancellationToken, transaction);
+        await EnsureColumnAsync(connection, "tracks", "cue_sheet_path", "TEXT", cancellationToken, transaction);
+        await EnsureColumnAsync(connection, "tracks", "segment_start_ms", "INTEGER NOT NULL DEFAULT 0", cancellationToken, transaction);
+        await EnsureColumnAsync(connection, "tracks", "segment_end_ms", "INTEGER", cancellationToken, transaction);
+        await ExecuteScriptAsync(
+            connection,
+            "CREATE INDEX IF NOT EXISTS idx_tracks_cue_sheet ON tracks(cue_sheet_path COLLATE NOCASE); CREATE INDEX IF NOT EXISTS idx_tracks_media_path ON tracks(media_path COLLATE NOCASE);",
+            cancellationToken,
+            transaction);
+    }
+
     internal const string BaseSchema = """
         CREATE TABLE IF NOT EXISTS tracks(
-          id INTEGER PRIMARY KEY, path TEXT NOT NULL COLLATE NOCASE UNIQUE, title TEXT NOT NULL, artist TEXT NOT NULL DEFAULT '', album_artist TEXT NOT NULL DEFAULT '', album TEXT NOT NULL DEFAULT '', genre TEXT NOT NULL DEFAULT '', comment TEXT NOT NULL DEFAULT '',
+          id INTEGER PRIMARY KEY, path TEXT NOT NULL COLLATE NOCASE UNIQUE, media_path TEXT, cue_sheet_path TEXT, segment_start_ms INTEGER NOT NULL DEFAULT 0, segment_end_ms INTEGER, title TEXT NOT NULL, artist TEXT NOT NULL DEFAULT '', album_artist TEXT NOT NULL DEFAULT '', album TEXT NOT NULL DEFAULT '', genre TEXT NOT NULL DEFAULT '', comment TEXT NOT NULL DEFAULT '',
           year INTEGER NOT NULL DEFAULT 0, track_number INTEGER NOT NULL DEFAULT 0, disc_number INTEGER NOT NULL DEFAULT 0, duration_ms INTEGER NOT NULL DEFAULT 0, bitrate INTEGER NOT NULL DEFAULT 0, sample_rate INTEGER NOT NULL DEFAULT 0,
           bits_per_sample INTEGER NOT NULL DEFAULT 0, channels INTEGER NOT NULL DEFAULT 0, codec TEXT NOT NULL DEFAULT '', replaygain_track REAL, replaygain_album REAL, replay_peak REAL, rating INTEGER NOT NULL DEFAULT 0, loved INTEGER NOT NULL DEFAULT 0,
           play_count INTEGER NOT NULL DEFAULT 0, last_played_at INTEGER, file_modified_at INTEGER NOT NULL, file_size INTEGER NOT NULL, artwork_path TEXT, lyrics TEXT NOT NULL DEFAULT '', is_missing INTEGER NOT NULL DEFAULT 0, added_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
@@ -809,8 +894,8 @@ public sealed class SqliteLibraryRepository(
         """;
 
     private const string UpsertSql = """
-        INSERT INTO tracks(path,title,artist,album_artist,album,genre,comment,year,track_number,disc_number,duration_ms,bitrate,sample_rate,bits_per_sample,channels,codec,replaygain_track,replaygain_album,replay_peak,rating,loved,play_count,last_played_at,file_modified_at,file_size,artwork_path,lyrics,is_missing,added_at,updated_at)
-        VALUES($path,$title,$artist,$album_artist,$album,$genre,$comment,$year,$track_number,$disc_number,$duration_ms,$bitrate,$sample_rate,$bits_per_sample,$channels,$codec,$replaygain_track,$replaygain_album,$replay_peak,$rating,$loved,$play_count,$last_played_at,$file_modified_at,$file_size,$artwork_path,$lyrics,0,$now,$now)
-        ON CONFLICT(path) DO UPDATE SET title=excluded.title,artist=excluded.artist,album_artist=excluded.album_artist,album=excluded.album,genre=excluded.genre,comment=excluded.comment,year=excluded.year,track_number=excluded.track_number,disc_number=excluded.disc_number,duration_ms=excluded.duration_ms,bitrate=excluded.bitrate,sample_rate=excluded.sample_rate,bits_per_sample=excluded.bits_per_sample,channels=excluded.channels,codec=excluded.codec,replaygain_track=excluded.replaygain_track,replaygain_album=excluded.replaygain_album,replay_peak=excluded.replay_peak,file_modified_at=excluded.file_modified_at,file_size=excluded.file_size,artwork_path=excluded.artwork_path,lyrics=excluded.lyrics,is_missing=0,updated_at=excluded.updated_at;
+        INSERT INTO tracks(path,media_path,cue_sheet_path,segment_start_ms,segment_end_ms,title,artist,album_artist,album,genre,comment,year,track_number,disc_number,duration_ms,bitrate,sample_rate,bits_per_sample,channels,codec,replaygain_track,replaygain_album,replay_peak,rating,loved,play_count,last_played_at,file_modified_at,file_size,artwork_path,lyrics,is_missing,added_at,updated_at)
+        VALUES($path,$media_path,$cue_sheet_path,$segment_start_ms,$segment_end_ms,$title,$artist,$album_artist,$album,$genre,$comment,$year,$track_number,$disc_number,$duration_ms,$bitrate,$sample_rate,$bits_per_sample,$channels,$codec,$replaygain_track,$replaygain_album,$replay_peak,$rating,$loved,$play_count,$last_played_at,$file_modified_at,$file_size,$artwork_path,$lyrics,0,$now,$now)
+        ON CONFLICT(path) DO UPDATE SET media_path=excluded.media_path,cue_sheet_path=excluded.cue_sheet_path,segment_start_ms=excluded.segment_start_ms,segment_end_ms=excluded.segment_end_ms,title=excluded.title,artist=excluded.artist,album_artist=excluded.album_artist,album=excluded.album,genre=excluded.genre,comment=excluded.comment,year=excluded.year,track_number=excluded.track_number,disc_number=excluded.disc_number,duration_ms=excluded.duration_ms,bitrate=excluded.bitrate,sample_rate=excluded.sample_rate,bits_per_sample=excluded.bits_per_sample,channels=excluded.channels,codec=excluded.codec,replaygain_track=excluded.replaygain_track,replaygain_album=excluded.replaygain_album,replay_peak=excluded.replay_peak,file_modified_at=excluded.file_modified_at,file_size=excluded.file_size,artwork_path=excluded.artwork_path,lyrics=excluded.lyrics,is_missing=0,updated_at=excluded.updated_at;
         """;
 }

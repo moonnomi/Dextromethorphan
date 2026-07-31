@@ -10,20 +10,29 @@ internal static class AudioDecoderFactory
 {
     public static DecodedAudio Open(Track track)
     {
-        var extension = Path.GetExtension(track.Path).ToLowerInvariant();
+        var path = track.EffectiveMediaPath;
+        var extension = Path.GetExtension(path).ToLowerInvariant();
         WaveStream reader = extension switch
         {
-            ".wav" or ".wave" => new WaveFileReader(track.Path),
-            ".aif" or ".aiff" => new AiffFileReader(track.Path),
-            ".mp3" => new Mp3FileReader(track.Path),
-            ".flac" => new FlacReader(track.Path),
-            ".ogg" => new VorbisWaveReader(track.Path),
-            ".opus" => new OpusWaveStream(track.Path),
-            ".dsf" => new DsfDopWaveStream(track.Path),
-            ".dff" => new DffDopWaveStream(track.Path),
-            _ => new MediaFoundationReader(track.Path)
+            ".wav" or ".wave" => new WaveFileReader(path),
+            ".aif" or ".aiff" => new AiffFileReader(path),
+            ".mp3" => new Mp3FileReader(path),
+            ".flac" => new FlacReader(path),
+            ".ogg" => new VorbisWaveReader(path),
+            ".opus" => new OpusWaveStream(path),
+            ".dsf" => new DsfDopWaveStream(path),
+            ".dff" => new DffDopWaveStream(path),
+            _ => new MediaFoundationReader(path)
         };
         var decoder = extension switch { ".dsf" => "Native DSF → DoP 1.1", ".dff" => "Native DSDIFF → DoP 1.1", ".flac" => "Managed FLAC decoder", ".ogg" => "NVorbis managed decoder", ".opus" => "Managed Concentus Opus decoder", ".wav" or ".wave" or ".aif" or ".aiff" or ".mp3" => "NAudio native", _ => "Windows Media Foundation" };
+        if (track.IsCueTrack)
+        {
+            reader = new SegmentWaveStream(
+                reader,
+                track.SegmentStart,
+                track.SegmentEnd);
+            decoder += " · CUE segment";
+        }
         return new DecodedAudio(track, reader, decoder);
     }
 

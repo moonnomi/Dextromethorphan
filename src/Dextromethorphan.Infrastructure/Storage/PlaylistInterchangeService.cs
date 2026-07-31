@@ -83,7 +83,7 @@ public sealed class PlaylistInterchangeService : IPlaylistInterchangeService
         foreach (var track in tracks)
         {
             builder.Append("#EXTINF:").Append((long)track.Duration.TotalSeconds).Append(',').Append(LineSafe(track.DisplayArtist)).Append(" - ").AppendLine(LineSafe(track.Title));
-            builder.AppendLine(track.Path);
+            builder.AppendLine(track.CueSheetPath ?? track.EffectiveMediaPath);
         }
         return builder.ToString();
     }
@@ -95,7 +95,7 @@ public sealed class PlaylistInterchangeService : IPlaylistInterchangeService
         {
             var track = tracks[i];
             var number = i + 1;
-            builder.Append("File").Append(number).Append('=').AppendLine(track.Path);
+            builder.Append("File").Append(number).Append('=').AppendLine(track.CueSheetPath ?? track.EffectiveMediaPath);
             builder.Append("Title").Append(number).Append('=').Append(LineSafe(track.DisplayArtist)).Append(" - ").AppendLine(LineSafe(track.Title));
             builder.Append("Length").Append(number).Append('=').AppendLine(((long)track.Duration.TotalSeconds).ToString(CultureInfo.InvariantCulture));
         }
@@ -112,7 +112,7 @@ public sealed class PlaylistInterchangeService : IPlaylistInterchangeService
                 new XElement(Xspf + "title", name),
                 new XElement(Xspf + "trackList", tracks.Select(track =>
                     new XElement(Xspf + "track",
-                        new XElement(Xspf + "location", new Uri(Path.GetFullPath(track.Path)).AbsoluteUri),
+                        new XElement(Xspf + "location", new Uri(Path.GetFullPath(track.CueSheetPath ?? track.EffectiveMediaPath)).AbsoluteUri),
                         new XElement(Xspf + "creator", track.DisplayArtist),
                         new XElement(Xspf + "title", track.Title),
                         new XElement(Xspf + "album", track.DisplayAlbum),

@@ -140,7 +140,7 @@ public sealed class LibraryScanner(
                 () => Volatile.Read(ref lastPath),
                 checkpointLifetime.Token);
 
-            var pending = Channel.CreateBounded<(Track Track, bool IsNew)>(new BoundedChannelOptions(500)
+            var pending = Channel.CreateBounded<PendingWrite>(new BoundedChannelOptions(500)
             {
                 SingleReader = true,
                 SingleWriter = false,
@@ -180,7 +180,35 @@ public sealed class LibraryScanner(
                 await foreach (var item in pending.Reader.ReadAllAsync(token))
                 {
                     await _pause.WaitAsync(token);
-                    batch.Add(item);
+                    if (item.CueSheetPath is { } cueSheetPath)
+                    {
+                        await FlushAsync();
+                        try
+                        {
+                            await repository.ReconcileCueSheetAsync(
+                                cueSheetPath,
+                                item.Tracks,
+                                token);
+                            Interlocked.Add(ref added, item.NewCount);
+                            Interlocked.Add(
+                                ref updated,
+                                item.Tracks.Count - item.NewCount);
+                        }
+                        catch (OperationCanceledException) when (
+                            token.IsCancellationRequested)
+                        {
+                            throw;
+                        }
+                        catch
+                        {
+                            Interlocked.Add(ref failed, item.Tracks.Count);
+                        }
+                        Interlocked.Add(ref processed, item.Tracks.Count);
+                        Report(cueSheetPath);
+                        continue;
+                    }
+                    var track = item.Tracks[0];
+                    batch.Add((track, item.NewCount == 1));
                     if (batch.Count >= 250) await FlushAsync();
                 }
                 await FlushAsync();
@@ -411,15 +439,32 @@ public sealed class LibraryScanner(
 
     private void OnChanged(object sender, FileSystemEventArgs e)
     {
-        if (SupportedExtensions.Contains(Path.GetExtension(e.FullPath))) QueueFileUpdate(e.FullPath);
+        if (IsLibraryFile(e.FullPath)) QueueFileUpdate(e.FullPath);
         else if (ArtworkExtensions.Contains(Path.GetExtension(e.FullPath))) ArtworkChanged?.Invoke(e.FullPath);
     }
 
     private void OnRenamed(object sender, RenamedEventArgs e)
     {
-        if (SupportedExtensions.Contains(Path.GetExtension(e.FullPath)))
+        if (Path.GetExtension(e.FullPath).Equals(
+                ".cue",
+                StringComparison.OrdinalIgnoreCase)
+            || Path.GetExtension(e.OldFullPath).Equals(
+                ".cue",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            QueueFileUpdate(e.OldFullPath);
+            QueueFileUpdate(e.FullPath);
+            return;
+        }
+        if (FindReferencingCueSheets(e.OldFullPath).Count > 0)
+        {
+            QueueFileUpdate(e.OldFullPath);
+            QueueFileUpdate(e.FullPath);
+            return;
+        }
+        if (IsLibraryFile(e.FullPath))
             QueueRenameUpdate(e.OldFullPath, e.FullPath);
-        else if (SupportedExtensions.Contains(Path.GetExtension(e.OldFullPath)))
+        else if (IsLibraryFile(e.OldFullPath))
             QueueFileUpdate(e.OldFullPath);
         else if (ArtworkExtensions.Contains(Path.GetExtension(e.FullPath))) ArtworkChanged?.Invoke(e.FullPath);
         if (ArtworkExtensions.Contains(Path.GetExtension(e.OldFullPath))) ArtworkChanged?.Invoke(e.OldFullPath);
@@ -434,8 +479,54 @@ public sealed class LibraryScanner(
             try
             {
                 await Task.Delay(800, source.Token);
+                if (!Path.GetExtension(path).Equals(
+                        ".cue",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    var referencingCueSheets = FindReferencingCueSheets(path);
+                    if (referencingCueSheets.Count > 0)
+                    {
+                        if (!File.Exists(path))
+                            await repository.MarkMissingAsync(
+                                [path],
+                                source.Token);
+                        foreach (var cueSheet in referencingCueSheets)
+                            QueueFileUpdate(cueSheet);
+                        FilesChanged?.Invoke(
+                            this,
+                            new LibraryFilesChangedEventArgs(
+                                [new LibraryFileChange(
+                                    LibraryFileChangeKind.FullRefresh,
+                                    path)]));
+                        return;
+                    }
+                }
                 if (File.Exists(path))
                 {
+                    if (Path.GetExtension(path).Equals(
+                            ".cue",
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        var fileIndex = await repository.GetFileIndexAsync(
+                            source.Token);
+                        var cueTracks = await ReadCueTracksAsync(
+                            path,
+                            fileIndex,
+                            new ConcurrentDictionary<string, ExternalArtworkSelection>(
+                                StringComparer.OrdinalIgnoreCase),
+                            source.Token);
+                        await repository.ReconcileCueSheetAsync(
+                            path,
+                            cueTracks.Tracks,
+                            source.Token);
+                        FilesChanged?.Invoke(
+                            this,
+                            new LibraryFilesChangedEventArgs(
+                                [new LibraryFileChange(
+                                    LibraryFileChangeKind.FullRefresh,
+                                    path)]));
+                        return;
+                    }
                     var preferredArtwork = ExternalArtworkResolver.FindPreferredForMedia(
                         path,
                         source.Token);
@@ -537,13 +628,30 @@ public sealed class LibraryScanner(
         string path,
         IReadOnlyDictionary<string, LibraryFileStamp> fileIndex,
         ConcurrentDictionary<string, ExternalArtworkSelection> directoryArtwork,
-        ChannelWriter<(Track Track, bool IsNew)> pending,
+        ChannelWriter<PendingWrite> pending,
         Action unchanged,
         Action failed,
         CancellationToken cancellationToken)
     {
         try
         {
+            if (Path.GetExtension(path).Equals(
+                    ".cue",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                var cueTracks = await ReadCueTracksAsync(
+                    path,
+                    fileIndex,
+                    directoryArtwork,
+                    cancellationToken);
+                await pending.WriteAsync(
+                    new PendingWrite(
+                        cueTracks.Tracks,
+                        path,
+                        cueTracks.NewCount),
+                    cancellationToken);
+                return;
+            }
             var info = new FileInfo(path);
             fileIndex.TryGetValue(path, out var existing);
             var preferredArtwork = PreferredArtwork(path, directoryArtwork, cancellationToken);
@@ -559,7 +667,9 @@ public sealed class LibraryScanner(
                     if (persisted is not null)
                     {
                         await pending.WriteAsync(
-                            (persisted with { ArtworkPath = preferredArtwork, Artwork = null }, false),
+                            PendingWrite.Single(
+                                persisted with { ArtworkPath = preferredArtwork, Artwork = null },
+                                false),
                             cancellationToken);
                         return;
                     }
@@ -572,7 +682,9 @@ public sealed class LibraryScanner(
                         await metadataReader.ReadAsync(path, cancellationToken),
                         preferredArtwork,
                         cancellationToken);
-                    await pending.WriteAsync((refreshed, false), cancellationToken);
+                    await pending.WriteAsync(
+                        PendingWrite.Single(refreshed, false),
+                        cancellationToken);
                     return;
                 }
                 unchanged();
@@ -582,7 +694,9 @@ public sealed class LibraryScanner(
                 await metadataReader.ReadAsync(path, cancellationToken),
                 preferredArtwork,
                 cancellationToken);
-            await pending.WriteAsync((track, existing is null), cancellationToken);
+            await pending.WriteAsync(
+                PendingWrite.Single(track, existing is null),
+                cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -592,6 +706,93 @@ public sealed class LibraryScanner(
         {
             failed();
         }
+    }
+
+    private async Task<CueTrackBatch> ReadCueTracksAsync(
+        string path,
+        IReadOnlyDictionary<string, LibraryFileStamp> fileIndex,
+        ConcurrentDictionary<string, ExternalArtworkSelection> directoryArtwork,
+        CancellationToken cancellationToken)
+    {
+        var cue = CueSheetParser.Parse(path);
+        var cueInfo = new FileInfo(path);
+        var baseTracks = new Dictionary<string, Track>(
+            StringComparer.OrdinalIgnoreCase);
+        var result = new List<Track>(cue.Tracks.Count);
+        var newCount = 0;
+        foreach (var cueTrack in cue.Tracks)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!SupportedExtensions.Contains(
+                    Path.GetExtension(cueTrack.MediaPath)))
+                throw new NotSupportedException(
+                    $"CUE references unsupported media '{Path.GetExtension(cueTrack.MediaPath)}'.");
+            if (!File.Exists(cueTrack.MediaPath))
+                throw new FileNotFoundException(
+                    "CUE referenced media is unavailable.",
+                    cueTrack.MediaPath);
+            if (!baseTracks.TryGetValue(
+                    cueTrack.MediaPath,
+                    out var baseTrack))
+            {
+                var preferredArtwork = PreferredArtwork(
+                    cueTrack.MediaPath,
+                    directoryArtwork,
+                    cancellationToken);
+                baseTrack = await CacheArtworkAsync(
+                    await metadataReader.ReadAsync(
+                        cueTrack.MediaPath,
+                        cancellationToken),
+                    preferredArtwork,
+                    cancellationToken);
+                baseTracks.Add(cueTrack.MediaPath, baseTrack);
+            }
+
+            var end = cueTrack.End ?? baseTrack.Duration;
+            if (end <= cueTrack.Start
+                || end > baseTrack.Duration + TimeSpan.FromSeconds(1))
+                throw new InvalidDataException(
+                    $"CUE track {cueTrack.Number:00} has invalid boundaries.");
+            if (end > baseTrack.Duration) end = baseTrack.Duration;
+            var virtualPath = cueTrack.VirtualPath(cue.Path);
+            if (!fileIndex.ContainsKey(virtualPath)) newCount++;
+            var mediaInfo = new FileInfo(cueTrack.MediaPath);
+            var modified = cueInfo.LastWriteTimeUtc > mediaInfo.LastWriteTimeUtc
+                ? cueInfo.LastWriteTimeUtc
+                : mediaInfo.LastWriteTimeUtc;
+            result.Add(baseTrack with
+            {
+                Id = 0,
+                Path = virtualPath,
+                MediaPath = cueTrack.MediaPath,
+                CueSheetPath = cue.Path,
+                SegmentStart = cueTrack.Start,
+                SegmentEnd = end,
+                Title = cueTrack.Title,
+                Artist = string.IsNullOrWhiteSpace(cueTrack.Performer)
+                    ? baseTrack.Artist
+                    : cueTrack.Performer,
+                AlbumArtist = string.IsNullOrWhiteSpace(cue.Performer)
+                    ? baseTrack.AlbumArtist
+                    : cue.Performer,
+                Album = cue.Title,
+                Genre = string.IsNullOrWhiteSpace(cue.Genre)
+                    ? baseTrack.Genre
+                    : cue.Genre,
+                Year = cue.Year == 0 ? baseTrack.Year : cue.Year,
+                TrackNumber = cueTrack.Number,
+                DiscNumber = cue.DiscNumber == 0
+                    ? baseTrack.DiscNumber
+                    : cue.DiscNumber,
+                Duration = end - cueTrack.Start,
+                FileModifiedAt = new DateTimeOffset(
+                    modified,
+                    TimeSpan.Zero),
+                FileSize = mediaInfo.Length,
+                IsMissing = false
+            });
+        }
+        return new CueTrackBatch(result, newCount);
     }
 
     private async Task PersistCheckpointsAsync(
@@ -734,9 +935,24 @@ public sealed class LibraryScanner(
                 reportIncomplete($"{directory}: {exception.Message}");
                 continue;
             }
+            var cueSheets = files
+                .Where(file => Path.GetExtension(file).Equals(
+                    ".cue",
+                    StringComparison.OrdinalIgnoreCase))
+                .Select(CanonicalPath.Normalize)
+                .OrderBy(file => file, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            var cueMedia = cueSheets
+                .SelectMany(CueSheetParser.ReferencedMediaFiles)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var cueSheet in cueSheets) yield return cueSheet;
             foreach (var file in files)
-                if (SupportedExtensions.Contains(Path.GetExtension(file)))
-                    yield return CanonicalPath.Normalize(file);
+            {
+                if (!SupportedExtensions.Contains(Path.GetExtension(file)))
+                    continue;
+                var normalized = CanonicalPath.Normalize(file);
+                if (!cueMedia.Contains(normalized)) yield return normalized;
+            }
             foreach (var child in directories)
                 pending.Push(child);
         }
@@ -770,6 +986,36 @@ public sealed class LibraryScanner(
         return relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar) && !Path.IsPathRooted(relative);
     }
 
+    private static bool IsLibraryFile(string path) =>
+        SupportedExtensions.Contains(Path.GetExtension(path))
+        || Path.GetExtension(path).Equals(
+            ".cue",
+            StringComparison.OrdinalIgnoreCase);
+
+    private static IReadOnlyList<string> FindReferencingCueSheets(
+        string mediaPath)
+    {
+        var directory = Path.GetDirectoryName(mediaPath);
+        if (directory is null || !Directory.Exists(directory)) return [];
+        var normalized = CanonicalPath.Normalize(mediaPath);
+        try
+        {
+            return Directory.EnumerateFiles(
+                    directory,
+                    "*.cue",
+                    SearchOption.TopDirectoryOnly)
+                .Where(cue => CueSheetParser.ReferencedMediaFiles(cue)
+                    .Contains(normalized))
+                .Select(CanonicalPath.Normalize)
+                .ToArray();
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
+
     public ValueTask DisposeAsync()
     {
         Cancel();
@@ -779,4 +1025,15 @@ public sealed class LibraryScanner(
 
     private readonly record struct SourceFile(string Root, string Path);
     private readonly record struct ExternalArtworkSelection(string? Path);
+    private sealed record PendingWrite(
+        IReadOnlyList<Track> Tracks,
+        string? CueSheetPath,
+        int NewCount)
+    {
+        public static PendingWrite Single(Track track, bool isNew) =>
+            new([track], null, isNew ? 1 : 0);
+    }
+    private sealed record CueTrackBatch(
+        IReadOnlyList<Track> Tracks,
+        int NewCount);
 }

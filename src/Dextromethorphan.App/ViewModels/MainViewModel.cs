@@ -774,7 +774,7 @@ public sealed class MainViewModel : ObservableObject
                 },
                 async (track, cancellationToken) =>
                 {
-                    var artwork = await _artwork.GetOrCreateAsync(track.Path, cancellationToken);
+                    var artwork = await _artwork.GetOrCreateAsync(track.EffectiveMediaPath, cancellationToken);
                     if (artwork is not null) rebuilt.Add(track with { ArtworkPath = artwork });
                     var current = Interlocked.Increment(ref completed);
                     if (current == tracks.Length || current % 50 == 0)
@@ -1017,7 +1017,7 @@ public sealed class MainViewModel : ObservableObject
     {
         if (track.ArtworkPath is { Length: > 0 } existing && File.Exists(existing)) return existing;
         if (_resolvedArtwork.TryGetValue(track.Path, out var cached)) return cached;
-        var resolved = await _artwork.GetOrCreateAsync(track.Path, cancellationToken);
+        var resolved = await _artwork.GetOrCreateAsync(track.EffectiveMediaPath, cancellationToken);
         _resolvedArtwork[track.Path] = resolved;
         return resolved;
     }

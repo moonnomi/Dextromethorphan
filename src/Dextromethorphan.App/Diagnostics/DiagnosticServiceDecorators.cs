@@ -22,6 +22,10 @@ internal sealed class DiagnosticLibraryRepository(ILibraryRepository inner, Deve
         diagnostics.MeasureAsync("repository", "library.upsert-batch", () => inner.UpsertBatchAsync(tracks, cancellationToken),
             new Dictionary<string, object?> { ["count"] = tracks.Count });
 
+    public Task ReconcileCueSheetAsync(string cueSheetPath, IReadOnlyCollection<Track> tracks, CancellationToken cancellationToken = default) =>
+        diagnostics.MeasureAsync("repository", "library.reconcile-cue", () => inner.ReconcileCueSheetAsync(cueSheetPath, tracks, cancellationToken),
+            new Dictionary<string, object?> { ["count"] = tracks.Count });
+
     public Task RemoveMissingAsync(IReadOnlyCollection<string> roots, CancellationToken cancellationToken = default) =>
         diagnostics.MeasureAsync("repository", "library.remove-missing", () => inner.RemoveMissingAsync(roots, cancellationToken),
             new Dictionary<string, object?> { ["roots"] = roots.Count });

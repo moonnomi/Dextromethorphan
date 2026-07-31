@@ -14,6 +14,7 @@ public sealed class DuplicateDetectionService(
         var candidates = (await repository.GetAllAsync(
                 cancellationToken))
             .Where(track => !track.IsMissing
+                            && !track.IsCueTrack
                             && track.FileSize > 0)
             .GroupBy(track => track.FileSize)
             .Where(group => group.Count() > 1)
@@ -33,7 +34,9 @@ public sealed class DuplicateDetectionService(
                 string hash;
                 try
                 {
-                    hash = await HashFileAsync(track.Path, token);
+                    hash = await HashFileAsync(
+                        track.EffectiveMediaPath,
+                        token);
                 }
                 catch (Exception exception) when (
                     exception is IOException

@@ -41,6 +41,7 @@ public interface ILibraryRepository
     Task<IReadOnlyDictionary<string, LibraryFileStamp>> GetFileIndexAsync(CancellationToken cancellationToken = default);
     Task UpsertAsync(Track track, CancellationToken cancellationToken = default);
     Task UpsertBatchAsync(IReadOnlyCollection<Track> tracks, CancellationToken cancellationToken = default);
+    Task ReconcileCueSheetAsync(string cueSheetPath, IReadOnlyCollection<Track> tracks, CancellationToken cancellationToken = default);
     Task RemoveMissingAsync(IReadOnlyCollection<string> roots, CancellationToken cancellationToken = default);
     Task MarkMissingAsync(IReadOnlyCollection<string> paths, CancellationToken cancellationToken = default);
     Task RelinkAsync(string previousPath, Track replacement, CancellationToken cancellationToken = default);
