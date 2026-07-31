@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>Dextromethorphan.AudioSoak</AssemblyName>
+    <RootNamespace>Dextromethorphan.AudioSoak</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Dextromethorphan.Core/Dextromethorphan.Core.csproj" />
+    <ProjectReference Include="../../src/Dextromethorphan.Infrastructure/Dextromethorphan.Infrastructure.csproj" />
+    <PackageReference Include="NAudio" />
+  </ItemGroup>
+</Project>

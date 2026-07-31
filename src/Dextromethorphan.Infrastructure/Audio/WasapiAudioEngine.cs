@@ -68,7 +68,8 @@ public sealed class WasapiAudioEngine : IAudioEngine
             LastCallbackMilliseconds =
                 _timedProvider?.LastReadMilliseconds ?? 0,
             MaximumCallbackMilliseconds =
-                _timedProvider?.MaximumReadMilliseconds ?? 0
+                _timedProvider?.MaximumReadMilliseconds ?? 0,
+            Underruns = _timedProvider?.DeadlineMisses ?? 0
         };
     public event EventHandler<PlaybackSnapshot>? StateChanged;
     public event EventHandler<TrackTransitionedEventArgs>? TrackTransitioned;

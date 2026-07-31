@@ -8,12 +8,14 @@ internal sealed class TimingWaveProvider(
 {
     private long _lastTicks;
     private long _maximumTicks;
+    private long _deadlineMisses;
 
     public WaveFormat WaveFormat => source.WaveFormat;
     public double LastReadMilliseconds =>
         Volatile.Read(ref _lastTicks) * 1000d / Stopwatch.Frequency;
     public double MaximumReadMilliseconds =>
         Volatile.Read(ref _maximumTicks) * 1000d / Stopwatch.Frequency;
+    public long DeadlineMisses => Volatile.Read(ref _deadlineMisses);
 
     public int Read(byte[] buffer, int offset, int count)
     {
@@ -26,6 +28,11 @@ internal sealed class TimingWaveProvider(
         {
             var elapsed = Stopwatch.GetTimestamp() - started;
             Interlocked.Exchange(ref _lastTicks, elapsed);
+            var deadlineTicks = (long)Math.Ceiling(
+                count / (double)WaveFormat.AverageBytesPerSecond
+                * Stopwatch.Frequency);
+            if (count > 0 && elapsed > deadlineTicks)
+                Interlocked.Increment(ref _deadlineMisses);
             var current = Volatile.Read(ref _maximumTicks);
             while (elapsed > current)
             {

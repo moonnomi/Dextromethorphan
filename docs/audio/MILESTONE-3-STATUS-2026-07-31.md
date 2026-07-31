@@ -12,12 +12,13 @@ The release-candidate software gate is complete. The self-contained win-x64 buil
 - SoundTouch tempo/pitch processing with output-frame timeline, lyric, SMTC, and latency alignment.
 - The complete 36-case PCM conversion matrix plus real shared/exclusive endpoint playback and buffer-boundary qualification.
 - A repeatable, device-selectable physical-DAC qualification script and manual matrix.
+- An isolated long-play runner that alternates generated 44.1/48 kHz PCM through the real event-driven transition pipeline and records callback deadlines, recovery, CPU, memory, and endpoint-volume invariance.
 
-The release build passed 257 automated tests. The opt-in onboard-device gate separately passed 36/36 shared formats, 24/24 driver-supported exclusive formats, and 2/10/100 ms buffers with endpoint volume unchanged. The external DST gate separately decoded three consecutive compressed frames bit-for-bit and verified cross-frame DoP seeking without modifying its source fixtures. Generated DSD64/128 tests verify marker order, two- and six-channel interleave, odd callback alignment, and seeking for DSF, uncompressed DFF, and DST-contained DSD.
+The release build passed 259 automated tests. The opt-in onboard-device gate separately passed 36/36 shared formats, 24/24 driver-supported exclusive formats, and 2/10/100 ms buffers with endpoint volume unchanged. The external DST gate separately decoded three consecutive compressed frames bit-for-bit and verified cross-frame DoP seeking without modifying its source fixtures. Generated DSD64/128 tests verify marker order, two- and six-channel interleave, odd callback alignment, and seeking for DSF, uncompressed DFF, and DST-contained DSD. A 25-second live soak smoke test completed eight mixed-rate crossfaded transitions with zero callback deadline misses or recovery attempts, 1,363,968 bytes of final working-set growth, and bit-identical endpoint volume before/after. This validates the runner, not the eight-hour acceptance gate.
 
 ## Data-safety boundary
 
-Format fixtures are generated or legally bundled test assets. ReplayGain safety tests analyze copied audio and verify source hashes/timestamps. The hardware gate emits only finite in-memory silence. None of these qualification paths opens the live music library, artwork cache, or library database, and the release build does not launch the application. Read-only post-build hashes confirmed the existing live database and settings were not modified.
+Format fixtures are generated or legally bundled test assets. ReplayGain safety tests analyze copied audio and verify source hashes/timestamps. The hardware gate emits only finite in-memory silence. The soak runner creates PCM silence under the Windows temporary directory and deletes it when finished; its project contains no library, scanner, database, or settings service. It uses fixed output volume and only reads the endpoint scalar before and after the run. None of these qualification paths opens the live music library, artwork cache, or library database, and the release build does not launch the application. Read-only post-build hashes confirmed the existing live database and settings were not modified.
 
 ## Still open
 
@@ -25,6 +26,6 @@ Format fixtures are generated or legally bundled test assets. ReplayGain safety 
 |---|---|---|
 | DEC-008: ASIO/native DSD evaluation | P3 decision intentionally follows physical WASAPI/DoP evidence | Complete the DAC/DoP matrix, then record a keep/defer/adopt decision |
 | HW-003: physical DoP | Generated framing/seeking and carrier discovery pass, but no compatible DAC is currently available | Verify real-driver 176.4/352.8 kHz negotiation and DAC DSD64/128 indication |
-| HW-004: long soak | Requires real elapsed playback and hardware | Retain an eight-hour diagnostics report with accepted underrun and memory-growth results |
+| HW-004: long soak | The isolated runner and short live smoke test pass; eight real elapsed hours have not yet completed | Retain an eight-hour diagnostics report with accepted callback-deadline, recovery, volume, and memory results |
 
 These are not silently treated as passing. Until HW-003 is complete, diagnostics may describe generated DoP framing but must not claim that a physical DAC received native DSD correctly.

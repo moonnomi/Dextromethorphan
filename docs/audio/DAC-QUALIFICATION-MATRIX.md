@@ -39,3 +39,5 @@ An exact Windows endpoint ID can instead be supplied with `-DeviceId`. The scrip
 HW-003 closes only after the DoP rows pass on physical hardware. HW-004 closes only after the eight-hour run completes and its diagnostics are retained.
 
 Generated DSD64/128 framing, multichannel interleave, callback alignment, seeking, and high-rate carrier discovery are already covered by the [DoP framing qualification](DOP-FRAMING-QUALIFICATION-2026-07-31.md). The manual rows must confirm that a real driver accepts those carriers and that the DAC actually indicates DSD rather than PCM.
+
+The automated eight-hour shared-mode transition run is documented in [audio soak qualification](AUDIO-SOAK-QUALIFICATION-2026-07-31.md). It complements, but does not replace, the physical-DAC rows above.
