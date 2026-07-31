@@ -20,10 +20,14 @@ public sealed class AudioFormatCorpusTests
             .InspectAsync(
                 cancellationToken: TestContext.Current.CancellationToken);
 
-        Assert.Equal(10, capabilities.Count);
+        Assert.Equal(11, capabilities.Count);
         Assert.Contains(
             capabilities,
             capability => capability.Format == "Opus"
+                && capability.State == DecoderCapabilityState.Bundled);
+        Assert.Contains(
+            capabilities,
+            capability => capability.Format == "DST-compressed DFF"
                 && capability.State == DecoderCapabilityState.Bundled);
         Assert.DoesNotContain(
             capabilities,

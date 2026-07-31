@@ -25,7 +25,22 @@ internal static class AudioDecoderFactory
             ".dff" => new DffDopWaveStream(path),
             _ => new MediaFoundationReader(path)
         };
-        var decoder = extension switch { ".dsf" => "Native DSF → DoP 1.1", ".dff" => "Native DSDIFF → DoP 1.1", ".flac" => "Managed FLAC decoder", ".ogg" => "NVorbis managed decoder", ".opus" => "Managed Concentus Opus decoder", ".wav" or ".wave" or ".aif" or ".aiff" or ".mp3" => "NAudio native", _ => "Windows Media Foundation" };
+        var decoder = reader switch
+        {
+            DffDopWaveStream { IsDstCompressed: true } =>
+                "Apache DST decoder → native DSD → DoP 1.1",
+            DffDopWaveStream => "Native DSDIFF → DoP 1.1",
+            DsfDopWaveStream => "Native DSF → DoP 1.1",
+            _ => extension switch
+            {
+                ".flac" => "Managed FLAC decoder",
+                ".ogg" => "NVorbis managed decoder",
+                ".opus" => "Managed Concentus Opus decoder",
+                ".wav" or ".wave" or ".aif" or ".aiff" or ".mp3" =>
+                    "NAudio native",
+                _ => "Windows Media Foundation"
+            }
+        };
         if (track.IsCueTrack)
         {
             reader = new SegmentWaveStream(

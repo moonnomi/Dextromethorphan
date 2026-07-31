@@ -20,5 +20,18 @@
           Link="licenses/SoundTouch.Net-LGPL-2.1.txt"
           CopyToOutputDirectory="PreserveNewest"
           CopyToPublishDirectory="PreserveNewest" />
+    <None Include="runtimes/win-x64/native/dextromethorphan_dst.dll"
+          Link="dextromethorphan_dst.dll"
+          Condition="'$(RuntimeIdentifier)' == '' Or '$(RuntimeIdentifier)' == 'win-x64'"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+    <None Include="../../native/Dextromethorphan.DstDecoder/licenses/dst-decoder-Apache-2.0.txt"
+          Link="licenses/dst-decoder-Apache-2.0.txt"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+    <None Include="../../native/Dextromethorphan.DstDecoder/NOTICE.md"
+          Link="licenses/dst-decoder-NOTICE.md"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -307,7 +307,7 @@ public sealed class WasapiAudioEngine : IAudioEngine
         var decoded = AudioDecoderFactory.Open(track);
         if (position > TimeSpan.Zero) decoded.Reader.CurrentTime = position > decoded.Reader.TotalTime ? decoded.Reader.TotalTime : position;
         var isDsd = decoded.Reader is DsfDopWaveStream or DffDopWaveStream;
-        if (isDsd && _profile.DsdMode != DsdMode.Dop) throw new NotSupportedException("Select DoP in this output device profile to play DSF files.");
+        if (isDsd && _profile.DsdMode != DsdMode.Dop) throw new NotSupportedException("Select DoP in this output device profile to play DSF or DFF files.");
         if (_profile.ChannelPolicy == ChannelPolicy.RejectNonStereo
             && decoded.Reader.WaveFormat.Channels != 2)
             throw new NotSupportedException(

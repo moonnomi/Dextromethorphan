@@ -59,7 +59,8 @@ public sealed class AudioDecoderCapabilityService
             Bundled("FLAC", ".flac", "BunLabs managed FLAC"),
             Bundled("Vorbis", ".ogg", "NVorbis managed decoder"),
             Bundled("Opus", ".opus", "Concentus managed decoder"),
-            Bundled("DSD / DoP", ".dsf, .dff", "Native DSF/DSDIFF parser")
+            Bundled("DSD / DoP", ".dsf, .dff", "Native DSF/DSDIFF parser"),
+            ProbeDstDecoder()
         };
         result.Add(Probe(
             "MP3",
@@ -104,6 +105,35 @@ public sealed class AudioDecoderCapabilityService
             backend,
             DecoderCapabilityState.Bundled,
             "Shipped with Dextromethorphan");
+
+    private static DecoderCapability ProbeDstDecoder()
+    {
+        try
+        {
+            using var decoder = new DstNativeDecoder(2, 2_822_400);
+            return new DecoderCapability(
+                "DST-compressed DFF",
+                ".dff",
+                "dst-decoder 0.1.2 native shim",
+                DecoderCapabilityState.Bundled,
+                $"Validated native API: {decoder.FrameBytes:N0} DSD bytes per stereo DSD64 frame");
+        }
+        catch (Exception exception) when (
+            exception is DllNotFoundException
+                or EntryPointNotFoundException
+                or BadImageFormatException
+                or PlatformNotSupportedException
+                or InvalidOperationException
+                or InvalidDataException)
+        {
+            return new DecoderCapability(
+                "DST-compressed DFF",
+                ".dff",
+                "dst-decoder 0.1.2 native shim",
+                DecoderCapabilityState.Unavailable,
+                $"{exception.GetType().Name}: {exception.Message}");
+        }
+    }
 
     private static DecoderCapability Probe(
         string format,

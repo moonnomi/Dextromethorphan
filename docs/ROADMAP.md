@@ -138,7 +138,7 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 
 ## Milestone 3 — audio engine completion and qualification
 
-**Status (2026-07-31): release-candidate software gate passed.** All P0 audio-engine, decoder, DSP, PCM-output, and onboard-device items are complete. The milestone remains open for one P2 codec item and the explicitly hardware-gated ASIO/native-DSD, physical-DoP, and eight-hour-soak evidence. See the [Milestone 3 status report](audio/MILESTONE-3-STATUS-2026-07-31.md).
+**Status (2026-07-31): release-candidate software gate passed.** All software audio-engine, decoder, DSP, PCM-output, and onboard-device items are complete. The milestone remains open only for the explicitly hardware-gated ASIO/native-DSD decision, physical-DoP evidence, and eight-hour soak. See the [Milestone 3 status report](audio/MILESTONE-3-STATUS-2026-07-31.md).
 
 ### Output devices and modes
 
@@ -160,7 +160,7 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 - [x] **P0 DEC-004** Verify seeking accuracy and end-of-stream behavior for every supported codec. See [decoder corpus and coverage](audio/DECODER-CORPUS-AND-COVERAGE-2026-07-31.md).
 - [x] **P1 DEC-005** Add CUE sheet and single-image album support with per-track boundaries and metadata. See [CUE sheet support](audio/CUE-SHEET-SUPPORT-2026-07-31.md).
 - [x] **P1 DEC-006** Add chapters for formats that support them. See [embedded chapter support](audio/CHAPTER-SUPPORT-2026-07-31.md).
-- [ ] **P2 DEC-007** Add DST-compressed DFF support.
+- [x] **P2 DEC-007** Add DST-compressed DFF support. See [DST-compressed DFF qualification](audio/DST-DFF-QUALIFICATION-2026-07-31.md).
 - [ ] **P3 DEC-008** Evaluate ASIO/native DSD only after WASAPI/DoP is hardware-qualified.
 
 ### Signal processing and transitions

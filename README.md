@@ -54,7 +54,7 @@ On first launch, select **Add music folder**. Your library, settings, and cache 
 
 Dextromethorphan has separate direct and DSP playback paths. Exclusive WASAPI without DSP can bypass the Windows shared mixer; enabling software volume, ReplayGain, crossfade, fades, or speed processing intentionally uses the DSP path instead.
 
-Managed decoders handle FLAC and Ogg Vorbis. WAV, AIFF, and MP3 use native NAudio paths, while AAC, ALAC, M4A, WMA, and Opus use Windows Media Foundation where a platform decoder is available. Uncompressed DSF and DFF can be streamed as DoP to compatible hardware.
+Managed decoders handle FLAC and Ogg Vorbis. WAV, AIFF, and MP3 use native NAudio paths, while AAC, ALAC, M4A, and WMA use Windows Media Foundation where a platform decoder is available; Opus uses the bundled Concentus path. DSF plus uncompressed or DST-compressed DFF can be streamed as DoP to compatible hardware.
 
 For the exact mode and fallback rules, see [Audio](docs/AUDIO.md).
 
@@ -88,6 +88,6 @@ The current focus is playback reliability, audio diagnostics, and interaction po
 <details>
 <summary>Third-party software and licenses</summary>
 
-NAudio and NVorbis are MIT licensed; BunLabs.NAudio.Flac is MS-PL; Microsoft.Data.Sqlite is MIT; SQLitePCLRaw is Apache-2.0; and TagLibSharp and SoundTouch.Net are LGPL-2.1. The SoundTouch license is copied into release output under `licenses`. Replace the LGPL/MS-PL components if a permissive-only distribution policy is required.
+NAudio and NVorbis are MIT licensed; BunLabs.NAudio.Flac is MS-PL; Microsoft.Data.Sqlite is MIT; SQLitePCLRaw and the DST decoder are Apache-2.0; and TagLibSharp and SoundTouch.Net are LGPL-2.1. Required SoundTouch and DST notices are copied into release output under `licenses`. Replace the LGPL/MS-PL components if a permissive-only distribution policy is required.
 
 </details>

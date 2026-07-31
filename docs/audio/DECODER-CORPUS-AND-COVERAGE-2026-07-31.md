@@ -18,7 +18,7 @@ generated from a two-second, 997 Hz sine wave by
 | AAC | `.aac`, `.m4a`, `.mp4` | Windows Media Foundation | ADTS and MP4 probes decoded at runtime |
 | ALAC | `.m4a`, `.mp4` | Windows Media Foundation | Embedded probe decoded at runtime |
 | WMA | `.wma` | Windows Media Foundation | Embedded probe decoded at runtime |
-| DSD | `.dsf`, `.dff` | Native parser to DoP 1.1 | Bundled for uncompressed DSD |
+| DSD | `.dsf`, `.dff` | Native parser and Apache DST decoder to DoP 1.1 | Bundled for DSF plus uncompressed or DST-compressed DFF on win-x64 |
 
 `AudioDecoderCapabilityService` never assumes that a Media Foundation
 transform exists. It extracts only embedded synthetic probes to a unique
@@ -42,7 +42,7 @@ The committed corpus includes:
 Tests hash every generated fixture before use. Metadata reads are verified to
 leave the media bytes unchanged. Every PCM decoder is opened, read, moved to
 the middle, read again, drained to EOF, and read once more to prove stable EOF.
-DSF and DFF are rewound and reread, including DoP marker validation. Opus has a
+DSF and uncompressed DFF are rewound and reread, including DoP marker validation. DST-compressed DFF has generated container/error tests plus a separate opt-in, bit-exact qualification against external compressed frames that are not redistributed with this repository. Opus has a
 sample-level sequential-versus-seek comparison with a maximum eight-LSB
 tolerance to account for decoder preroll state.
 
@@ -67,7 +67,6 @@ Settings smoke set passed 20/20.
 
 ## Remaining boundaries
 
-DST-compressed DFF is intentionally tracked separately by DEC-007. CUE sheets
-and chapters are tracked by DEC-005 and DEC-006. Physical output qualification
+CUE sheets and chapters are tracked by DEC-005 and DEC-006. Physical output qualification
 is tracked by AUD-006 and HW-001 through HW-004; decoder success alone does not
 claim bit-perfect hardware output.

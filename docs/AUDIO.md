@@ -40,16 +40,15 @@ SoundTouch runs per track before the gapless/crossfade provider, so crossfade du
 
 ## DSD over PCM
 
-Uncompressed DSF and DFF/DSDIFF are streamed block-by-block as DoP 1.1. Every 16 DSD bits occupy the lower bytes of a 24-bit frame; the most-significant byte alternates `0x05` and `0xFA` across all channels. DSD64 negotiates 176.4 kHz/24-bit PCM. Seeking maps to native container boundaries.
+DSF and both uncompressed and DST-compressed DFF/DSDIFF are streamed block-by-block as DoP 1.1. DST is decompressed losslessly to native channel-interleaved DSD one 1/75-second frame at a time, then enters the same DoP framer; it is never converted to PCM. Every 16 DSD bits occupy the lower bytes of a 24-bit frame; the most-significant byte alternates `0x05` and `0xFA` across all channels. DSD64 negotiates 176.4 kHz/24-bit PCM. Seeking decodes only the containing DST frame and resumes at the requested DoP frame.
 
 DoP requires an exclusive DAC and `DsdMode: "Dop"`. ReplayGain, crossfade, fades, software volume, and speed/pitch are rejected rather than corrupting DSD. DST compression and ASIO-native DSD are pending.
 
 ## Decoder coverage
 
-- Managed/built-in: WAV, AIFF, MP3, FLAC, Ogg Vorbis, Opus, and DSF/DFF-to-DoP.
+- Managed/built-in: WAV, AIFF, MP3, FLAC, Ogg Vorbis, Opus, DSF-to-DoP, and uncompressed or DST-compressed DFF-to-DoP on win-x64.
 - Windows Media Foundation with startup capability probes: AAC/M4A, ALAC, WMA, and other installed transforms.
-- Pending independent coverage: DST-compressed DSDIFF.
 
 ## Verification
 
-Automated tests cover callback-spanning gapless joins, crossfade output, SoundTouch tempo/pitch frequency and duration behavior, measured processing displacement, ReplayGain analysis and peak math, clipping guard behavior, sleep-at-end state, and exact DSF/DoP payload/marker framing. USB-driver exclusive behavior and DAC interpretation require a physical hardware matrix.
+Automated tests cover callback-spanning gapless joins, crossfade output, SoundTouch tempo/pitch frequency and duration behavior, measured processing displacement, ReplayGain analysis and peak math, clipping guard behavior, sleep-at-end state, exact DSF/DoP payload/marker framing, DST container validation, malformed-frame containment, and bit-exact external DST qualification. USB-driver exclusive behavior and DAC interpretation require a physical hardware matrix.
