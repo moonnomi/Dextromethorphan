@@ -178,7 +178,7 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 
 - [x] **P0 HW-001** Test at least one normal onboard device before every release. The current release candidate passed on the system's Realtek onboard endpoint; this remains a release-time gate. See [PCM output qualification](audio/PCM-OUTPUT-QUALIFICATION-2026-07-31.md).
 - [x] **P1 HW-002** Build a DAC test matrix for exclusive negotiation, sample-rate switching, buffers, hardware volume, device loss, and long playback. Execution remains hardware-gated. See [DAC qualification matrix](audio/DAC-QUALIFICATION-MATRIX.md).
-- [ ] **P1 HW-003** Verify DoP marker order, channel interleave, seeking, DSD64/128 negotiation, and DAC indication on physical hardware.
+- [ ] **P1 HW-003** Verify DoP marker order, channel interleave, seeking, DSD64/128 negotiation, and DAC indication on physical hardware. Generated framing, seeking, and carrier-format discovery are complete; physical negotiation and DAC indication remain. See [DoP framing qualification](audio/DOP-FRAMING-QUALIFICATION-2026-07-31.md).
 - [ ] **P1 HW-004** Run 8-hour playback/transition soak tests and record underruns and memory growth.
 
 ---

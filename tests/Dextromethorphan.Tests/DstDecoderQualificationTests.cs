@@ -41,6 +41,48 @@ public sealed class DstDecoderQualificationTests
     }
 
     [Fact]
+    public void GeneratedDsd128EscapeFramePreservesDopAndSeeking()
+    {
+        const int channels = 2;
+        const int dsdSampleRate = 5_644_800;
+        using var decoder = new DstNativeDecoder(channels, dsdSampleRate);
+        Assert.Equal(18_816, decoder.FrameBytes);
+        var sourceDsd = Enumerable.Range(0, decoder.FrameBytes)
+            .Select(index => (byte)(index * 37 + 11))
+            .ToArray();
+        var dstFrame = new byte[sourceDsd.Length + 1];
+        // DST's lossless-coding escape hatch: coded=0, dummy/stuffing=0.
+        sourceDsd.CopyTo(dstFrame, 1);
+        var path = WriteDstDff(
+            dstFrame,
+            sampleRate: dsdSampleRate);
+        try
+        {
+            using var stream = new DffDopWaveStream(path);
+            var expected = ToDop(sourceDsd, channels);
+            Assert.True(stream.IsDstCompressed);
+            Assert.Equal(352_800, stream.WaveFormat.SampleRate);
+            Assert.Equal(24, stream.WaveFormat.BitsPerSample);
+            Assert.Equal(expected, Drain(stream));
+
+            const int seekFrame = 3_777;
+            var seekPosition = seekFrame * stream.WaveFormat.BlockAlign;
+            stream.Position = seekPosition;
+            var actual = new byte[stream.WaveFormat.BlockAlign * 31];
+            Assert.Equal(
+                actual.Length,
+                stream.Read(actual, 0, actual.Length));
+            Assert.Equal(
+                expected.AsSpan(seekPosition, actual.Length).ToArray(),
+                actual);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void DstContainerRejectsDeclaredFrameCountMismatch()
     {
         var path = WriteDstDff([0x80, 0x00], declaredFrames: 2);
@@ -174,17 +216,19 @@ public sealed class DstDecoderQualificationTests
 
     private static string WriteDstDff(
         byte[] compressedFrame,
-        uint declaredFrames = 1) =>
-        WriteDstDff([compressedFrame], declaredFrames);
+        uint declaredFrames = 1,
+        int sampleRate = 2_822_400) =>
+        WriteDstDff([compressedFrame], declaredFrames, sampleRate);
 
     private static string WriteDstDff(
         IReadOnlyList<byte[]> compressedFrames,
-        uint? declaredFrames = null)
+        uint? declaredFrames = null,
+        int sampleRate = 2_822_400)
     {
         using var properties = new MemoryStream();
         WriteId(properties, "SND ");
         WriteChunk(properties, "FS  ", stream =>
-            WriteUInt32(stream, 2_822_400));
+            WriteUInt32(stream, checked((uint)sampleRate)));
         WriteChunk(properties, "CHNL", stream =>
         {
             WriteUInt16(stream, 2);

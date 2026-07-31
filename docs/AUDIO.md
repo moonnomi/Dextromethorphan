@@ -51,4 +51,4 @@ DoP requires an exclusive DAC and `DsdMode: "Dop"`. ReplayGain, crossfade, fades
 
 ## Verification
 
-Automated tests cover callback-spanning gapless joins, crossfade output, SoundTouch tempo/pitch frequency and duration behavior, measured processing displacement, ReplayGain analysis and peak math, clipping guard behavior, sleep-at-end state, exact DSF/DoP payload/marker framing, DST container validation, malformed-frame containment, and bit-exact external DST qualification. USB-driver exclusive behavior and DAC interpretation require a physical hardware matrix.
+Automated tests cover callback-spanning gapless joins, crossfade output, SoundTouch tempo/pitch frequency and duration behavior, measured processing displacement, ReplayGain analysis and peak math, clipping guard behavior, sleep-at-end state, exact DSD64/128 DSF/DFF/DoP payload and marker framing through six channels, DST container validation, malformed-frame containment, and bit-exact external DST qualification. Exclusive discovery includes 176.4/352.8/705.6 kHz DoP carrier rates, but USB-driver behavior and DAC interpretation still require the physical hardware matrix.

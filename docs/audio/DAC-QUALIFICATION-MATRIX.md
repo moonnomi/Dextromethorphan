@@ -37,3 +37,5 @@ An exact Windows endpoint ID can instead be supplied with `-DeviceId`. The scrip
 | Release soak | Representative queue for 8 hours | Zero unhandled errors; underruns and memory growth are recorded and accepted |
 
 HW-003 closes only after the DoP rows pass on physical hardware. HW-004 closes only after the eight-hour run completes and its diagnostics are retained.
+
+Generated DSD64/128 framing, multichannel interleave, callback alignment, seeking, and high-rate carrier discovery are already covered by the [DoP framing qualification](DOP-FRAMING-QUALIFICATION-2026-07-31.md). The manual rows must confirm that a real driver accepts those carriers and that the DAC actually indicates DSD rather than PCM.

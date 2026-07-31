@@ -42,7 +42,12 @@ public sealed class DsfDopWaveStream : WaveStream
         var sampleCount = reader.ReadInt64();
         _blockSize = reader.ReadInt32();
         _ = reader.ReadInt32(); // reserved
-        if (_channels is < 1 or > 8 || dsdSampleRate <= 0 || dsdSampleRate % 16 != 0 || _blockSize <= 0 || sampleCount <= 0)
+        if (_channels is < 1 or > 8
+            || dsdSampleRate <= 0
+            || dsdSampleRate % 16 != 0
+            || _blockSize < 2
+            || (_blockSize & 1) != 0
+            || sampleCount <= 0)
             throw Invalid("The DSF stream has invalid channel, rate, sample-count, or block-size fields.");
         if (bitsPerSample is not (1 or 8)) throw Invalid("Unsupported DSF bit order.");
         _reverseBits = bitsPerSample == 8;
@@ -52,6 +57,12 @@ public sealed class DsfDopWaveStream : WaveStream
         if (dataChunkSize < 12) throw Invalid("Invalid DSF data chunk.");
         _dataOffset = _stream.Position;
         _bytesPerChannel = (sampleCount + 7) / 8;
+        var storedBlocks = (_bytesPerChannel + _blockSize - 1) / _blockSize;
+        var requiredDataBytes = checked(
+            storedBlocks * _blockSize * _channels);
+        if (dataChunkSize - 12 < requiredDataBytes
+            || requiredDataBytes > _stream.Length - _dataOffset)
+            throw Invalid("The DSF data chunk is truncated.");
         WaveFormat = new WaveFormat(dsdSampleRate / 16, 24, _channels);
         Length = (_bytesPerChannel / 2) * WaveFormat.BlockAlign;
         _dsdBlock = new byte[checked(_blockSize * _channels)];
@@ -79,11 +90,14 @@ public sealed class DsfDopWaveStream : WaveStream
     public override int Read(byte[] buffer, int offset, int count)
     {
         var remaining = (int)Math.Min(count, Length - _position);
+        remaining -= remaining % WaveFormat.BlockAlign;
         var written = 0;
         while (written < remaining)
         {
             if (_dopOffset >= _dopCount && !LoadNextBlock()) break;
             var copy = Math.Min(remaining - written, _dopCount - _dopOffset);
+            copy -= copy % WaveFormat.BlockAlign;
+            if (copy <= 0) break;
             Array.Copy(_dopBlock, _dopOffset, buffer, offset + written, copy);
             _dopOffset += copy;
             written += copy;
