@@ -105,6 +105,11 @@ public sealed class MainViewModel : ObservableObject
 
     private string _duplicateScanStatus =
         "Content analysis has not been run.";
+    private AudioDeviceInfo? _selectedOutputDevice;
+    private AudioDeviceCapabilities? _outputCapabilities;
+    private string _outputProfileStatus =
+        "Select an output to inspect its capabilities.";
+    private bool _isOutputProfileBusy;
 
     public MainViewModel(
         ISettingsService settings,
@@ -184,6 +189,7 @@ public sealed class MainViewModel : ObservableObject
         _audio.StateChanged += AudioOnStateChanged;
         _audio.TrackTransitioned += AudioOnTrackTransitioned;
         _audio.PlaybackEnded += AudioOnPlaybackEnded;
+        _audio.OutputDevicesChanged += AudioOnOutputDevicesChanged;
         _queue.Changed += QueueOnChanged;
         _scanner.ProgressChanged += ScannerOnProgressChanged;
         _scanner.SourceStatusesChanged += ScannerOnSourceStatusesChanged;
@@ -209,6 +215,56 @@ public sealed class MainViewModel : ObservableObject
     public ObservableCollection<LibrarySourceStatus> LibrarySources { get; } = new ObservableRangeCollection<LibrarySourceStatus>();
     public ObservableCollection<DuplicateTrackGroup> DuplicateGroups { get; } = new ObservableRangeCollection<DuplicateTrackGroup>();
     public string DuplicateScanStatus { get => _duplicateScanStatus; private set => Set(ref _duplicateScanStatus, value); }
+    public AudioOutputProfileDraft OutputProfile { get; } = new();
+    public AudioDeviceInfo? SelectedOutputDevice
+    {
+        get => _selectedOutputDevice;
+        set => Set(ref _selectedOutputDevice, value);
+    }
+    public AudioDeviceCapabilities? OutputCapabilities
+    {
+        get => _outputCapabilities;
+        private set
+        {
+            if (!Set(ref _outputCapabilities, value)) return;
+            Raise(nameof(SupportedExclusiveFormats));
+            Raise(nameof(OutputMixFormat));
+            Raise(nameof(SupportsEventDrivenExclusive));
+        }
+    }
+    public IReadOnlyList<AudioFormatInfo> SupportedExclusiveFormats =>
+        OutputCapabilities?.SupportedExclusiveFormats ?? [];
+    public string OutputMixFormat =>
+        OutputCapabilities?.MixFormat.ToString() ?? "Not queried";
+    public bool SupportsEventDrivenExclusive =>
+        OutputCapabilities?.SupportsEventDrivenExclusive == true;
+    public string OutputProfileStatus
+    {
+        get => _outputProfileStatus;
+        private set => Set(ref _outputProfileStatus, value);
+    }
+    public bool IsOutputProfileBusy
+    {
+        get => _isOutputProfileBusy;
+        private set => Set(ref _isOutputProfileBusy, value);
+    }
+    public IReadOnlyList<WasapiMode> WasapiModes { get; } =
+        Enum.GetValues<WasapiMode>();
+    public IReadOnlyList<SampleRatePolicy> SampleRatePolicies { get; } =
+        Enum.GetValues<SampleRatePolicy>();
+    public IReadOnlyList<int> SampleRates { get; } =
+        [44_100, 48_000, 88_200, 96_000, 176_400, 192_000];
+    public IReadOnlyList<BitDepthPolicy> BitDepthPolicies { get; } =
+        Enum.GetValues<BitDepthPolicy>();
+    public IReadOnlyList<int> BitDepths { get; } = [16, 24, 32];
+    public IReadOnlyList<ChannelPolicy> ChannelPolicies { get; } =
+        Enum.GetValues<ChannelPolicy>();
+    public IReadOnlyList<OutputFallbackPolicy> OutputFallbackPolicies { get; } =
+        Enum.GetValues<OutputFallbackPolicy>();
+    public IReadOnlyList<VolumeControlMode> VolumeControlModes { get; } =
+        Enum.GetValues<VolumeControlMode>();
+    public IReadOnlyList<DsdMode> DsdModes { get; } =
+        Enum.GetValues<DsdMode>();
 
     public Track? SelectedTrack
     {
@@ -325,6 +381,14 @@ public sealed class MainViewModel : ObservableObject
     public string DiagnosticOutput => _audio.Diagnostics?.OutputFormat?.ToString() ?? "—";
     public string DiagnosticDecoder => _audio.Diagnostics?.Decoder ?? "—";
     public string DiagnosticBuffer => $"{(_settings.Current.OutputProfiles.FirstOrDefault(x => x.DeviceId == _settings.Current.ActiveOutputDeviceId)?.BufferMilliseconds ?? 100)} ms · event-driven";
+    public string DiagnosticEndpoint => _audio.Diagnostics is { } diagnostics
+        ? diagnostics.FallbackActive
+            ? $"{diagnostics.RequestedDevice} → {diagnostics.EffectiveDevice}"
+            : diagnostics.EffectiveDevice
+        : "—";
+    public string DiagnosticTiming => _audio.Diagnostics is { } diagnostics
+        ? $"last {diagnostics.LastCallbackMilliseconds:0.###} ms · max {diagnostics.MaximumCallbackMilliseconds:0.###} ms · {diagnostics.Underruns} underruns · {diagnostics.RecoveryAttempts} recovery attempts"
+        : "—";
     public string DiagnosticReason => _audio.Diagnostics?.Reason ?? "Start playback to see decoder, format conversion, WASAPI mode, and bit-perfect status.";
     public bool IsShuffleEnabled => _queue.Shuffle;
     public string ShuffleText => IsShuffleEnabled ? "Shuffle on" : "Shuffle off";
@@ -427,7 +491,7 @@ public sealed class MainViewModel : ObservableObject
         await _repository.InitializeAsync(_lifetime.Token);
         var refreshLibrary = RefreshLibraryAsync(cancellationToken: _lifetime.Token);
         var refreshArtwork = RefreshArtworkCacheStatsAsync();
-        Replace(OutputDevices, await _audio.GetOutputDevicesAsync(_lifetime.Token));
+        await RefreshOutputDevicesAsync();
         var profile = _settings.Current.OutputProfiles.FirstOrDefault(x => x.DeviceId == _settings.Current.ActiveOutputDeviceId) ?? _settings.Current.OutputProfiles[0];
         await _audio.SetPlaybackOptionsAsync(new AudioPlaybackOptions
         {
@@ -450,6 +514,100 @@ public sealed class MainViewModel : ObservableObject
         if (!IsSafeMode)
             await RestoreSessionAsync();
         IsLibraryReady = true;
+    }
+
+    public async Task RefreshOutputDevicesAsync()
+    {
+        IsOutputProfileBusy = true;
+        try
+        {
+            var devices = await _audio.GetOutputDevicesAsync(_lifetime.Token);
+            Replace(OutputDevices, devices);
+            var activeId = _settings.Current.ActiveOutputDeviceId;
+            SelectedOutputDevice = devices.FirstOrDefault(device =>
+                                       device.Id.Equals(
+                                           activeId,
+                                           StringComparison.OrdinalIgnoreCase))
+                                   ?? devices.FirstOrDefault();
+            if (SelectedOutputDevice is not null)
+                await SelectOutputDeviceAsync(SelectedOutputDevice);
+            else
+            {
+                OutputCapabilities = null;
+                OutputProfileStatus = "No active Windows output endpoint was found.";
+            }
+        }
+        catch (Exception exception)
+        {
+            OutputCapabilities = null;
+            OutputProfileStatus =
+                "Output discovery failed: " + exception.GetBaseException().Message;
+            _applicationLog.Write(
+                ApplicationLogLevel.Warning,
+                "audio",
+                "device-discovery-failed",
+                exception: exception);
+        }
+        finally
+        {
+            IsOutputProfileBusy = false;
+        }
+    }
+
+    public async Task SelectOutputDeviceAsync(AudioDeviceInfo device)
+    {
+        SelectedOutputDevice = device;
+        var existing = _settings.Current.OutputProfiles.FirstOrDefault(
+            profile => profile.DeviceId.Equals(
+                device.Id,
+                StringComparison.OrdinalIgnoreCase));
+        OutputProfile.Load(
+            existing ?? AudioOutputProfileDefaults.For(device));
+        IsOutputProfileBusy = true;
+        OutputProfileStatus = "Querying exclusive-mode formats…";
+        try
+        {
+            OutputCapabilities = await _audio.GetDeviceCapabilitiesAsync(
+                device.Id,
+                _lifetime.Token);
+            OutputProfileStatus = SupportedExclusiveFormats.Count == 0
+                ? "This endpoint reported no tested exclusive PCM formats. Shared mode remains available."
+                : $"{SupportedExclusiveFormats.Count:N0} exclusive formats accepted · event-driven WASAPI available";
+        }
+        catch (Exception exception)
+        {
+            OutputCapabilities = null;
+            OutputProfileStatus =
+                "Capability query failed: " + exception.GetBaseException().Message;
+        }
+        finally
+        {
+            IsOutputProfileBusy = false;
+        }
+    }
+
+    public async Task SaveOutputProfileAsync()
+    {
+        if (SelectedOutputDevice is null) return;
+        var profile = OutputProfile.ToProfile();
+        profile.DeviceId = SelectedOutputDevice.Id;
+        profile.Name = SelectedOutputDevice.Name;
+        await _settings.UpdateAsync(
+            settings =>
+            {
+                settings.OutputProfiles.RemoveAll(existing =>
+                    existing.DeviceId.Equals(
+                        profile.DeviceId,
+                        StringComparison.OrdinalIgnoreCase));
+                settings.OutputProfiles.Add(profile);
+                settings.ActiveOutputDeviceId = profile.DeviceId;
+            },
+            _lifetime.Token);
+        await _audio.ConfigureOutputAsync(profile, _lifetime.Token);
+        await _audio.SetVolumeAsync(Volume, _lifetime.Token);
+        OutputProfileStatus =
+            $"Saved {profile.Name} · {profile.Mode} · {profile.BufferMilliseconds} ms";
+        Raise(nameof(DiagnosticBuffer));
     }
 
     public async Task AddLibraryFolderAsync(string folder)
@@ -1931,7 +2089,7 @@ public sealed class MainViewModel : ObservableObject
                 PositionText = FormatTime(snapshot.Position);
             }
             if (!string.IsNullOrWhiteSpace(snapshot.Error)) StatusText = snapshot.Error;
-            Raise(nameof(HasAudioDiagnostics)); Raise(nameof(DiagnosticHeadline)); Raise(nameof(DiagnosticMode)); Raise(nameof(DiagnosticSource)); Raise(nameof(DiagnosticOutput)); Raise(nameof(DiagnosticDecoder)); Raise(nameof(DiagnosticBuffer)); Raise(nameof(DiagnosticReason));
+            Raise(nameof(HasAudioDiagnostics)); Raise(nameof(DiagnosticHeadline)); Raise(nameof(DiagnosticMode)); Raise(nameof(DiagnosticSource)); Raise(nameof(DiagnosticOutput)); Raise(nameof(DiagnosticDecoder)); Raise(nameof(DiagnosticBuffer)); Raise(nameof(DiagnosticEndpoint)); Raise(nameof(DiagnosticTiming)); Raise(nameof(DiagnosticReason));
             UpdateLyricsPosition(snapshot.Position);
             _systemMedia.Update(snapshot with { Track = track }, HasPreviousTrack(), HasNextTrack());
             if (CurrentView == "Now Playing") { ViewSubtitle = CurrentArtist; Raise(nameof(ViewTitle)); }
@@ -1950,6 +2108,22 @@ public sealed class MainViewModel : ObservableObject
 
     private void AudioOnPlaybackEnded(object? sender, EventArgs e) => _ = HandlePlaybackEndedAsync();
     private async Task HandlePlaybackEndedAsync() { _sleepTimer.NotifyTrackEnded(); var next = _queue.Advance(); if (next is not null) await ChangeTrackAsync(next); }
+
+    private void AudioOnOutputDevicesChanged(
+        object? sender,
+        AudioEndpointChangedEventArgs e)
+    {
+        _applicationLog.Write(
+            ApplicationLogLevel.Information,
+            "audio",
+            "endpoint-changed",
+            new Dictionary<string, object?>
+            {
+                ["kind"] = e.Kind.ToString(),
+                ["detail"] = e.Detail
+            });
+        RunOnUi(() => _ = RefreshOutputDevicesAsync());
+    }
 
     private Track? PeekUpcomingTrack()
     {
@@ -2242,6 +2416,10 @@ public sealed class MainViewModel : ObservableObject
         _scanner.ProgressChanged -= ScannerOnProgressChanged;
         _scanner.SourceStatusesChanged -= ScannerOnSourceStatusesChanged;
         _scanner.FilesChanged -= ScannerOnFilesChanged;
+        _audio.StateChanged -= AudioOnStateChanged;
+        _audio.TrackTransitioned -= AudioOnTrackTransitioned;
+        _audio.PlaybackEnded -= AudioOnPlaybackEnded;
+        _audio.OutputDevicesChanged -= AudioOnOutputDevicesChanged;
         _shortcuts.ActionInvoked -= ShortcutsOnActionInvoked; _systemMedia.CommandReceived -= SystemMediaOnCommandReceived;
         await _scanner.DisposeAsync();
         _searchCancellation?.Dispose(); _artworkCancellation?.Dispose(); _queueArtworkCancellation?.Dispose(); _sessionSaveCancellation?.Dispose(); _volumeCancellation?.Dispose(); _libraryChangeCancellation?.Dispose(); _lifetime.Dispose();

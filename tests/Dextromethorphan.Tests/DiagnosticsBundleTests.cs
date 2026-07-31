@@ -58,6 +58,16 @@ public sealed class DiagnosticsBundleTests : IDisposable
         Assert.DoesNotContain("secret-device", redacted);
         Assert.Contains("<library-root-1>", redacted);
         Assert.Contains("id-", redacted);
+        var pipelineEntry = Assert.Single(
+            archive.Entries,
+            entry => entry.FullName == "audio-pipeline.json");
+        using var pipelineReader =
+            new StreamReader(pipelineEntry.Open());
+        var pipeline = await pipelineReader.ReadToEndAsync(
+            cancellationToken);
+        Assert.Contains("\"FallbackActive\": true", pipeline);
+        Assert.Contains("\"RecoveryAttempts\": 2", pipeline);
+        Assert.Contains("\"MaximumCallbackMilliseconds\": 1.75", pipeline);
     }
 
     public void Dispose()
@@ -75,7 +85,24 @@ public sealed class DiagnosticsBundleTests : IDisposable
             TimeSpan.Zero,
             TimeSpan.Zero,
             1);
-        public AudioDiagnostics? Diagnostics => null;
+        public AudioDiagnostics? Diagnostics { get; } = new(
+            AudioPipelineMode.Direct,
+            WasapiMode.Exclusive,
+            WasapiMode.Shared,
+            new(44_100, 16, 2, "Pcm"),
+            new(48_000, 32, 2, "IeeeFloat"),
+            false,
+            true,
+            "Test decoder",
+            "Shared fallback",
+            "Requested device",
+            "Effective device",
+            true,
+            "Format rejected",
+            2,
+            0,
+            0.5,
+            1.75);
         public event EventHandler<PlaybackSnapshot>? StateChanged
         {
             add { }
@@ -87,6 +114,12 @@ public sealed class DiagnosticsBundleTests : IDisposable
             remove { }
         }
         public event EventHandler? PlaybackEnded
+        {
+            add { }
+            remove { }
+        }
+        public event EventHandler<AudioEndpointChangedEventArgs>?
+            OutputDevicesChanged
         {
             add { }
             remove { }

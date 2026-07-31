@@ -132,6 +132,7 @@ public interface IAudioEngine : IAsyncDisposable
     event EventHandler<PlaybackSnapshot>? StateChanged;
     event EventHandler<TrackTransitionedEventArgs>? TrackTransitioned;
     event EventHandler? PlaybackEnded;
+    event EventHandler<AudioEndpointChangedEventArgs>? OutputDevicesChanged;
     Task<IReadOnlyList<AudioDeviceInfo>> GetOutputDevicesAsync(CancellationToken cancellationToken = default);
     Task<AudioDeviceCapabilities> GetDeviceCapabilitiesAsync(string deviceId, CancellationToken cancellationToken = default);
     Task LoadAsync(Track track, CancellationToken cancellationToken = default);

@@ -35,6 +35,7 @@ internal static class AudioDecoderFactory
             {
                 (1, 2) => new MonoToStereoSampleProvider(provider),
                 (2, 1) => new StereoToMonoSampleProvider(provider),
+                (> 2, 2) => new MultichannelToStereoSampleProvider(provider),
                 _ => throw new NotSupportedException($"Channel conversion {provider.WaveFormat.Channels} → {target.Channels} is not supported.")
             };
         }
@@ -44,6 +45,62 @@ internal static class AudioDecoderFactory
 
     public static long TotalSamples(DecodedAudio decoded, WaveFormat format) =>
         (long)Math.Ceiling(decoded.Reader.TotalTime.TotalSeconds * format.SampleRate * format.Channels);
+}
+
+internal sealed class MultichannelToStereoSampleProvider(
+    ISampleProvider source) : ISampleProvider
+{
+    private readonly int _sourceChannels = source.WaveFormat.Channels;
+    private float[] _sourceBuffer = [];
+
+    public WaveFormat WaveFormat { get; } =
+        WaveFormat.CreateIeeeFloatWaveFormat(
+            source.WaveFormat.SampleRate,
+            2);
+
+    public int Read(float[] buffer, int offset, int count)
+    {
+        var framesRequested = count / 2;
+        var sourceSamples = framesRequested * _sourceChannels;
+        if (_sourceBuffer.Length < sourceSamples)
+            _sourceBuffer = new float[sourceSamples];
+        var sourceRead = source.Read(
+            _sourceBuffer,
+            0,
+            sourceSamples);
+        var framesRead = sourceRead / _sourceChannels;
+        for (var frame = 0; frame < framesRead; frame++)
+        {
+            var input = frame * _sourceChannels;
+            var left = _sourceBuffer[input];
+            var right = _sourceBuffer[input + 1];
+            var weight = 1d;
+            if (_sourceChannels > 2)
+            {
+                var center = _sourceBuffer[input + 2] * 0.70710678f;
+                left += center;
+                right += center;
+                weight += 0.70710678;
+            }
+            if (_sourceChannels > 3)
+            {
+                var lfe = _sourceBuffer[input + 3] * 0.5f;
+                left += lfe;
+                right += lfe;
+                weight += 0.5;
+            }
+            for (var channel = 4; channel < _sourceChannels; channel++)
+            {
+                var sample = _sourceBuffer[input + channel] * 0.70710678f;
+                if ((channel & 1) == 0) left += sample;
+                else right += sample;
+                weight += 0.35355339;
+            }
+            buffer[offset + frame * 2] = (float)(left / weight);
+            buffer[offset + frame * 2 + 1] = (float)(right / weight);
+        }
+        return framesRead * 2;
+    }
 }
 
 internal sealed class DecodedAudio(Track track, WaveStream reader, string decoder) : IDisposable

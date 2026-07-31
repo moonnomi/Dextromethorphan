@@ -7,7 +7,12 @@ public enum WasapiMode { Shared, Exclusive }
 public enum DsdMode { Disabled, Dop, Native }
 public enum AudioPipelineMode { Direct, Dsp }
 public enum TransitionMode { Gapless, Crossfade }
-public enum OutputFallbackPolicy { Never, SharedMode }
+public enum OutputFallbackPolicy { Never, SharedMode, SystemDefaultShared }
+public enum SampleRatePolicy { MatchSource, EndpointMixFormat, Fixed }
+public enum BitDepthPolicy { MatchSource, Fixed }
+public enum ChannelPolicy { RejectNonStereo, DownmixToStereo, MatchSource }
+public enum VolumeControlMode { Software, Hardware, Fixed }
+public enum AudioEndpointChangeKind { Added, Removed, StateChanged, DefaultChanged }
 
 public sealed record AudioDeviceInfo(string Id, string Name, bool IsDefault, string State, string MixFormat = "");
 
@@ -23,6 +28,11 @@ public sealed record AudioDeviceCapabilities(
     IReadOnlyList<AudioFormatInfo> SupportedExclusiveFormats,
     bool SupportsEventDrivenExclusive);
 
+public sealed record AudioEndpointChangedEventArgs(
+    AudioEndpointChangeKind Kind,
+    string DeviceId,
+    string? Detail = null);
+
 public sealed record AudioDiagnostics(
     AudioPipelineMode PipelineMode,
     WasapiMode RequestedMode,
@@ -32,7 +42,15 @@ public sealed record AudioDiagnostics(
     bool IsBitPerfect,
     bool IsEventDriven,
     string Decoder,
-    string Reason);
+    string Reason,
+    string RequestedDevice = "",
+    string EffectiveDevice = "",
+    bool FallbackActive = false,
+    string FallbackReason = "",
+    int RecoveryAttempts = 0,
+    long Underruns = 0,
+    double LastCallbackMilliseconds = 0,
+    double MaximumCallbackMilliseconds = 0);
 
 public sealed record PlaybackSnapshot(
     Track? Track,
@@ -76,11 +94,18 @@ public sealed class AudioOutputProfile
     public string Name { get; set; } = "System default";
     public WasapiMode Mode { get; set; } = WasapiMode.Shared;
     public int BufferMilliseconds { get; set; } = 100;
+    public SampleRatePolicy SampleRatePolicy { get; set; } = SampleRatePolicy.MatchSource;
     public int PreferredSampleRate { get; set; }
+    public BitDepthPolicy BitDepthPolicy { get; set; } = BitDepthPolicy.MatchSource;
     public int PreferredBitDepth { get; set; }
+    public ChannelPolicy ChannelPolicy { get; set; } = ChannelPolicy.DownmixToStereo;
     public DsdMode DsdMode { get; set; } = DsdMode.Disabled;
     public double CrossfadeSeconds { get; set; }
+    public VolumeControlMode VolumeControl { get; set; } = VolumeControlMode.Software;
+    // Retained for settings compatibility. New code writes VolumeControl.
     public bool HardwareVolume { get; set; }
     public bool PreferBitPerfect { get; set; } = true;
     public OutputFallbackPolicy FallbackPolicy { get; set; } = OutputFallbackPolicy.SharedMode;
+    public int RecoveryMaximumAttempts { get; set; } = 4;
+    public int RecoveryInitialDelayMilliseconds { get; set; } = 200;
 }

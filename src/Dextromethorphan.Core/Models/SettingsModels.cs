@@ -2,7 +2,7 @@ namespace Dextromethorphan.Core.Models;
 
 public sealed class AppSettings
 {
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public string Theme { get; set; } = "Dark";
     public string AccentColor { get; set; } = "#FF8A3D";

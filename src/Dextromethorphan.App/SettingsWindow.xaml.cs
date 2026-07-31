@@ -10,6 +10,34 @@ public partial class SettingsWindow : Window
 {
     public SettingsWindow() => InitializeComponent();
 
+    private async void OutputDevice_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (DataContext is MainViewModel
+            {
+                IsOutputProfileBusy: false
+            } viewModel
+            && viewModel.SelectedOutputDevice is { } device)
+            await RunAsync(() => viewModel.SelectOutputDeviceAsync(device));
+    }
+
+    private async void RefreshOutputs_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+            await RunAsync(viewModel.RefreshOutputDevicesAsync);
+    }
+
+    private async void SaveOutputProfile_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+            await RunAsync(viewModel.SaveOutputProfileAsync);
+    }
+
     private async void ExportDiagnostics_Click(
         object sender,
         RoutedEventArgs e)

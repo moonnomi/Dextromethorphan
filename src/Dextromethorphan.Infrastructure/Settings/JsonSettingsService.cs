@@ -420,10 +420,30 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
                 profile.DsdMode = DsdMode.Disabled;
             if (!Enum.IsDefined(profile.FallbackPolicy))
                 profile.FallbackPolicy = OutputFallbackPolicy.SharedMode;
+            if (!Enum.IsDefined(profile.SampleRatePolicy))
+                profile.SampleRatePolicy = SampleRatePolicy.MatchSource;
+            if (!Enum.IsDefined(profile.BitDepthPolicy))
+                profile.BitDepthPolicy = BitDepthPolicy.MatchSource;
+            if (!Enum.IsDefined(profile.ChannelPolicy))
+                profile.ChannelPolicy = ChannelPolicy.DownmixToStereo;
+            if (!Enum.IsDefined(profile.VolumeControl))
+                profile.VolumeControl = VolumeControlMode.Software;
+            if (profile.HardwareVolume)
+                profile.VolumeControl = VolumeControlMode.Hardware;
+            profile.HardwareVolume =
+                profile.VolumeControl == VolumeControlMode.Hardware;
             profile.BufferMilliseconds = Math.Clamp(
                 profile.BufferMilliseconds,
                 2,
                 1_000);
+            profile.RecoveryMaximumAttempts = Math.Clamp(
+                profile.RecoveryMaximumAttempts,
+                1,
+                8);
+            profile.RecoveryInitialDelayMilliseconds = Math.Clamp(
+                profile.RecoveryInitialDelayMilliseconds,
+                50,
+                2_000);
             profile.PreferredSampleRate =
                 profile.PreferredSampleRate == 0
                     ? 0

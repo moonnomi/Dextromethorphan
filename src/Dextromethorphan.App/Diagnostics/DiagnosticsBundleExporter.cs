@@ -92,10 +92,16 @@ public sealed partial class DiagnosticsBundleExporter(
                                         profile.DeviceId),
                                     profile.Mode,
                                     profile.BufferMilliseconds,
+                                    profile.SampleRatePolicy,
                                     profile.PreferredSampleRate,
+                                    profile.BitDepthPolicy,
                                     profile.PreferredBitDepth,
+                                    profile.ChannelPolicy,
+                                    profile.VolumeControl,
                                     profile.DsdMode,
-                                    profile.FallbackPolicy
+                                    profile.FallbackPolicy,
+                                    profile.RecoveryMaximumAttempts,
+                                    profile.RecoveryInitialDelayMilliseconds
                                 })
                     },
                     cancellationToken);
@@ -137,13 +143,35 @@ public sealed partial class DiagnosticsBundleExporter(
                     foreach (var device in await audio.GetOutputDevicesAsync(
                                  cancellationToken))
                     {
+                        object? capabilities = null;
+                        try
+                        {
+                            var value =
+                                await audio.GetDeviceCapabilitiesAsync(
+                                    device.Id,
+                                    cancellationToken);
+                            capabilities = new
+                            {
+                                value.MixFormat,
+                                value.SupportedExclusiveFormats,
+                                value.SupportsEventDrivenExclusive
+                            };
+                        }
+                        catch (Exception exception)
+                        {
+                            capabilities = new
+                            {
+                                error = exception.GetBaseException().Message
+                            };
+                        }
                         devices.Add(new
                         {
                             id = DiagnosticsRedactor.HashIdentifier(device.Id),
                             device.Name,
                             device.IsDefault,
                             device.State,
-                            device.MixFormat
+                            device.MixFormat,
+                            capabilities
                         });
                     }
                 }
@@ -158,6 +186,15 @@ public sealed partial class DiagnosticsBundleExporter(
                     archive,
                     "audio-devices.json",
                     devices,
+                    cancellationToken);
+                await WriteJsonAsync(
+                    archive,
+                    "audio-pipeline.json",
+                    audio.Diagnostics ?? (object)new
+                    {
+                        state = audio.Snapshot.State.ToString(),
+                        message = "No active audio pipeline."
+                    },
                     cancellationToken);
 
                 if (Directory.Exists(paths.Logs))

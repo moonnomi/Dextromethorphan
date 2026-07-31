@@ -45,11 +45,73 @@
             <ScrollViewer VerticalScrollBarVisibility="Auto" ui:SmoothScrollBehavior.Enabled="True">
                 <StackPanel Margin="34,28">
                     <TextBlock Text="Audio output" FontSize="25" FontWeight="SemiBold"/>
-                    <TextBlock Text="WASAPI endpoints detected on this computer" Foreground="{StaticResource TextMutedBrush}" Margin="0,4,0,22"/>
-                    <ItemsControl ItemsSource="{Binding OutputDevices}">
-                        <ItemsControl.ItemTemplate><DataTemplate><Border Style="{StaticResource Card}" Padding="16" Margin="0,0,0,8"><Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="{Binding Name}" FontWeight="SemiBold"/><TextBlock Text="{Binding State}" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,3,0,0"/></StackPanel><Border Grid.Column="1" CornerRadius="9" Background="{StaticResource AccentSoftBrush}" Padding="9,4" Visibility="{Binding IsDefault, Converter={StaticResource BoolToVisibility}}"><TextBlock Text="DEFAULT" FontSize="9" Foreground="{StaticResource AccentBrush}"/></Border></Grid></Border></DataTemplate></ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                    <Border Style="{StaticResource Card}" Padding="16" Margin="0,16,0,0"><StackPanel><TextBlock Text="Software volume" FontWeight="SemiBold"/><TextBlock Text="DSP volume is independent from the Windows mixer." Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,4,0,12"/><Slider Minimum="0" Maximum="1" Value="{Binding Volume, Mode=TwoWay}"/></StackPanel></Border>
+                    <TextBlock Text="A separate signal-path profile is saved for every Windows endpoint." Foreground="{StaticResource TextMutedBrush}" Margin="0,4,0,22"/>
+
+                    <Border Style="{StaticResource Card}" Padding="18">
+                        <StackPanel>
+                            <TextBlock Text="Output device" FontWeight="SemiBold"/>
+                            <Grid Margin="0,10,0,0">
+                                <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <ComboBox ItemsSource="{Binding OutputDevices}" SelectedItem="{Binding SelectedOutputDevice}" DisplayMemberPath="Name" SelectionChanged="OutputDevice_SelectionChanged"/>
+                                <Button Grid.Column="1" Content="Refresh" Click="RefreshOutputs_Click" Margin="8,0,0,0"/>
+                            </Grid>
+                            <TextBlock Text="{Binding OutputProfileStatus}" Foreground="{StaticResource AccentBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Endpoint profile" FontWeight="SemiBold"/>
+                            <TextBlock Text="Changes are applied only after Save profile." Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,4,0,14"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="18"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+
+                                <StackPanel Grid.Row="0"><TextBlock Text="WASAPI mode" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding WasapiModes}" SelectedItem="{Binding OutputProfile.Mode}" Margin="0,5,0,10"/></StackPanel>
+                                <StackPanel Grid.Row="0" Grid.Column="2"><TextBlock Text="Event buffer (ms)" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><TextBox Text="{Binding OutputProfile.BufferMilliseconds, UpdateSourceTrigger=PropertyChanged}" Margin="0,5,0,10"/></StackPanel>
+
+                                <StackPanel Grid.Row="1"><TextBlock Text="Sample-rate policy" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding SampleRatePolicies}" SelectedItem="{Binding OutputProfile.SampleRatePolicy}" Margin="0,5,0,10"/></StackPanel>
+                                <StackPanel Grid.Row="1" Grid.Column="2"><TextBlock Text="Fixed sample rate" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding SampleRates}" SelectedItem="{Binding OutputProfile.PreferredSampleRate}" Margin="0,5,0,10"/></StackPanel>
+
+                                <StackPanel Grid.Row="2"><TextBlock Text="Bit-depth policy" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding BitDepthPolicies}" SelectedItem="{Binding OutputProfile.BitDepthPolicy}" Margin="0,5,0,10"/></StackPanel>
+                                <StackPanel Grid.Row="2" Grid.Column="2"><TextBlock Text="Fixed bit depth" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding BitDepths}" SelectedItem="{Binding OutputProfile.PreferredBitDepth}" Margin="0,5,0,10"/></StackPanel>
+
+                                <StackPanel Grid.Row="3"><TextBlock Text="Channel policy" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding ChannelPolicies}" SelectedItem="{Binding OutputProfile.ChannelPolicy}" Margin="0,5,0,10"/></StackPanel>
+                                <StackPanel Grid.Row="3" Grid.Column="2"><TextBlock Text="Failure fallback" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding OutputFallbackPolicies}" SelectedItem="{Binding OutputProfile.FallbackPolicy}" Margin="0,5,0,10"/></StackPanel>
+
+                                <StackPanel Grid.Row="4"><TextBlock Text="Volume control" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding VolumeControlModes}" SelectedItem="{Binding OutputProfile.VolumeControl}" Margin="0,5,0,10"/></StackPanel>
+                                <StackPanel Grid.Row="4" Grid.Column="2"><TextBlock Text="DSD mode" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding DsdModes}" SelectedItem="{Binding OutputProfile.DsdMode}" Margin="0,5,0,10"/></StackPanel>
+
+                                <StackPanel Grid.Row="5"><TextBlock Text="Recovery attempts" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><TextBox Text="{Binding OutputProfile.RecoveryMaximumAttempts, UpdateSourceTrigger=PropertyChanged}" Margin="0,5,0,10"/></StackPanel>
+                                <StackPanel Grid.Row="5" Grid.Column="2"><TextBlock Text="Initial retry delay (ms)" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><TextBox Text="{Binding OutputProfile.RecoveryInitialDelayMilliseconds, UpdateSourceTrigger=PropertyChanged}" Margin="0,5,0,10"/></StackPanel>
+
+                                <StackPanel Grid.Row="6">
+                                    <CheckBox Content="Prefer direct bit-perfect path" IsChecked="{Binding OutputProfile.PreferBitPerfect}"/>
+                                    <TextBlock Text="Software volume, ReplayGain, fades, crossfade, and tempo processing require DSP." Foreground="{StaticResource TextMutedBrush}" FontSize="9" TextWrapping="Wrap" Margin="24,4,0,0"/>
+                                </StackPanel>
+                                <StackPanel Grid.Row="6" Grid.Column="2"><TextBlock Text="Per-output crossfade (seconds)" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><Slider Minimum="0" Maximum="10" Value="{Binding OutputProfile.CrossfadeSeconds}" Margin="0,5,0,0"/></StackPanel>
+                            </Grid>
+                            <Button Style="{StaticResource PrimaryButton}" Content="Save profile" Click="SaveOutputProfile_Click" HorizontalAlignment="Left" Margin="0,16,0,0"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Reported capabilities" FontWeight="SemiBold"/>
+                            <TextBlock Text="{Binding OutputMixFormat, StringFormat=Shared mix: {0}}" Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,5,0,2"/>
+                            <TextBlock Text="{Binding SupportsEventDrivenExclusive, StringFormat=Event-driven exclusive: {0}}" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/>
+                            <TextBlock Text="Accepted exclusive PCM formats" FontWeight="SemiBold" Margin="0,14,0,8"/>
+                            <ItemsControl ItemsSource="{Binding SupportedExclusiveFormats}">
+                                <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate><DataTemplate><Border Background="{StaticResource AccentSoftBrush}" CornerRadius="7" Padding="8,5" Margin="0,0,6,6"><TextBlock Text="{Binding}" FontSize="9" Foreground="{StaticResource AccentBrush}"/></Border></DataTemplate></ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Padding="16" Margin="0,12,0,0"><StackPanel><TextBlock Text="Current volume" FontWeight="SemiBold"/><TextBlock Text="Software mode never changes the Windows endpoint volume. Hardware mode does so only when explicitly selected for this output." Foreground="{StaticResource TextMutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,12"/><Slider Minimum="0" Maximum="1" Value="{Binding Volume, Mode=TwoWay}"/></StackPanel></Border>
                 </StackPanel>
             </ScrollViewer>
         </TabItem>

@@ -140,15 +140,15 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 
 ### Output devices and modes
 
-- [ ] **P0 AUD-001** Build the full per-output profile editor: device, shared/exclusive, buffer, sample rate policy, bit depth, channel policy, fallback, hardware/software volume, and DSD mode.
-- [ ] **P0 AUD-002** Enumerate and display supported exclusive formats before saving a profile.
-- [ ] **P0 AUD-003** Handle default-device changes, device removal, sleep/resume, driver reset, and endpoint invalidation without freezing or changing Windows volume.
-- [ ] **P0 AUD-004** Make exclusive failure/fallback visible and actionable; never silently claim bit-perfect playback.
-- [ ] **P0 AUD-005** Add configurable retry/backoff and automatic continuation after recoverable endpoint errors.
+- [x] **P0 AUD-001** Build the full per-output profile editor: device, shared/exclusive, buffer, sample rate policy, bit depth, channel policy, fallback, hardware/software volume, and DSD mode. See [output profiles and recovery](audio/OUTPUT-PROFILES-AND-RECOVERY-2026-07-31.md).
+- [x] **P0 AUD-002** Enumerate and display supported exclusive formats before saving a profile. See [output profiles and recovery](audio/OUTPUT-PROFILES-AND-RECOVERY-2026-07-31.md).
+- [x] **P0 AUD-003** Handle default-device changes, device removal, sleep/resume, driver reset, and endpoint invalidation without freezing or changing Windows volume. See [output profiles and recovery](audio/OUTPUT-PROFILES-AND-RECOVERY-2026-07-31.md).
+- [x] **P0 AUD-004** Make exclusive failure/fallback visible and actionable; never silently claim bit-perfect playback. See [output profiles and recovery](audio/OUTPUT-PROFILES-AND-RECOVERY-2026-07-31.md).
+- [x] **P0 AUD-005** Add configurable retry/backoff and automatic continuation after recoverable endpoint errors. See [output profiles and recovery](audio/OUTPUT-PROFILES-AND-RECOVERY-2026-07-31.md).
 - [ ] **P0 AUD-006** Qualify 44.1, 48, 88.2, 96, 176.4, and 192 kHz; 16/24/32-bit; mono/stereo; shared/exclusive; and buffer boundaries.
-- [ ] **P1 AUD-007** Define stereo-only behavior for multichannel files and endpoints: reject, map, or downmix with explicit policy.
-- [ ] **P1 AUD-008** Add Bluetooth/HDMI-friendly shared-mode profiles and sensible device-specific defaults.
-- [ ] **P1 AUD-009** Export an audio diagnostics report including requested/effective format, decoder, pipeline, fallback reason, underruns, callback timing, and device ID.
+- [x] **P1 AUD-007** Define stereo-only behavior for multichannel files and endpoints: reject, map, or downmix with explicit policy. See [output profiles and recovery](audio/OUTPUT-PROFILES-AND-RECOVERY-2026-07-31.md).
+- [x] **P1 AUD-008** Add Bluetooth/HDMI-friendly shared-mode profiles and sensible device-specific defaults. See [output profiles and recovery](audio/OUTPUT-PROFILES-AND-RECOVERY-2026-07-31.md).
+- [x] **P1 AUD-009** Export an audio diagnostics report including requested/effective format, decoder, pipeline, fallback reason, underruns, callback timing, and device ID. See [output profiles and recovery](audio/OUTPUT-PROFILES-AND-RECOVERY-2026-07-31.md).
 
 ### Decoder and format coverage
 
