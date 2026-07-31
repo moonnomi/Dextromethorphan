@@ -71,6 +71,8 @@ internal static class Program
         long initialWorkingSet = 0;
         long peakWorkingSet = 0;
         long finalWorkingSet = 0;
+        var playbackClock = new SoakPlaybackClock(
+            TimeSpan.FromSeconds(1));
         AudioDiagnostics? finalDiagnostics = null;
         string? fatalError = null;
 
@@ -152,12 +154,22 @@ internal static class Program
             initialCpu = process.TotalProcessorTime;
             stopwatch.Restart();
             await engine.PlayAsync(cancellation.Token);
+            var previousState = engine.Snapshot.State;
+            var previousObservation = Stopwatch.GetTimestamp();
 
             Console.WriteLine($"Audio soak started on {deviceName}.");
-            Console.WriteLine($"Duration: {options.Duration}; report: {outputPath}");
-            while (stopwatch.Elapsed < options.Duration)
+            Console.WriteLine(
+                $"Observed playing time: {options.Duration}; report: {outputPath}");
+            while (playbackClock.Playing < options.Duration)
             {
                 cancellation.Token.ThrowIfCancellationRequested();
+                var observedAt = Stopwatch.GetTimestamp();
+                playbackClock.Observe(
+                    previousState,
+                    Stopwatch.GetElapsedTime(
+                        previousObservation,
+                        observedAt));
+                previousObservation = observedAt;
 
                 while (transitionSignals.TryDequeue(out _))
                 {
@@ -173,16 +185,24 @@ internal static class Program
                 if (!faults.IsEmpty)
                     throw new InvalidOperationException(
                         "The audio engine entered the faulted state.");
+                if (playbackClock.NonPlaying > TimeSpan.FromMinutes(5))
+                    throw new InvalidOperationException(
+                        "Playback did not remain active for five observed minutes.");
+
+                var snapshot = engine.Snapshot;
+                previousState = snapshot.State;
 
                 if (stopwatch.Elapsed >= nextSampleAt)
                 {
                     process.Refresh();
                     peakWorkingSet = Math.Max(
                         peakWorkingSet,
-                        process.WorkingSet64);
-                    var snapshot = engine.Snapshot;
+                        Math.Max(
+                            process.WorkingSet64,
+                            process.PeakWorkingSet64));
                     samples.Add(new SoakSample(
                         stopwatch.Elapsed.TotalSeconds,
+                        playbackClock.Playing.TotalSeconds,
                         snapshot.State.ToString(),
                         snapshot.Position.TotalSeconds,
                         process.WorkingSet64,
@@ -194,7 +214,8 @@ internal static class Program
                     nextSampleAt = stopwatch.Elapsed
                                    + options.SampleInterval;
                     Console.WriteLine(
-                        $"{stopwatch.Elapsed:hh\\:mm\\:ss}  " +
+                        $"wall={stopwatch.Elapsed:hh\\:mm\\:ss}  " +
+                        $"playing={playbackClock.Playing:hh\\:mm\\:ss}  " +
                         $"transitions={Volatile.Read(ref transitionCount)}  " +
                         $"deadline-misses={snapshot.Diagnostics?.Underruns ?? 0}  " +
                         $"working-set={process.WorkingSet64 / 1_048_576d:0.0} MiB");
@@ -221,7 +242,9 @@ internal static class Program
             stopwatch.Stop();
             process.Refresh();
             finalWorkingSet = process.WorkingSet64;
-            peakWorkingSet = Math.Max(peakWorkingSet, finalWorkingSet);
+            peakWorkingSet = Math.Max(
+                peakWorkingSet,
+                Math.Max(finalWorkingSet, process.PeakWorkingSet64));
             try
             {
                 (_, volumeAfter) = ReadEndpoint(options.DeviceId);
@@ -235,6 +258,7 @@ internal static class Program
                                   && volumeAfter.HasValue
                                   && volumeBefore.Value.Equals(volumeAfter.Value);
             var memoryGrowth = finalWorkingSet - initialWorkingSet;
+            var peakMemoryGrowth = peakWorkingSet - initialWorkingSet;
             var cpuTime = process.TotalProcessorTime - initialCpu;
             var cpuPercent = stopwatch.Elapsed.TotalSeconds <= 0
                 ? 0
@@ -249,13 +273,16 @@ internal static class Program
                             && (finalDiagnostics?.Underruns ?? 0) == 0
                             && (finalDiagnostics?.RecoveryAttempts ?? 0) == 0
                             && volumeUnchanged
-                            && memoryGrowth <= 128L * 1_048_576;
+                            && peakMemoryGrowth <= 128L * 1_048_576;
             var report = new SoakReport(
-                1,
+                2,
                 startedAt,
                 DateTimeOffset.UtcNow,
                 options.Duration.TotalSeconds,
                 stopwatch.Elapsed.TotalSeconds,
+                playbackClock.Playing.TotalSeconds,
+                playbackClock.UnobservedGap.TotalSeconds,
+                playbackClock.NonPlaying.TotalSeconds,
                 completed,
                 cancelled,
                 qualified,
@@ -275,7 +302,8 @@ internal static class Program
                     initialWorkingSet,
                     peakWorkingSet,
                     finalWorkingSet,
-                    memoryGrowth),
+                    memoryGrowth,
+                    peakMemoryGrowth),
                 new CpuReport(cpuTime.TotalSeconds, cpuPercent),
                 new VolumeReport(volumeBefore, volumeAfter, volumeUnchanged),
                 samples);
@@ -473,6 +501,9 @@ internal sealed record SoakReport(
     DateTimeOffset FinishedAt,
     double RequestedDurationSeconds,
     double ActualDurationSeconds,
+    double ObservedPlayingSeconds,
+    double UnobservedGapSeconds,
+    double NonPlayingSeconds,
     bool Completed,
     bool Cancelled,
     bool Qualified,
@@ -499,11 +530,13 @@ internal sealed record MemoryReport(
     long InitialWorkingSetBytes,
     long PeakWorkingSetBytes,
     long FinalWorkingSetBytes,
-    long GrowthBytes);
+    long GrowthBytes,
+    long PeakGrowthBytes);
 internal sealed record CpuReport(double TotalProcessorSeconds, double AveragePercent);
 internal sealed record VolumeReport(float? Before, float? After, bool Unchanged);
 internal sealed record SoakSample(
     double ElapsedSeconds,
+    double ObservedPlayingSeconds,
     string State,
     double TrackPositionSeconds,
     long WorkingSetBytes,
@@ -512,3 +545,25 @@ internal sealed record SoakSample(
     int RecoveryAttempts,
     double LastCallbackMilliseconds,
     double MaximumCallbackMilliseconds);
+
+internal sealed class SoakPlaybackClock(TimeSpan maximumObservedInterval)
+{
+    public TimeSpan Playing { get; private set; }
+    public TimeSpan UnobservedGap { get; private set; }
+    public TimeSpan NonPlaying { get; private set; }
+
+    public void Observe(PlaybackState precedingState, TimeSpan interval)
+    {
+        if (interval <= TimeSpan.Zero) return;
+        if (interval > maximumObservedInterval)
+        {
+            UnobservedGap += interval;
+            return;
+        }
+
+        if (precedingState == PlaybackState.Playing)
+            Playing += interval;
+        else
+            NonPlaying += interval;
+    }
+}

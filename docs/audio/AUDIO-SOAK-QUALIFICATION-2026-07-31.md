@@ -15,15 +15,17 @@ This gate exercises the real `WasapiAudioEngine`, decoder, sample-rate normaliza
 
 The JSON report contains:
 
-- requested and actual elapsed duration;
+- requested observed-playing duration, wall duration, excluded sleep/stall gaps, and non-playing time;
 - premature playback ends, fault messages, transitions, and recovery attempts;
 - callback read timing and callback deadline misses;
-- initial, peak, and final process working set plus final growth;
+- initial, peak, and final process working set plus final and peak growth;
 - process CPU time and average normalized CPU percentage;
 - periodic playback state and memory samples; and
 - endpoint volume before/after and an unchanged flag.
 
 Here, an `Underruns` count is specifically a provider callback deadline miss: producing a requested audio buffer took longer than that buffer's playback duration. It is an actionable software-path timing signal, not a driver- or DAC-reported USB underrun counter.
+
+The runner advances its acceptance clock only across frequently observed `Playing` intervals. A loop gap longer than one second—such as system sleep, debugger suspension, or severe process starvation—is recorded as an unobserved gap and does not count toward eight playback hours. Five accumulated observed minutes outside `Playing` is a failure. Callback deadline misses and maximum callback time are cumulative across endpoint recovery/rebuilds, so reopening the pipeline cannot erase an earlier defect. The memory limit applies to peak growth, not merely the final value after garbage collection.
 
 ## Run it
 
@@ -45,18 +47,20 @@ Pressing Ctrl+C records a non-qualifying cancelled report instead of treating a 
 
 ## Runner smoke qualification
 
-The runner was first qualified for 25 seconds on the current Realtek shared endpoint using three-second generated tracks and a 0.25-second crossfade:
+The hardened schema-2 runner was qualified for 20 observed playing seconds on the current Realtek shared endpoint using three-second generated tracks and a 0.25-second crossfade:
 
 | Signal | Result |
 |---|---:|
-| Completed mixed-rate transitions | 8 |
+| Requested / observed playing time | 20 / 20.008239 seconds |
+| Wall / excluded gap / non-playing time | 20.0592302 / 0 / 0 seconds |
+| Completed mixed-rate transitions | 7 |
 | Premature playback ends | 0 |
 | Callback deadline misses | 0 |
 | Endpoint recovery attempts | 0 |
-| Maximum provider callback | 6.5462 ms |
-| Initial / peak / final working set | 38,113,280 / 44,007,424 / 39,477,248 bytes |
-| Final working-set growth | 1,363,968 bytes |
-| Average normalized CPU | 0.1092% |
+| Maximum provider callback | 6.3457 ms |
+| Initial / peak / final working set | 37,683,200 / 44,576,768 / 39,419,904 bytes |
+| Peak / final working-set growth | 6,893,568 / 1,736,704 bytes |
+| Average normalized CPU | 0.1461% |
 | Endpoint volume before / after | 0.7016084 / 0.7016084 |
 
-This short result validates the harness and safety invariants only. **HW-004 remains open** until a report shows at least eight actual elapsed hours, no faults or premature ends, zero deadline misses/recovery attempts, unchanged endpoint volume, and accepted bounded memory growth.
+This short result validates the hardened harness and safety invariants only. **HW-004 remains open** until a schema-2 report shows at least eight observed `Playing` hours, no faults or premature ends, zero cumulative deadline misses/recovery attempts, unchanged endpoint volume, and accepted bounded peak memory growth.

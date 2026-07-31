@@ -17,6 +17,7 @@ public sealed class WasapiAudioEngine : IAudioEngine
     private readonly MMDeviceEnumerator _endpointEnumerator;
     private readonly AudioEndpointNotificationClient _endpointNotifications;
     private readonly CancellationTokenSource _lifetime = new();
+    private readonly CallbackTimingAccumulator _callbackTiming = new();
     private WasapiOut? _output;
     private MMDevice? _outputDevice;
     private DirectGaplessWaveProvider? _direct;
@@ -60,17 +61,24 @@ public sealed class WasapiAudioEngine : IAudioEngine
         TimeSpan.FromMilliseconds(100));
     }
     public PlaybackSnapshot Snapshot => new(_track, _state, Position, Duration, _volume, _error, Diagnostics, _options.Speed, _gain?.Peak ?? 0);
-    public AudioDiagnostics? Diagnostics => _diagnostics is null
-        ? null
-        : _diagnostics with
+    public AudioDiagnostics? Diagnostics
+    {
+        get
         {
-            RecoveryAttempts = _recoveryAttempts,
-            LastCallbackMilliseconds =
-                _timedProvider?.LastReadMilliseconds ?? 0,
-            MaximumCallbackMilliseconds =
-                _timedProvider?.MaximumReadMilliseconds ?? 0,
-            Underruns = _timedProvider?.DeadlineMisses ?? 0
-        };
+            var diagnostics = _diagnostics;
+            if (diagnostics is null) return null;
+            var timed = _timedProvider;
+            return diagnostics with
+            {
+                RecoveryAttempts = _recoveryAttempts,
+                LastCallbackMilliseconds =
+                    timed?.LastReadMilliseconds ?? 0,
+                MaximumCallbackMilliseconds =
+                    _callbackTiming.MaximumMilliseconds(timed),
+                Underruns = _callbackTiming.DeadlineMisses(timed)
+            };
+        }
+    }
     public event EventHandler<PlaybackSnapshot>? StateChanged;
     public event EventHandler<TrackTransitionedEventArgs>? TrackTransitioned;
     public event EventHandler? PlaybackEnded;
@@ -823,6 +831,8 @@ public sealed class WasapiAudioEngine : IAudioEngine
     {
         if (_output is not null) _output.PlaybackStopped -= OutputOnPlaybackStopped;
         _output?.Stop(); _output?.Dispose(); _output = null;
+        if (_timedProvider is { } timed)
+            _callbackTiming.Capture(timed);
         _outputDevice?.Dispose(); _outputDevice = null;
         if (_direct is not null) { _direct.SourceChanged -= OnPipelineSourceChanged; _direct.Completed -= OnPipelineCompleted; _direct.Dispose(); _direct = null; }
         if (_transition is not null) { _transition.SourceChanged -= OnPipelineSourceChanged; _transition.Completed -= OnPipelineCompleted; _transition.Dispose(); _transition = null; }

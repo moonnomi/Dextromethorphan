@@ -34,6 +34,24 @@ public sealed class TimingWaveProviderTests
         Assert.True(timed.MaximumReadMilliseconds >= 15);
     }
 
+    [Fact]
+    public void AccumulatorRetainsMetricsAcrossProviderRebuilds()
+    {
+        var accumulator = new CallbackTimingAccumulator();
+        var first = new TimingWaveProvider(
+            new TestWaveProvider(TimeSpan.FromMilliseconds(20)));
+        var second = new TimingWaveProvider(
+            new TestWaveProvider(TimeSpan.FromMilliseconds(20)));
+        var buffer = new byte[960];
+
+        first.Read(buffer, 0, buffer.Length);
+        accumulator.Capture(first);
+        second.Read(buffer, 0, buffer.Length);
+
+        Assert.Equal(2, accumulator.DeadlineMisses(second));
+        Assert.True(accumulator.MaximumMilliseconds(second) >= 15);
+    }
+
     private sealed class TestWaveProvider(TimeSpan delay) : IWaveProvider
     {
         public WaveFormat WaveFormat { get; } =
