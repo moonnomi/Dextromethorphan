@@ -189,6 +189,30 @@ public partial class SettingsWindow : Window
             await RunAsync(viewModel.FindContentDuplicatesAsync);
     }
 
+    private async void SaveReplayGain_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+            await RunAsync(viewModel.SaveReplayGainSettingsAsync);
+    }
+
+    private async void AnalyzeReplayGain_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+            await RunAsync(viewModel.AnalyzeMissingReplayGainAsync);
+    }
+
+    private void CancelReplayGain_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+            viewModel.CancelReplayGainAnalysis();
+    }
+
     private async Task RunAsync(Func<Task> operation)
     {
         try

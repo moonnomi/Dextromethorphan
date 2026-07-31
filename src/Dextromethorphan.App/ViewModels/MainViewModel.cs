@@ -35,6 +35,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly UserDataBackupService _userDataBackups;
     private readonly DuplicateDetectionService _duplicates;
     private readonly AudioDecoderCapabilityService _decoderCapabilities;
+    private readonly ReplayGainAnalysisService _replayGainAnalysis;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly ConcurrentDictionary<string, string?> _resolvedArtwork = new(StringComparer.OrdinalIgnoreCase);
     private readonly Stack<NavigationEntry> _backHistory = new();
@@ -55,6 +56,7 @@ public sealed class MainViewModel : ObservableObject
     private CancellationTokenSource? _sessionSaveCancellation;
     private CancellationTokenSource? _volumeCancellation;
     private CancellationTokenSource? _libraryChangeCancellation;
+    private CancellationTokenSource? _replayGainAnalysisCancellation;
     private Task? _shellInitialization;
     private Task? _libraryInitialization;
     private Task? _activeScanTask;
@@ -115,6 +117,13 @@ public sealed class MainViewModel : ObservableObject
     private string _decoderCapabilityStatus =
         "Codec availability has not been checked.";
     private bool _isDecoderCapabilityBusy;
+    private ReplayGainMode _replayGainMode = ReplayGainMode.Track;
+    private double _replayGainPreampDb;
+    private bool _preventClipping = true;
+    private bool _isReplayGainAnalysisBusy;
+    private double _replayGainAnalysisProgress;
+    private string _replayGainAnalysisStatus =
+        "Loudness has not been analyzed in this session.";
 
     public MainViewModel(
         ISettingsService settings,
@@ -135,7 +144,8 @@ public sealed class MainViewModel : ObservableObject
         DiagnosticsBundleExporter diagnosticsBundles,
         UserDataBackupService userDataBackups,
         DuplicateDetectionService duplicates,
-        AudioDecoderCapabilityService decoderCapabilities)
+        AudioDecoderCapabilityService decoderCapabilities,
+        ReplayGainAnalysisService replayGainAnalysis)
     {
         _settings = settings; _repository = repository; _playlists = playlists; _scanner = scanner; _artwork = artwork; _metadataReader = metadataReader;
         _audio = audio; _queue = queue; _sleepTimer = sleepTimer; _shortcuts = shortcuts; _systemMedia = systemMedia;
@@ -145,6 +155,7 @@ public sealed class MainViewModel : ObservableObject
         _userDataBackups = userDataBackups;
         _duplicates = duplicates;
         _decoderCapabilities = decoderCapabilities;
+        _replayGainAnalysis = replayGainAnalysis;
         NavigateCommand = new RelayCommand(p => Navigate(p?.ToString()));
         SelectGroupCommand = new RelayCommand(p => SelectGroup(p as LibraryCardViewModel));
         CloseCollectionCommand = new RelayCommand(_ => CloseCollectionDetail());
@@ -270,6 +281,38 @@ public sealed class MainViewModel : ObservableObject
     {
         get => _isDecoderCapabilityBusy;
         private set => Set(ref _isDecoderCapabilityBusy, value);
+    }
+    public IReadOnlyList<ReplayGainMode> ReplayGainModes { get; } =
+        Enum.GetValues<ReplayGainMode>();
+    public ReplayGainMode ReplayGainMode
+    {
+        get => _replayGainMode;
+        set => Set(ref _replayGainMode, value);
+    }
+    public double ReplayGainPreampDb
+    {
+        get => _replayGainPreampDb;
+        set => Set(ref _replayGainPreampDb, Math.Clamp(value, -20, 20));
+    }
+    public bool PreventClipping
+    {
+        get => _preventClipping;
+        set => Set(ref _preventClipping, value);
+    }
+    public bool IsReplayGainAnalysisBusy
+    {
+        get => _isReplayGainAnalysisBusy;
+        private set => Set(ref _isReplayGainAnalysisBusy, value);
+    }
+    public double ReplayGainAnalysisProgress
+    {
+        get => _replayGainAnalysisProgress;
+        private set => Set(ref _replayGainAnalysisProgress, value);
+    }
+    public string ReplayGainAnalysisStatus
+    {
+        get => _replayGainAnalysisStatus;
+        private set => Set(ref _replayGainAnalysisStatus, value);
     }
     public IReadOnlyList<WasapiMode> WasapiModes { get; } =
         Enum.GetValues<WasapiMode>();
@@ -504,6 +547,12 @@ public sealed class MainViewModel : ObservableObject
         _animationsEnabled = !IsSafeMode && _settings.Current.AnimationsEnabled; Raise(nameof(AnimationsEnabled));
         _artworkCacheMegabytes = _settings.Current.ArtworkCacheMegabytes;
         Raise(nameof(ArtworkCacheMegabytes)); Raise(nameof(ArtworkCacheLimitText));
+        _replayGainMode = _settings.Current.ReplayGainMode;
+        _replayGainPreampDb = _settings.Current.ReplayGainPreampDb;
+        _preventClipping = _settings.Current.PreventClipping;
+        Raise(nameof(ReplayGainMode));
+        Raise(nameof(ReplayGainPreampDb));
+        Raise(nameof(PreventClipping));
         _shortcuts.Refresh(_settings.Current.Shortcuts);
         StatusText = IsSafeMode
             ? "Safe mode · session restore and visual effects are disabled"
@@ -517,19 +566,9 @@ public sealed class MainViewModel : ObservableObject
         var refreshArtwork = RefreshArtworkCacheStatsAsync();
         await RefreshOutputDevicesAsync();
         var profile = _settings.Current.OutputProfiles.FirstOrDefault(x => x.DeviceId == _settings.Current.ActiveOutputDeviceId) ?? _settings.Current.OutputProfiles[0];
-        await _audio.SetPlaybackOptionsAsync(new AudioPlaybackOptions
-        {
-            ReplayGainMode = _settings.Current.ReplayGainMode,
-            ReplayGainPreampDb = _settings.Current.ReplayGainPreampDb,
-            PreventClipping = _settings.Current.PreventClipping,
-            TransitionMode = profile.CrossfadeSeconds > 0 ? TransitionMode.Crossfade : _settings.Current.TransitionMode,
-            CrossfadeSeconds = profile.CrossfadeSeconds > 0 ? profile.CrossfadeSeconds : _settings.Current.CrossfadeSeconds,
-            FadeInSeconds = _settings.Current.FadeInSeconds,
-            FadeOutSeconds = _settings.Current.FadeOutSeconds,
-            Speed = _settings.Current.PlaybackSpeed,
-            PitchSemitones = _settings.Current.PitchSemitones,
-            PreservePitch = _settings.Current.PreservePitch
-        }, _lifetime.Token);
+        await _audio.SetPlaybackOptionsAsync(
+            CurrentPlaybackOptions(),
+            _lifetime.Token);
         await _audio.ConfigureOutputAsync(profile, _lifetime.Token);
         await _audio.SetVolumeAsync(_volume, _lifetime.Token);
         await Task.WhenAll(refreshLibrary, refreshArtwork);
@@ -538,6 +577,103 @@ public sealed class MainViewModel : ObservableObject
         if (!IsSafeMode)
             await RestoreSessionAsync();
         IsLibraryReady = true;
+    }
+
+    public async Task SaveReplayGainSettingsAsync()
+    {
+        await _settings.UpdateAsync(
+            settings =>
+            {
+                settings.ReplayGainMode = ReplayGainMode;
+                settings.ReplayGainPreampDb = ReplayGainPreampDb;
+                settings.PreventClipping = PreventClipping;
+            },
+            _lifetime.Token);
+        await _audio.SetPlaybackOptionsAsync(
+            CurrentPlaybackOptions(),
+            _lifetime.Token);
+        ReplayGainAnalysisStatus =
+            $"Playback processing saved · {ReplayGainMode} gain · " +
+            $"{ReplayGainPreampDb:+0.0;-0.0;0.0} dB preamp · " +
+            (PreventClipping
+                ? "sample-peak guard on"
+                : "sample-peak guard off");
+    }
+
+    public async Task AnalyzeMissingReplayGainAsync()
+    {
+        if (IsReplayGainAnalysisBusy) return;
+        _replayGainAnalysisCancellation?.Dispose();
+        _replayGainAnalysisCancellation =
+            CancellationTokenSource.CreateLinkedTokenSource(
+                _lifetime.Token);
+        var token = _replayGainAnalysisCancellation.Token;
+        IsReplayGainAnalysisBusy = true;
+        ReplayGainAnalysisProgress = 0;
+        ReplayGainAnalysisStatus =
+            "Preparing missing track and album gain analysis…";
+        var progress = new Progress<ReplayGainAnalysisProgress>(item =>
+        {
+            ReplayGainAnalysisProgress = item.Total == 0
+                ? 0
+                : item.Completed * 100d / item.Total;
+            ReplayGainAnalysisStatus = string.IsNullOrWhiteSpace(
+                item.CurrentTrack)
+                ? item.State
+                : $"{item.State} · {item.Completed:N0}/{item.Total:N0} · " +
+                  item.CurrentTrack;
+        });
+        try
+        {
+            var summary = await _replayGainAnalysis.AnalyzeMissingAsync(
+                _allTracks,
+                progress,
+                token);
+            ReplayGainAnalysisProgress = 100;
+            ReplayGainAnalysisStatus = summary.Analyzed == 0
+                ? "Every available track already has loudness and peak data."
+                : $"Analyzed {summary.Analyzed:N0} · updated " +
+                  $"{summary.Updated:N0} · skipped {summary.Failed:N0}";
+            if (summary.Updated > 0)
+                await RefreshLibraryAsync(cancellationToken: token);
+        }
+        catch (OperationCanceledException)
+        {
+            ReplayGainAnalysisStatus =
+                "Loudness analysis cancelled. Completed results were kept.";
+        }
+        finally
+        {
+            IsReplayGainAnalysisBusy = false;
+        }
+    }
+
+    public void CancelReplayGainAnalysis() =>
+        _replayGainAnalysisCancellation?.Cancel();
+
+    private AudioPlaybackOptions CurrentPlaybackOptions()
+    {
+        var profile = _settings.Current.OutputProfiles.FirstOrDefault(
+                          output => output.DeviceId ==
+                                    _settings.Current.ActiveOutputDeviceId)
+                      ?? _settings.Current.OutputProfiles[0];
+        return new AudioPlaybackOptions
+        {
+            ReplayGainMode = ReplayGainMode,
+            ReplayGainPreampDb = ReplayGainPreampDb,
+            PreventClipping = PreventClipping,
+            TransitionMode = profile.CrossfadeSeconds > 0
+                ? TransitionMode.Crossfade
+                : _settings.Current.TransitionMode,
+            CrossfadeSeconds = profile.CrossfadeSeconds > 0
+                ? profile.CrossfadeSeconds
+                : _settings.Current.CrossfadeSeconds,
+            FadeInSeconds = _settings.Current.FadeInSeconds,
+            FadeOutSeconds = _settings.Current.FadeOutSeconds,
+            Speed = _settings.Current.PlaybackSpeed,
+            PitchSemitones = _settings.Current.PitchSemitones,
+            PreservePitch = _settings.Current.PreservePitch
+        };
     }
 
     public async Task RefreshOutputDevicesAsync()
@@ -2430,6 +2566,7 @@ public sealed class MainViewModel : ObservableObject
     {
         _sessionSaveCancellation?.Cancel();
         _libraryChangeCancellation?.Cancel();
+        _replayGainAnalysisCancellation?.Cancel();
         _scanner.Cancel();
         var activeScan = _activeScanTask;
         if (activeScan is not null)
@@ -2471,7 +2608,7 @@ public sealed class MainViewModel : ObservableObject
         _audio.OutputDevicesChanged -= AudioOnOutputDevicesChanged;
         _shortcuts.ActionInvoked -= ShortcutsOnActionInvoked; _systemMedia.CommandReceived -= SystemMediaOnCommandReceived;
         await _scanner.DisposeAsync();
-        _searchCancellation?.Dispose(); _artworkCancellation?.Dispose(); _queueArtworkCancellation?.Dispose(); _sessionSaveCancellation?.Dispose(); _volumeCancellation?.Dispose(); _libraryChangeCancellation?.Dispose(); _lifetime.Dispose();
+        _searchCancellation?.Dispose(); _artworkCancellation?.Dispose(); _queueArtworkCancellation?.Dispose(); _sessionSaveCancellation?.Dispose(); _volumeCancellation?.Dispose(); _libraryChangeCancellation?.Dispose(); _replayGainAnalysisCancellation?.Dispose(); _lifetime.Dispose();
         _applicationLog.Write(ApplicationLogLevel.Information, "shutdown", "state-flushed");
     }
 

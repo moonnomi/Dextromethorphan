@@ -143,6 +143,39 @@ public sealed class DspQualificationTests
         Assert.InRange(output[^1], 0.19f, 0.21f);
     }
 
+    [Fact]
+    public void EbuR128AnalyzerMeasuresGeneratedReferenceAndReplayGainTarget()
+    {
+        using var decoded = AudioDecoderFactory.Open(
+            TrackFor("reference.wav"));
+        var target = WaveFormat.CreateIeeeFloatWaveFormat(48_000, 2);
+
+        var result = EbuR128Analyzer.Analyze(
+            AudioDecoderFactory.Normalize(decoded, target),
+            cancellationToken:
+                TestContext.Current.CancellationToken);
+
+        Assert.InRange(result.IntegratedLufs, -21.2, -20.9);
+        Assert.InRange(result.ReplayGainDb, 2.9, 3.2);
+        Assert.InRange(result.SamplePeak, 0.088, 0.089);
+        Assert.Equal(96_000, result.Frames);
+        Assert.Equal(17, result.BlockEnergies.Count);
+    }
+
+    [Fact]
+    public void EbuR128IntegratedLoudnessAppliesRelativeGate()
+    {
+        var foreground = Math.Pow(10, (-20 + 0.691) / 10);
+        var quiet = Math.Pow(10, (-60 + 0.691) / 10);
+
+        var result = EbuR128Analyzer.IntegratedLoudness(
+            Enumerable.Repeat(foreground, 10)
+                .Concat(Enumerable.Repeat(quiet, 10))
+                .ToArray());
+
+        Assert.Equal(-20, result, precision: 8);
+    }
+
     private static Track TrackFor(string file) =>
         new()
         {

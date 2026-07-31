@@ -116,7 +116,54 @@
             </ScrollViewer>
         </TabItem>
         <TabItem Header="Playback">
-            <ScrollViewer VerticalScrollBarVisibility="Auto" ui:SmoothScrollBehavior.Enabled="True"><StackPanel Margin="34,28"><TextBlock Text="Playback" FontSize="25" FontWeight="SemiBold"/><TextBlock Text="Transition and signal-path behavior" Foreground="{StaticResource TextMutedBrush}" Margin="0,4,0,22"/><Border Style="{StaticResource Card}" Padding="18"><StackPanel><TextBlock Text="Bit-perfect mode" FontWeight="SemiBold"/><TextBlock Text="Exclusive WASAPI with no DSP bypasses the shared Windows mixer. ReplayGain, crossfade, speed, pitch, fades, and software volume deliberately use the DSP path." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" Margin="0,6,0,0"/></StackPanel></Border></StackPanel></ScrollViewer>
+            <ScrollViewer VerticalScrollBarVisibility="Auto" ui:SmoothScrollBehavior.Enabled="True">
+                <StackPanel Margin="34,28">
+                    <TextBlock Text="Playback" FontSize="25" FontWeight="SemiBold"/>
+                    <TextBlock Text="Transition and signal-path behavior" Foreground="{StaticResource TextMutedBrush}" Margin="0,4,0,22"/>
+                    <Border Style="{StaticResource Card}" Padding="18">
+                        <StackPanel>
+                            <TextBlock Text="Bit-perfect mode" FontWeight="SemiBold"/>
+                            <TextBlock Text="Exclusive WASAPI with no DSP bypasses the shared Windows mixer. ReplayGain, crossfade, speed, pitch, fades, and software volume deliberately use the DSP path." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" Margin="0,6,0,0"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
+                        <StackPanel>
+                            <TextBlock Text="ReplayGain processing" FontWeight="SemiBold"/>
+                            <TextBlock Text="Choose track or album normalization. The preamp is applied after the stored gain value." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,5,0,14"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="18"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                <StackPanel>
+                                    <TextBlock Text="Mode" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/>
+                                    <ComboBox ItemsSource="{Binding ReplayGainModes}" SelectedItem="{Binding ReplayGainMode}" Margin="0,5,0,0"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <TextBlock Text="Preamp" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding ReplayGainPreampDb, StringFormat={}{0:+0.0;-0.0;0.0} dB}" Foreground="{StaticResource AccentBrush}" FontSize="10"/>
+                                    </Grid>
+                                    <Slider Minimum="-20" Maximum="20" TickFrequency="0.5" Value="{Binding ReplayGainPreampDb}" Margin="0,5,0,0"/>
+                                </StackPanel>
+                            </Grid>
+                            <CheckBox Content="Prevent digital clipping with the sample-peak guard" IsChecked="{Binding PreventClipping}" Margin="0,14,0,0"/>
+                            <TextBlock Text="This is a sample-peak safety guard, not an oversampled true-peak limiter. DoP playback bypasses all ReplayGain processing." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" FontSize="9" Margin="24,4,0,0"/>
+                            <Button Style="{StaticResource PrimaryButton}" Content="Save processing" Click="SaveReplayGain_Click" HorizontalAlignment="Left" Margin="0,16,0,0"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Analyze missing loudness data" FontWeight="SemiBold"/>
+                            <TextBlock Text="Measures mono/stereo tracks with EBU R128 gating and stores ReplayGain 2.0 track gain, album gain, and sample peak in the local database. Music files are read-only. Analysis automatically waits while playback is active." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,5,0,12"/>
+                            <ProgressBar Minimum="0" Maximum="100" Value="{Binding ReplayGainAnalysisProgress}" Height="4"/>
+                            <TextBlock Text="{Binding ReplayGainAnalysisStatus}" TextWrapping="Wrap" Foreground="{StaticResource AccentBrush}" FontSize="10" Margin="0,8,0,0"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                                <Button Style="{StaticResource PrimaryButton}" Content="Analyze missing" Click="AnalyzeReplayGain_Click" Margin="0,0,8,0"/>
+                                <Button Content="Cancel" Click="CancelReplayGain_Click"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
         </TabItem>
         <TabItem Header="Library">
             <ScrollViewer VerticalScrollBarVisibility="Auto" ui:SmoothScrollBehavior.Enabled="True">
