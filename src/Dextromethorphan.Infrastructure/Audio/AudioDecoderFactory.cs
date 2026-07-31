@@ -1,4 +1,5 @@
 using Dextromethorphan.Core.Models;
+using System.Buffers.Binary;
 using NAudio.Flac;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
@@ -33,12 +34,21 @@ internal static class AudioDecoderFactory
                 track.SegmentEnd);
             decoder += " · CUE segment";
         }
-        return new DecodedAudio(track, reader, decoder);
+        var waveSubFormat = extension is ".wav" or ".wave"
+            ? TryReadWaveSubFormat(path)
+            : null;
+        return new DecodedAudio(
+            track,
+            reader,
+            decoder,
+            waveSubFormat);
     }
 
     public static ISampleProvider Normalize(DecodedAudio decoded, WaveFormat target)
     {
-        ISampleProvider provider = decoded.Reader.ToSampleProvider();
+        ISampleProvider provider = new PcmWaveToSampleProvider(
+            decoded.Reader,
+            decoded.WaveSubFormat);
         if (provider.WaveFormat.Channels != target.Channels)
         {
             provider = (provider.WaveFormat.Channels, target.Channels) switch
@@ -55,6 +65,60 @@ internal static class AudioDecoderFactory
 
     public static long TotalSamples(DecodedAudio decoded, WaveFormat format) =>
         (long)Math.Ceiling(decoded.Reader.TotalTime.TotalSeconds * format.SampleRate * format.Channels);
+
+    private static Guid? TryReadWaveSubFormat(string path)
+    {
+        try
+        {
+            using var stream = new FileStream(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            Span<byte> riffHeader = stackalloc byte[12];
+            if (stream.Read(riffHeader) != riffHeader.Length
+                || BinaryPrimitives.ReadUInt32LittleEndian(
+                    riffHeader[8..]) != 0x4556_4157) // WAVE
+                return null;
+
+            Span<byte> chunkHeader = stackalloc byte[8];
+            while (stream.Position + chunkHeader.Length <= stream.Length)
+            {
+                if (stream.Read(chunkHeader) != chunkHeader.Length)
+                    return null;
+                var chunkId = BinaryPrimitives.ReadUInt32LittleEndian(
+                    chunkHeader);
+                var chunkSize = BinaryPrimitives.ReadUInt32LittleEndian(
+                    chunkHeader[4..]);
+                if (chunkId == 0x2074_6d66) // fmt chunk
+                {
+                    if (chunkSize < 40) return null;
+                    Span<byte> format = stackalloc byte[40];
+                    if (stream.Read(format) != format.Length)
+                        return null;
+                    var tag = BinaryPrimitives.ReadUInt16LittleEndian(
+                        format);
+                    return tag == (ushort)WaveFormatEncoding.Extensible
+                        ? new Guid(format[24..40])
+                        : null;
+                }
+
+                var paddedSize = (long)chunkSize + (chunkSize & 1);
+                if (paddedSize > stream.Length - stream.Position)
+                    return null;
+                stream.Position += paddedSize;
+            }
+        }
+        catch (IOException)
+        {
+            // The decoder remains authoritative if a concurrently changing
+            // file cannot be inspected for its optional extensible subtype.
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+        return null;
+    }
 }
 
 internal sealed class MultichannelToStereoSampleProvider(
@@ -113,10 +177,15 @@ internal sealed class MultichannelToStereoSampleProvider(
     }
 }
 
-internal sealed class DecodedAudio(Track track, WaveStream reader, string decoder) : IDisposable
+internal sealed class DecodedAudio(
+    Track track,
+    WaveStream reader,
+    string decoder,
+    Guid? waveSubFormat = null) : IDisposable
 {
     public Track Track { get; } = track;
     public WaveStream Reader { get; } = reader;
     public string Decoder { get; } = decoder;
+    public Guid? WaveSubFormat { get; } = waveSubFormat;
     public void Dispose() => Reader.Dispose();
 }

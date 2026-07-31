@@ -29,6 +29,21 @@ Invoke-Ffmpeg -Arguments @(
     $reference
 )
 
+Invoke-Ffmpeg -Arguments @(
+    '-f', 'lavfi',
+    '-i', 'aevalsrc=0.35:s=44100:d=0.08',
+    '-ac', '1',
+    '-c:a', 'pcm_s16le',
+    (Join-Path $Output 'transition-mono-44100.wav')
+)
+Invoke-Ffmpeg -Arguments @(
+    '-f', 'lavfi',
+    '-i', 'aevalsrc=0.2|0.2:s=48000:d=0.03',
+    '-ac', '2',
+    '-c:a', 'pcm_s24le',
+    (Join-Path $Output 'transition-stereo-48000.wav')
+)
+
 $encodings = @(
     @{ File = 'reference.flac'; Args = @('-c:a', 'flac') },
     @{ File = 'reference.mp3'; Args = @('-c:a', 'libmp3lame', '-q:a', '4') },

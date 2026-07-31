@@ -9,6 +9,7 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
     private Source _current;
     private Source? _next;
     private long _crossfadeSamples;
+    private long _activeCrossfadeSamples;
     private long _crossfadeConsumed;
     private bool _completedRaised;
     private float[] _currentBuffer = [];
@@ -52,6 +53,7 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
             Retire(_next?.Owner);
             _next = provider is null ? null : new Source(provider, Align(totalSamples, WaveFormat.Channels), owner);
             _crossfadeConsumed = 0;
+            _activeCrossfadeSamples = 0;
             _completedRaised = false;
         }
     }
@@ -65,7 +67,10 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
             var written = 0;
             while (written < count)
             {
-                if (_next is not null && _crossfadeSamples > 0 && Remaining(_current) <= _crossfadeSamples)
+                var fadeTarget = CrossfadeTargetSamples();
+                if (_next is not null
+                    && fadeTarget > 0
+                    && Remaining(_current) <= fadeTarget)
                 {
                     var mixed = ReadCrossfade(buffer, offset + written, count - written);
                     written += mixed;
@@ -74,7 +79,9 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
 
                 var beforeFade = _next is null || _crossfadeSamples == 0
                     ? count - written
-                    : (int)Math.Min(count - written, Math.Max(0, Remaining(_current) - _crossfadeSamples));
+                    : (int)Math.Min(
+                        count - written,
+                        Math.Max(0, Remaining(_current) - fadeTarget));
                 beforeFade = Align(beforeFade, channels);
                 if (beforeFade > 0)
                 {
@@ -104,26 +111,45 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
     {
         if (_next is null) return 0;
         var channels = WaveFormat.Channels;
-        var remainingFade = _crossfadeSamples - _crossfadeConsumed;
+        if (_activeCrossfadeSamples == 0)
+            _activeCrossfadeSamples = Align(
+                Math.Min(
+                    CrossfadeTargetSamples(),
+                    Math.Min(Remaining(_current), Remaining(_next))),
+                channels);
+        var remainingFade =
+            _activeCrossfadeSamples - _crossfadeConsumed;
         var requested = Align((int)Math.Min(count, remainingFade), channels);
         if (requested <= 0) { SwitchToNext(); return 0; }
         EnsureBuffer(ref _currentBuffer, requested);
         EnsureBuffer(ref _nextBuffer, requested);
-        var currentRead = _current.Provider.Read(_currentBuffer, 0, requested);
-        var nextRead = _next.Provider.Read(_nextBuffer, 0, requested);
+        var currentRead = ReadFully(
+            _current.Provider,
+            _currentBuffer,
+            requested);
+        var nextRead = ReadFully(
+            _next.Provider,
+            _nextBuffer,
+            requested);
         _current.SamplesRead += currentRead;
         _next.SamplesRead += nextRead;
         var produced = Math.Max(currentRead, nextRead);
         for (var sample = 0; sample < produced; sample++)
         {
-            var frameProgress = (_crossfadeConsumed + sample - (sample % channels)) / (double)Math.Max(channels, _crossfadeSamples);
+            var fadeFrames = _activeCrossfadeSamples / channels;
+            var frame = (_crossfadeConsumed + sample) / channels;
+            var frameProgress = fadeFrames <= 1
+                ? 1
+                : frame / (double)(fadeFrames - 1);
             var angle = Math.Clamp(frameProgress, 0, 1) * Math.PI / 2;
             var outgoing = sample < currentRead ? _currentBuffer[sample] : 0;
             var incoming = sample < nextRead ? _nextBuffer[sample] : 0;
             destination[offset + sample] = (float)((outgoing * Math.Cos(angle)) + (incoming * Math.Sin(angle)));
         }
         _crossfadeConsumed += produced;
-        if (_crossfadeConsumed >= _crossfadeSamples || currentRead == 0) SwitchToNext();
+        if (_crossfadeConsumed >= _activeCrossfadeSamples
+            || currentRead == 0)
+            SwitchToNext();
         return produced;
     }
 
@@ -134,6 +160,7 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
         _current = _next;
         _next = null;
         _crossfadeConsumed = 0;
+        _activeCrossfadeSamples = 0;
         _completedRaised = false;
         Retire(retired);
         SourceChanged?.Invoke(this, EventArgs.Empty);
@@ -147,10 +174,34 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
     }
 
     private static long Remaining(Source source) => Math.Max(0, source.TotalSamples - source.SamplesRead);
+    private long CrossfadeTargetSamples() => _next is null
+        ? 0
+        : Align(
+            Math.Min(
+                _crossfadeSamples,
+                Math.Min(_current.TotalSamples, _next.TotalSamples)),
+            WaveFormat.Channels);
     private static int Align(int value, int channels) => value - (value % channels);
     private static long Align(long value, int channels) => value - (value % channels);
     private static bool FormatsMatch(WaveFormat a, WaveFormat b) => a.SampleRate == b.SampleRate && a.Channels == b.Channels && a.Encoding == b.Encoding;
     private static void EnsureBuffer(ref float[] buffer, int required) { if (buffer.Length < required) buffer = new float[required]; }
+    private static int ReadFully(
+        ISampleProvider source,
+        float[] buffer,
+        int requested)
+    {
+        var read = 0;
+        while (read < requested)
+        {
+            var current = source.Read(
+                buffer,
+                read,
+                requested - read);
+            if (current == 0) break;
+            read += current;
+        }
+        return read;
+    }
     private static void Retire(IDisposable? disposable) { if (disposable is not null) ThreadPool.QueueUserWorkItem(_ => disposable.Dispose()); }
 
     public void Dispose()

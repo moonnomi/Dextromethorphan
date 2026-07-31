@@ -163,8 +163,8 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 
 ### Signal processing and transitions
 
-- [ ] **P0 DSP-001** Add offline waveform/audio fixtures that verify no silence, duplication, or dropped frames at gapless boundaries.
-- [ ] **P0 DSP-002** Verify crossfade timing and equal-power behavior across differing rates/channels and very short tracks.
+- [x] **P0 DSP-001** Add offline waveform/audio fixtures that verify no silence, duplication, or dropped frames at gapless boundaries.
+- [x] **P0 DSP-002** Verify crossfade timing and equal-power behavior across differing rates/channels and very short tracks.
 - [ ] **P0 DSP-003** Add ReplayGain scanner/analysis for files missing tags, using an EBU R128-compatible implementation.
 - [ ] **P0 DSP-004** Add album/track gain, preamp, clipping prevention, and processing-state controls to Settings.
 - [ ] **P1 DSP-005** Replace the current interpolator/FFT pitch path with a reviewed high-quality tempo/pitch engine after listening, latency, and license evaluation.

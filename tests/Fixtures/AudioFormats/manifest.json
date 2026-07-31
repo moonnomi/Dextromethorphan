@@ -77,12 +77,12 @@
                   {
                       "file":  "reference.ogg",
                       "bytes":  12251,
-                      "sha256":  "1ab79c70d2d1c6333d02c76348ea171714f81bd861ae4515505076cdbe0a9db6"
+                      "sha256":  "bb6c37ba19d7648ab5bc1e5157a9f928885974b5aeaa96efbe9078a0c32a77c9"
                   },
                   {
                       "file":  "reference.opus",
                       "bytes":  37547,
-                      "sha256":  "a668380b3bd2cb9be00a0ab06967b08b1663d26b1b23187ba45e3f1e47d6d740"
+                      "sha256":  "863e19916723acf2bf634a714afa3267cba023d82770b7f4f1f43c9dc79cdbf1"
                   },
                   {
                       "file":  "reference.wav",
@@ -93,6 +93,16 @@
                       "file":  "reference.wma",
                       "bytes":  52040,
                       "sha256":  "23bf75073cae75925de3e722cd91d27e848c354ef6d6ad6f3aee51995d7f53fc"
+                  },
+                  {
+                      "file":  "transition-mono-44100.wav",
+                      "bytes":  7134,
+                      "sha256":  "47e3ba141c2f58ecd1daf92ffa06f390606feccd6fe5135d5e238b9413783821"
+                  },
+                  {
+                      "file":  "transition-stereo-48000.wav",
+                      "bytes":  8742,
+                      "sha256":  "00ca091f1298c64984ee95750b118d898a2aba66b7edd4662debcc318e3f8dd1"
                   },
                   {
                       "file":  "truncated.mp3",
