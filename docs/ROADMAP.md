@@ -145,7 +145,7 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 - [x] **P0 AUD-003** Handle default-device changes, device removal, sleep/resume, driver reset, and endpoint invalidation without freezing or changing Windows volume. See [output profiles and recovery](audio/OUTPUT-PROFILES-AND-RECOVERY-2026-07-31.md).
 - [x] **P0 AUD-004** Make exclusive failure/fallback visible and actionable; never silently claim bit-perfect playback. See [output profiles and recovery](audio/OUTPUT-PROFILES-AND-RECOVERY-2026-07-31.md).
 - [x] **P0 AUD-005** Add configurable retry/backoff and automatic continuation after recoverable endpoint errors. See [output profiles and recovery](audio/OUTPUT-PROFILES-AND-RECOVERY-2026-07-31.md).
-- [ ] **P0 AUD-006** Qualify 44.1, 48, 88.2, 96, 176.4, and 192 kHz; 16/24/32-bit; mono/stereo; shared/exclusive; and buffer boundaries.
+- [x] **P0 AUD-006** Qualify 44.1, 48, 88.2, 96, 176.4, and 192 kHz; 16/24/32-bit; mono/stereo; shared/exclusive; and buffer boundaries. See [PCM output qualification](audio/PCM-OUTPUT-QUALIFICATION-2026-07-31.md).
 - [x] **P1 AUD-007** Define stereo-only behavior for multichannel files and endpoints: reject, map, or downmix with explicit policy. See [output profiles and recovery](audio/OUTPUT-PROFILES-AND-RECOVERY-2026-07-31.md).
 - [x] **P1 AUD-008** Add Bluetooth/HDMI-friendly shared-mode profiles and sensible device-specific defaults. See [output profiles and recovery](audio/OUTPUT-PROFILES-AND-RECOVERY-2026-07-31.md).
 - [x] **P1 AUD-009** Export an audio diagnostics report including requested/effective format, decoder, pipeline, fallback reason, underruns, callback timing, and device ID. See [output profiles and recovery](audio/OUTPUT-PROFILES-AND-RECOVERY-2026-07-31.md).
@@ -174,7 +174,7 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 
 ### Hardware qualification
 
-- [ ] **P0 HW-001** Test at least one normal onboard device before every release.
+- [x] **P0 HW-001** Test at least one normal onboard device before every release. The current release candidate passed on the system's Realtek onboard endpoint; this remains a release-time gate. See [PCM output qualification](audio/PCM-OUTPUT-QUALIFICATION-2026-07-31.md).
 - [ ] **P1 HW-002** Build a DAC test matrix for exclusive negotiation, sample-rate switching, buffers, hardware volume, device loss, and long playback.
 - [ ] **P1 HW-003** Verify DoP marker order, channel interleave, seeking, DSD64/128 negotiation, and DAC indication on physical hardware.
 - [ ] **P1 HW-004** Run 8-hour playback/transition soak tests and record underruns and memory growth.

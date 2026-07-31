@@ -28,10 +28,10 @@ Normal discovery and capability probing never writes endpoint volume. Hardware v
 
 ## Qualification evidence
 
-- 173 automated tests pass, including profile round-trip, fallback defaults, recovery backoff, endpoint notifications, PCM conversion, multichannel downmix, diagnostics export, and Settings XAML loading.
+- The automated suite covers profile round-trip, fallback defaults, recovery backoff, endpoint notifications, the complete PCM conversion matrix, multichannel downmix, diagnostics export, and Settings XAML loading.
 - The opt-in hardware probe passed on `Speakers (Realtek(R) Audio)`.
 - Its shared mix is 48 kHz, 32-bit, stereo.
 - The driver accepted all tested 44.1–192 kHz mono/stereo PCM combinations at 16 and 24 bits, rejected the tested 32-bit PCM/float combinations, and exposed event-driven exclusive mode.
 - The Windows endpoint volume value was identical before and after discovery/capability probing.
 
-The hardware probe is capability qualification, not playback qualification. AUD-006 and the HW items remain open until generated audio is actually played through every applicable format/buffer combination and the required soak/DAC runs are completed.
+Playback qualification now generates finite silence through the real endpoint rather than relying only on capability flags. The current onboard endpoint passed all 36 shared-mode PCM combinations, all 24 exclusive combinations accepted by its driver, and 2/10/100 ms shared buffer checks without changing endpoint volume. See [PCM output qualification](PCM-OUTPUT-QUALIFICATION-2026-07-31.md). Physical-DAC, DoP, and long-soak work remains separately gated by HW-002 through HW-004.

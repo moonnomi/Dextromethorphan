@@ -7,6 +7,18 @@ namespace Dextromethorphan.Tests;
 
 public sealed class AudioOutputProfileTests
 {
+    public static IEnumerable<object[]> PcmFormatMatrix =>
+        from sampleRate in new[]
+        {
+            44_100, 48_000, 88_200, 96_000, 176_400, 192_000
+        }
+        from bitsPerSample in new[] { 16, 24, 32 }
+        from channels in new[] { 1, 2 }
+        select new object[]
+        {
+            sampleRate, bitsPerSample, channels
+        };
+
     [Fact]
     public void DraftRoundTripsEveryOutputDecision()
     {
@@ -137,6 +149,42 @@ public sealed class AudioOutputProfileTests
         Assert.Equal(expectedBytes, provider.Read(bytes, 0, bytes.Length));
         Assert.Equal(bits, provider.WaveFormat.BitsPerSample);
         Assert.Equal(WaveFormatEncoding.Pcm, provider.WaveFormat.Encoding);
+    }
+
+    [Theory]
+    [MemberData(nameof(PcmFormatMatrix))]
+    public void PcmMatrixRemainsBlockAlignedAcrossCallbackBoundaries(
+        int sampleRate,
+        int bitsPerSample,
+        int channels)
+    {
+        const int frames = 31;
+        var samples = Enumerable.Range(0, frames * channels)
+            .Select(index => (float)Math.Sin(index * 0.1) * 0.75f)
+            .ToArray();
+        var provider = new PcmSampleWaveProvider(
+            new ArraySampleProvider(samples, sampleRate, channels),
+            bitsPerSample);
+        var blockAlign = provider.WaveFormat.BlockAlign;
+        var buffer = new byte[blockAlign * 7 + 1];
+        var total = 0;
+
+        Assert.Equal(0, provider.Read(
+            buffer,
+            0,
+            blockAlign - 1));
+        while (true)
+        {
+            var read = provider.Read(buffer, 0, buffer.Length);
+            if (read == 0) break;
+            Assert.Equal(0, read % blockAlign);
+            total += read;
+        }
+
+        Assert.Equal(frames * blockAlign, total);
+        Assert.Equal(sampleRate, provider.WaveFormat.SampleRate);
+        Assert.Equal(bitsPerSample, provider.WaveFormat.BitsPerSample);
+        Assert.Equal(channels, provider.WaveFormat.Channels);
     }
 
     private sealed class ArraySampleProvider(
