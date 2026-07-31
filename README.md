@@ -70,6 +70,7 @@ Add `-Installer` when [Inno Setup 6](https://jrsoftware.org/isinfo.php) is insta
 ## Documentation
 
 - [Audio engine and playback modes](docs/AUDIO.md)
+- [Milestone 3 audio qualification status](docs/audio/MILESTONE-3-STATUS-2026-07-31.md)
 - [Library, scanning, and playlists](docs/LIBRARY.md)
 - [Interface and navigation](docs/UI.md)
 - [Windows shortcuts and media controls](docs/WINDOWS-INTEGRATION.md)

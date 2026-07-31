@@ -138,6 +138,8 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 
 ## Milestone 3 — audio engine completion and qualification
 
+**Status (2026-07-31): release-candidate software gate passed.** All P0 audio-engine, decoder, DSP, PCM-output, and onboard-device items are complete. The milestone remains open for one P2 codec item and the explicitly hardware-gated ASIO/native-DSD, physical-DoP, and eight-hour-soak evidence. See the [Milestone 3 status report](audio/MILESTONE-3-STATUS-2026-07-31.md).
+
 ### Output devices and modes
 
 - [x] **P0 AUD-001** Build the full per-output profile editor: device, shared/exclusive, buffer, sample rate policy, bit depth, channel policy, fallback, hardware/software volume, and DSD mode. See [output profiles and recovery](audio/OUTPUT-PROFILES-AND-RECOVERY-2026-07-31.md).
