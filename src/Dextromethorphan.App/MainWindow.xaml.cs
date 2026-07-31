@@ -755,6 +755,29 @@ public partial class MainWindow : Window
             screenshots.Add(screenshot);
         }
 
+        // A settled monotonic traversal can hide races between rapid viewport
+        // recycling, Unloaded cancellation, and the next artwork request.
+        // Repeatedly jump between disjoint ranges, then require both endpoints
+        // to recover all of their visible cards and artwork after the queues
+        // settle. This mirrors fast wheel/scrollbar use in a real library.
+        for (var cycle = 0; cycle < 4; cycle++)
+        {
+            foreach (var ratio in new[] { 0d, 1d, 0.2d, 0.8d, 0.4d, 0.6d, 1d })
+            {
+                viewer.ScrollToVerticalOffset(viewer.ScrollableHeight * ratio);
+                await NextRenderedFrameTimestampAsync(cancellationToken);
+            }
+            await InspectAsync();
+            viewer.ScrollToTop();
+            await NextRenderedFrameTimestampAsync(cancellationToken);
+            await InspectAsync();
+        }
+        var returnScreenshot = Path.Combine(
+            outputDirectory,
+            "gallery-return-top.png");
+        CaptureVisualPng(returnScreenshot);
+        screenshots.Add(returnScreenshot);
+
         var finalCards = ViewModel.GalleryGroups.Count;
         var status = finalCards != sourceCards
             ? $"Paging stopped at {finalCards:N0} of {sourceCards:N0} cards."

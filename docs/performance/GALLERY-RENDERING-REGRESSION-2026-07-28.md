@@ -42,3 +42,26 @@ The application was run against an isolated copy of the user's actual applicatio
 Top, middle, and bottom PNGs all contained the expected album grid. The same run recorded a 10.035 ms album-scroll p95, 21.682 ms worst frame, and zero frames over 33 ms. Correctness is restored without removing virtualization or returning to eager full-library image creation.
 
 A separate deterministic 50,000-track / 2,500-album image fixture exposed all 2,500 cards immediately and rendered 310/310 inspected artwork instances across the same 16 checkpoints. Its album-scroll p95 was 8.610 ms, cached Albums switch was 24.518 ms, and settled working set was 292.1 MiB.
+
+## Recurrence hardening — 2026-07-31
+
+A later user report showed the same visible symptom after rapid scrolling: the header still reported 302 albums while a realized range could appear empty, and returning through older ranges could leave cards absent. The complete card collection and image-request pipeline were intact. The remaining intermittent risk was in arrangement: the custom panel asked WPF's item generator to translate every realized child position during `ArrangeOverride`. During removal and recreation of a distant range, that lookup can temporarily return no item index; the valid container was then skipped for that layout pass.
+
+Each realized container now retains the authoritative source index assigned by the generation loop. Measure, cleanup, and arrange use that stable index, with the generator lookup retained only as a compatibility fallback. This does not retain off-screen containers or images and does not disable virtualization.
+
+The visual regression now adds four rapid, non-monotonic top/bottom recycling cycles after the settled traversal. It verifies both endpoints only after artwork/property queues settle and captures the final return-to-top state.
+
+The current production build was qualified against an isolated copy of the live 531-track / 302-album database and artwork cache:
+
+| Check | Result |
+|---|---:|
+| Source / final materialized cards | 302 / 302 |
+| Inspection checkpoints | 24 |
+| Realized cards inspected | 762 |
+| Expected / rendered artwork | 762 / 762 |
+| Container mapping failures | 0 |
+| Missing expected images | 0 |
+| Live app-data files hashed before/after | 747 |
+| Live files changed | 0 |
+
+The qualification process used `DEXTROMETHORPHAN_DATA_ROOT` to select the copied app-data directory. It never opened the live database as its writable database, and the SHA-256/length/timestamp snapshot confirmed that the live database, settings, artwork, and sidecars were unchanged.

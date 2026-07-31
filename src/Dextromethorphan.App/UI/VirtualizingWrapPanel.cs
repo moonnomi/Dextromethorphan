@@ -7,6 +7,13 @@ namespace Dextromethorphan.App.UI;
 
 public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
 {
+    private static readonly DependencyProperty RealizedIndexProperty =
+        DependencyProperty.RegisterAttached(
+            "RealizedIndex",
+            typeof(int),
+            typeof(VirtualizingWrapPanel),
+            new PropertyMetadata(-1));
+
     public static readonly DependencyProperty ItemWidthProperty = DependencyProperty.Register(
         nameof(ItemWidth), typeof(double), typeof(VirtualizingWrapPanel),
         new FrameworkPropertyMetadata(186d, FrameworkPropertyMetadataOptions.AffectsMeasure));
@@ -59,11 +66,15 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         var itemHeight = Math.Max(1, ItemHeight);
         for (var childIndex = 0; childIndex < InternalChildren.Count; childIndex++)
         {
-            var itemIndex = generator.IndexFromGeneratorPosition(new GeneratorPosition(childIndex, 0));
+            var child = InternalChildren[childIndex];
+            var itemIndex = (int)child.GetValue(RealizedIndexProperty);
+            if (itemIndex < 0)
+                itemIndex = generator.IndexFromGeneratorPosition(
+                    new GeneratorPosition(childIndex, 0));
             if (itemIndex < 0) continue;
             var row = itemIndex / _itemsPerRow;
             var column = itemIndex % _itemsPerRow;
-            InternalChildren[childIndex].Arrange(new Rect(
+            child.Arrange(new Rect(
                 column * itemWidth,
                 (row * itemHeight) - _offset.Y,
                 itemWidth,
@@ -100,6 +111,11 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
                     else InsertInternalChild(childIndex, child);
                     generator.PrepareItemContainer(child);
                 }
+                // Generator-position lookups can be transiently unavailable
+                // while WPF removes and recreates a distant virtualized range.
+                // Keep the authoritative source index on the container so an
+                // otherwise valid card can never be skipped by ArrangeOverride.
+                child.SetValue(RealizedIndexProperty, itemIndex);
                 child.Measure(childSize);
             }
         }
@@ -110,8 +126,11 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
         var generator = ItemContainerGenerator;
         for (var childIndex = InternalChildren.Count - 1; childIndex >= 0; childIndex--)
         {
+            var child = InternalChildren[childIndex];
             var position = new GeneratorPosition(childIndex, 0);
-            var itemIndex = generator.IndexFromGeneratorPosition(position);
+            var itemIndex = (int)child.GetValue(RealizedIndexProperty);
+            if (itemIndex < 0)
+                itemIndex = generator.IndexFromGeneratorPosition(position);
             if (itemIndex >= startIndex && itemIndex <= endIndex) continue;
             // WPF's recycling generator can return a reused ListBoxItem before
             // its template bindings and attached artwork state have caught up
@@ -124,6 +143,7 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
             // a fresh container is prepared and its artwork request starts on
             // Loaded.  Correctness matters more here than retaining a pool of
             // roughly 20 very small ListBoxItems.
+            child.ClearValue(RealizedIndexProperty);
             generator.Remove(position, 1);
             RemoveInternalChildRange(childIndex, 1);
         }
