@@ -48,6 +48,69 @@ public sealed class DatabaseMaintenanceTests : IDisposable
     }
 
     [Fact]
+    public async Task VersionZeroLegacyDatabaseMigratesWithoutTouchingTrackData()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var paths = new AppPaths(_root);
+        paths.EnsureCreated();
+        await using (var connection = new SqliteConnection($"Data Source={paths.DatabaseFile}"))
+        {
+            await connection.OpenAsync(cancellationToken);
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE tracks(
+                  id INTEGER PRIMARY KEY,
+                  path TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                  title TEXT NOT NULL,
+                  artist TEXT NOT NULL DEFAULT '',
+                  album_artist TEXT NOT NULL DEFAULT '',
+                  album TEXT NOT NULL DEFAULT '',
+                  genre TEXT NOT NULL DEFAULT '',
+                  comment TEXT NOT NULL DEFAULT '',
+                  year INTEGER NOT NULL DEFAULT 0,
+                  track_number INTEGER NOT NULL DEFAULT 0,
+                  disc_number INTEGER NOT NULL DEFAULT 0,
+                  duration_ms INTEGER NOT NULL DEFAULT 0,
+                  bitrate INTEGER NOT NULL DEFAULT 0,
+                  sample_rate INTEGER NOT NULL DEFAULT 0,
+                  bits_per_sample INTEGER NOT NULL DEFAULT 0,
+                  channels INTEGER NOT NULL DEFAULT 0,
+                  codec TEXT NOT NULL DEFAULT '',
+                  replaygain_track REAL,
+                  replaygain_album REAL,
+                  replay_peak REAL,
+                  rating INTEGER NOT NULL DEFAULT 0,
+                  loved INTEGER NOT NULL DEFAULT 0,
+                  play_count INTEGER NOT NULL DEFAULT 0,
+                  last_played_at INTEGER,
+                  file_modified_at INTEGER NOT NULL,
+                  file_size INTEGER NOT NULL,
+                  lyrics TEXT NOT NULL DEFAULT '',
+                  added_at INTEGER NOT NULL,
+                  updated_at INTEGER NOT NULL);
+                INSERT INTO tracks(
+                  path,title,file_modified_at,file_size,added_at,updated_at)
+                VALUES('C:\Music\untouched.flac','Untouched',1,42,1,1);
+                PRAGMA user_version=0;
+                """;
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        var repository = new SqliteLibraryRepository(paths);
+        await repository.InitializeAsync(cancellationToken);
+
+        var migrated = Assert.Single(await repository.SearchAsync(
+            "Untouched",
+            cancellationToken: cancellationToken));
+        Assert.Equal(@"C:\Music\untouched.flac", migrated.Path);
+        Assert.Equal(42, migrated.FileSize);
+        Assert.False(migrated.IsMissing);
+        Assert.Equal(
+            SqliteLibraryRepository.CurrentSchemaVersion,
+            (await repository.CheckIntegrityAsync(cancellationToken)).SchemaVersion);
+    }
+
+    [Fact]
     public async Task BackupRestoreReturnsUserStateAtomically()
     {
         var cancellationToken = TestContext.Current.CancellationToken;

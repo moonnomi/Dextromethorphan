@@ -788,7 +788,6 @@ public sealed class SqliteLibraryRepository(
           bits_per_sample INTEGER NOT NULL DEFAULT 0, channels INTEGER NOT NULL DEFAULT 0, codec TEXT NOT NULL DEFAULT '', replaygain_track REAL, replaygain_album REAL, replay_peak REAL, rating INTEGER NOT NULL DEFAULT 0, loved INTEGER NOT NULL DEFAULT 0,
           play_count INTEGER NOT NULL DEFAULT 0, last_played_at INTEGER, file_modified_at INTEGER NOT NULL, file_size INTEGER NOT NULL, artwork_path TEXT, lyrics TEXT NOT NULL DEFAULT '', is_missing INTEGER NOT NULL DEFAULT 0, added_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
         CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist COLLATE NOCASE); CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album COLLATE NOCASE); CREATE INDEX IF NOT EXISTS idx_tracks_added ON tracks(added_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_tracks_missing ON tracks(is_missing, path COLLATE NOCASE);
         CREATE TABLE IF NOT EXISTS bookmarks(track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE, position_ms INTEGER NOT NULL, updated_at INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS playlists(id INTEGER PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'manual', rules_json TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS playlist_tracks(playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE, track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE, position INTEGER NOT NULL, PRIMARY KEY(playlist_id, track_id));
