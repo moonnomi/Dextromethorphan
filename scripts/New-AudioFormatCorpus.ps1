@@ -13,7 +13,8 @@ New-Item -ItemType Directory -Force -Path $Output | Out-Null
 New-Item -ItemType Directory -Force -Path $ProbeOutput | Out-Null
 
 function Invoke-Ffmpeg([string[]]$Arguments) {
-    & $ffmpeg.Source -hide_banner -loglevel error -y @Arguments
+    & $ffmpeg.Source -hide_banner -loglevel error `
+        -fflags +bitexact -flags:a +bitexact -y @Arguments
     if ($LASTEXITCODE -ne 0) {
         throw "ffmpeg failed with exit code ${LASTEXITCODE}: $Arguments"
     }
@@ -51,6 +52,44 @@ foreach ($encoding in $encodings) {
     $arguments += (Join-Path $Output $encoding.File)
     Invoke-Ffmpeg -Arguments $arguments
 }
+
+$chapterMetadata = Join-Path $Output 'chapters.ffmeta'
+[IO.File]::WriteAllText(
+    $chapterMetadata,
+    @"
+;FFMETADATA1
+[CHAPTER]
+TIMEBASE=1/1000
+START=0
+END=750
+title=Opening chapter
+[CHAPTER]
+TIMEBASE=1/1000
+START=750
+END=2000
+title=Final chapter
+"@,
+    [Text.UTF8Encoding]::new($false))
+@(
+    @{ File = 'chaptered.mp3'; Args = @('-c:a', 'libmp3lame', '-q:a', '4') },
+    @{ File = 'chaptered.m4a'; Args = @('-c:a', 'aac', '-b:a', '160k') },
+    @{ File = 'chaptered.flac'; Args = @(
+        '-c:a', 'flac',
+        '-metadata', 'CHAPTER001=00:00:00.000',
+        '-metadata', 'CHAPTER001NAME=Opening chapter',
+        '-metadata', 'CHAPTER002=00:00:00.750',
+        '-metadata', 'CHAPTER002NAME=Final chapter') }
+) | ForEach-Object {
+    $chapterArguments = @(
+        '-i', $reference,
+        '-i', $chapterMetadata,
+        '-map_chapters', '1'
+    )
+    $chapterArguments += [string[]]$_.Args
+    $chapterArguments += Join-Path $Output $_.File
+    Invoke-Ffmpeg -Arguments $chapterArguments
+}
+[IO.File]::Delete($chapterMetadata)
 
 $unicodeName =
     'unicode-' + [char]0x97F3 + [char]0x697D + '-alac.m4a'
@@ -213,7 +252,7 @@ $mp3 = [IO.File]::ReadAllBytes(
     $mp3[0..([Math]::Min(95, $mp3.Length - 1))])
 
 $files = Get-ChildItem -LiteralPath $Output -File |
-    Where-Object Name -ne 'manifest.json' |
+    Where-Object Name -notin @('manifest.json', 'README.md') |
     Sort-Object Name |
     ForEach-Object {
         [ordered]@{

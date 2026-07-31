@@ -189,6 +189,11 @@ public sealed class MainViewModel : ObservableObject
             parameter => parameter is Track { IsMissing: true });
         LoveCommand = new AsyncRelayCommand(_ => ToggleLoveAsync(), _ => CurrentTrack is not null);
         SeekLyricCommand = new AsyncRelayCommand(p => SeekLyricAsync(p as LyricLineViewModel));
+        SeekChapterCommand = new AsyncRelayCommand(
+            p => p is AudioChapter chapter
+                ? CommitSeekAsync(chapter.Start.TotalSeconds)
+                : Task.CompletedTask,
+            p => p is AudioChapter);
         PlayQueueEntryCommand = new AsyncRelayCommand(p => PlayQueueEntryAsync(p as QueueEntryViewModel));
         RemoveQueueEntryCommand = new AsyncRelayCommand(p => RemoveQueueEntryAsync(p as QueueEntryViewModel));
         PlayQueueEntryNextCommand = new RelayCommand(p => MoveQueueEntryNext(p as QueueEntryViewModel));
@@ -456,6 +461,7 @@ public sealed class MainViewModel : ObservableObject
     public RelayCommand ClearQueueCommand { get; }
     public AsyncRelayCommand LoveCommand { get; }
     public AsyncRelayCommand SeekLyricCommand { get; }
+    public AsyncRelayCommand SeekChapterCommand { get; }
     public AsyncRelayCommand PlayQueueEntryCommand { get; }
     public AsyncRelayCommand RemoveQueueEntryCommand { get; }
     public AsyncRelayCommand RemoveMissingTrackCommand { get; }

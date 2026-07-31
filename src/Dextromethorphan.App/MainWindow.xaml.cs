@@ -7,6 +7,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
@@ -70,6 +71,7 @@ public partial class MainWindow : Window
         PerformanceOverlay = performanceOverlay;
         PerformanceOverlay.Attach(this);
         DataContext = viewModel;
+        InstallChapterMarkers();
         ViewModel.PropertyChanged += ViewModelOnPropertyChanged;
         PreviewMouseMove += RecordUserInteraction;
         PreviewMouseWheel += RecordUserInteraction;
@@ -81,6 +83,50 @@ public partial class MainWindow : Window
             IdleCleanupTimer_Tick,
             Dispatcher);
         _idleCleanupTimer.Start();
+    }
+
+    private void InstallChapterMarkers()
+    {
+        if (SeekSlider.Parent is not Grid seekGrid) return;
+        var markers = new ChapterMarkerBar
+        {
+            IsHitTestVisible = false,
+            Margin = new Thickness(6, 0, 6, 0),
+            ToolTip = "Chapter markers"
+        };
+        markers.SetBinding(
+            ChapterMarkerBar.ChaptersProperty,
+            new Binding("CurrentTrack.Chapters"));
+        markers.SetBinding(
+            ChapterMarkerBar.DurationProperty,
+            new Binding(nameof(MainViewModel.DurationSeconds)));
+        Grid.SetColumn(markers, 1);
+        Panel.SetZIndex(markers, 2);
+        seekGrid.Children.Add(markers);
+        var chapterMenu = new ContextMenu();
+        chapterMenu.Opened += (_, _) =>
+        {
+            chapterMenu.Items.Clear();
+            var chapters = ViewModel.CurrentTrack?.Chapters ?? [];
+            if (chapters.Count == 0)
+            {
+                chapterMenu.Items.Add(new MenuItem
+                {
+                    Header = "No chapters in this track",
+                    IsEnabled = false
+                });
+                return;
+            }
+            foreach (var chapter in chapters)
+                chapterMenu.Items.Add(new MenuItem
+                {
+                    Header = $"{chapter.StartText}  {chapter.Title}",
+                    Command = ViewModel.SeekChapterCommand,
+                    CommandParameter = chapter
+                });
+        };
+        SeekSlider.ContextMenu = chapterMenu;
+        SeekSlider.ToolTip = "Seek · right-click to open chapters";
     }
 
     public MainViewModel ViewModel { get; }

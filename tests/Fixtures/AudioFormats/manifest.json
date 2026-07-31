@@ -20,6 +20,21 @@
                       "sha256":  "f0b073af083f99ad9947df7ebb05f5b4e8a16cd797b53ac62a07cd7a1a13988b"
                   },
                   {
+                      "file":  "chaptered.flac",
+                      "bytes":  36383,
+                      "sha256":  "99d5483a340883d887bfbb82d5367694cb8cd3f94569a73170d3c58564f4f216"
+                  },
+                  {
+                      "file":  "chaptered.m4a",
+                      "bytes":  42268,
+                      "sha256":  "0d8081d1aac6528997a71094c27943ec91e0c1a332cd0c700d3d2362994a406b"
+                  },
+                  {
+                      "file":  "chaptered.mp3",
+                      "bytes":  9301,
+                      "sha256":  "13b97a4dbe679644edfc6e247befbbd823caf4332e7acd6c14ffa2abd53c3ebd"
+                  },
+                  {
                       "file":  "generated-cover.bmp",
                       "bytes":  12342,
                       "sha256":  "6003b753b5538dc6de660c2d30fba7a5a485cc05ffa165e0b5214373b7b7f05d"
@@ -33,11 +48,6 @@
                       "file":  "metadata-heavy.flac",
                       "bytes":  60804,
                       "sha256":  "93297e8c9b4c4f1282390982960782327ed7e847fd0bc940dbee378a7189f2b1"
-                  },
-                  {
-                      "file":  "README.md",
-                      "bytes":  693,
-                      "sha256":  "14e77a91bccd4454b8542862859bc017461e69129572b8589bb7f61e05f75dc2"
                   },
                   {
                       "file":  "reference.aiff",
@@ -67,12 +77,12 @@
                   {
                       "file":  "reference.ogg",
                       "bytes":  12251,
-                      "sha256":  "5e01017343db6f0eaa591ac66f07963831701f73988a6719b450ec8e66fc2f70"
+                      "sha256":  "1ab79c70d2d1c6333d02c76348ea171714f81bd861ae4515505076cdbe0a9db6"
                   },
                   {
                       "file":  "reference.opus",
                       "bytes":  37547,
-                      "sha256":  "f54213ffe4fe11a26265d44348ddd7c5fd5a6529369d2f096c18b984b0268a59"
+                      "sha256":  "a668380b3bd2cb9be00a0ab06967b08b1663d26b1b23187ba45e3f1e47d6d740"
                   },
                   {
                       "file":  "reference.wav",

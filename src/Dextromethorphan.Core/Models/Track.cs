@@ -36,6 +36,7 @@ public sealed record Track
     public byte[]? Artwork { get; init; }
     public string? ArtworkPath { get; init; }
     public string Lyrics { get; init; } = "";
+    public IReadOnlyList<AudioChapter> Chapters { get; init; } = [];
     public bool IsMissing { get; init; }
 
     public string EffectiveMediaPath =>

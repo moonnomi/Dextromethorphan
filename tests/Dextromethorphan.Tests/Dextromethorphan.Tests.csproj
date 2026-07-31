@@ -17,7 +17,7 @@
   <ItemGroup>
     <Content Include="../Fixtures/AudioFormats/**">
       <Link>Fixtures/AudioFormats/%(RecursiveDir)%(Filename)%(Extension)</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
 </Project>

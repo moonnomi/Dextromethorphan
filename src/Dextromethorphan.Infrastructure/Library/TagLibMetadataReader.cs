@@ -43,7 +43,11 @@ public sealed class TagLibMetadataReader : ITrackMetadataReader
             FileModifiedAt = info.LastWriteTimeUtc,
             FileSize = info.Length,
             Artwork = tag.Pictures.FirstOrDefault()?.Data.Data,
-            Lyrics = sidecarLyrics ?? tag.Lyrics ?? ""
+            Lyrics = sidecarLyrics ?? tag.Lyrics ?? "",
+            Chapters = ChapterMetadataReader.Read(
+                file,
+                path,
+                properties.Duration)
         };
     }
 

@@ -785,6 +785,10 @@ public sealed class LibraryScanner(
                     ? baseTrack.DiscNumber
                     : cue.DiscNumber,
                 Duration = end - cueTrack.Start,
+                Chapters = SliceChapters(
+                    baseTrack.Chapters,
+                    cueTrack.Start,
+                    end),
                 FileModifiedAt = new DateTimeOffset(
                     modified,
                     TimeSpan.Zero),
@@ -794,6 +798,24 @@ public sealed class LibraryScanner(
         }
         return new CueTrackBatch(result, newCount);
     }
+
+    private static IReadOnlyList<AudioChapter> SliceChapters(
+        IReadOnlyList<AudioChapter> chapters,
+        TimeSpan start,
+        TimeSpan end) =>
+        chapters
+            .Where(chapter => chapter.Start < end
+                              && chapter.End > start)
+            .Select(chapter => new AudioChapter(
+                chapter.Title,
+                chapter.Start <= start
+                    ? TimeSpan.Zero
+                    : chapter.Start - start,
+                chapter.End >= end
+                    ? end - start
+                    : chapter.End - start))
+            .Where(chapter => chapter.End > chapter.Start)
+            .ToArray();
 
     private async Task PersistCheckpointsAsync(
         IReadOnlyList<string> roots,

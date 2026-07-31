@@ -157,7 +157,7 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 - [x] **P0 DEC-003** Test malformed headers, truncated files, unusual metadata blocks, large tags, embedded covers, VBR duration, and Unicode paths. See [decoder corpus and coverage](audio/DECODER-CORPUS-AND-COVERAGE-2026-07-31.md).
 - [x] **P0 DEC-004** Verify seeking accuracy and end-of-stream behavior for every supported codec. See [decoder corpus and coverage](audio/DECODER-CORPUS-AND-COVERAGE-2026-07-31.md).
 - [x] **P1 DEC-005** Add CUE sheet and single-image album support with per-track boundaries and metadata. See [CUE sheet support](audio/CUE-SHEET-SUPPORT-2026-07-31.md).
-- [ ] **P1 DEC-006** Add chapters for formats that support them.
+- [x] **P1 DEC-006** Add chapters for formats that support them. See [embedded chapter support](audio/CHAPTER-SUPPORT-2026-07-31.md).
 - [ ] **P2 DEC-007** Add DST-compressed DFF support.
 - [ ] **P3 DEC-008** Evaluate ASIO/native DSD only after WASAPI/DoP is hardware-qualified.
 
