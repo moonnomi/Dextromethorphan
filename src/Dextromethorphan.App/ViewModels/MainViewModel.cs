@@ -7,25 +7,32 @@ using Dextromethorphan.App.UI;
 using Dextromethorphan.Core.Abstractions;
 using Dextromethorphan.Core.Lyrics;
 using Dextromethorphan.Core.Models;
+using Dextromethorphan.Infrastructure.Library;
+using Dextromethorphan.Infrastructure.Storage;
 
 namespace Dextromethorphan.App.ViewModels;
 
 public sealed class MainViewModel : ObservableObject
 {
-    private static readonly string[] Views = ["Albums", "Artists", "Genres", "Songs", "Folders", "Playlists", "Favorites", "Now Playing"];
+    private static readonly string[] Views = ["Albums", "Artists", "Genres", "Songs", "Folders", "Playlists", "Favorites", "Missing", "Now Playing"];
     private readonly ISettingsService _settings;
     private readonly ILibraryRepository _repository;
     private readonly IPlaylistRepository _playlists;
     private readonly ILibraryScanner _scanner;
     private readonly IArtworkCache _artwork;
+    private readonly ITrackMetadataReader _metadataReader;
     private readonly IAudioEngine _audio;
     private readonly IPlaybackQueue _queue;
     private readonly ISleepTimerService _sleepTimer;
     private readonly IShortcutService _shortcuts;
     private readonly ISystemMediaTransportService _systemMedia;
+    private readonly IApplicationLog _applicationLog;
     private readonly DeveloperDiagnostics _diagnostics;
     private readonly ArtworkPropertyUpdateBatcher _artworkUpdates;
     private readonly ArtworkImageService _artworkImages;
+    private readonly DiagnosticsBundleExporter _diagnosticsBundles;
+    private readonly UserDataBackupService _userDataBackups;
+    private readonly DuplicateDetectionService _duplicates;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly ConcurrentDictionary<string, string?> _resolvedArtwork = new(StringComparer.OrdinalIgnoreCase);
     private readonly Stack<NavigationEntry> _backHistory = new();
@@ -35,12 +42,21 @@ public sealed class MainViewModel : ObservableObject
     private readonly PresentationCollectionCache<LibraryCardViewModel> _galleryViews = new();
     private readonly PresentationCollectionCache<LibraryCardViewModel> _sidebarViews = new();
     private readonly PresentationCollectionCache<Track> _trackViews = new();
+    private readonly LibraryGroupingIndex _groupingIndex = new();
+    private readonly SemaphoreSlim _groupingGate = new(1, 1);
+    private readonly object _pendingLibraryChangeGate = new();
+    private readonly List<LibraryFileChange> _pendingLibraryChanges = [];
     private readonly ConcurrentDictionary<long, Lazy<Task<IReadOnlyList<Track>>>> _playlistTrackLoads = new();
     private CancellationTokenSource? _searchCancellation;
     private CancellationTokenSource? _artworkCancellation;
     private CancellationTokenSource? _queueArtworkCancellation;
     private CancellationTokenSource? _sessionSaveCancellation;
     private CancellationTokenSource? _volumeCancellation;
+    private CancellationTokenSource? _libraryChangeCancellation;
+    private Task? _shellInitialization;
+    private Task? _libraryInitialization;
+    private Task? _activeScanTask;
+    private Task? _shutdownTask;
     private Task _artworkResolutionTask = Task.CompletedTask;
     private IReadOnlyList<Track> _allTracks = [];
     private IReadOnlyList<LibraryCardViewModel> _activeGroups = [];
@@ -80,7 +96,15 @@ public sealed class MainViewModel : ObservableObject
     private int _artworkCacheMegabytes = 512;
     private string _contentViewStateKey = "primary:Albums";
     private bool _restoringViewSelection;
+    private bool _isLibraryReady;
+    private bool _isSafeMode;
+    private PlaybackState? _lastLoggedPlaybackState;
+    private string? _lastLoggedTrackPath;
+    private string? _lastLoggedAudioError;
     private string _artworkCacheStatus = "Calculating cache size…";
+
+    private string _duplicateScanStatus =
+        "Content analysis has not been run.";
 
     public MainViewModel(
         ISettingsService settings,
@@ -88,18 +112,27 @@ public sealed class MainViewModel : ObservableObject
         IPlaylistRepository playlists,
         ILibraryScanner scanner,
         IArtworkCache artwork,
+        ITrackMetadataReader metadataReader,
         IAudioEngine audio,
         IPlaybackQueue queue,
         ISleepTimerService sleepTimer,
         IShortcutService shortcuts,
         ISystemMediaTransportService systemMedia,
+        IApplicationLog applicationLog,
         DeveloperDiagnostics diagnostics,
         ArtworkPropertyUpdateBatcher artworkUpdates,
-        ArtworkImageService artworkImages)
+        ArtworkImageService artworkImages,
+        DiagnosticsBundleExporter diagnosticsBundles,
+        UserDataBackupService userDataBackups,
+        DuplicateDetectionService duplicates)
     {
-        _settings = settings; _repository = repository; _playlists = playlists; _scanner = scanner; _artwork = artwork;
+        _settings = settings; _repository = repository; _playlists = playlists; _scanner = scanner; _artwork = artwork; _metadataReader = metadataReader;
         _audio = audio; _queue = queue; _sleepTimer = sleepTimer; _shortcuts = shortcuts; _systemMedia = systemMedia;
+        _applicationLog = applicationLog;
         _diagnostics = diagnostics; _artworkUpdates = artworkUpdates; _artworkImages = artworkImages;
+        _diagnosticsBundles = diagnosticsBundles;
+        _userDataBackups = userDataBackups;
+        _duplicates = duplicates;
         NavigateCommand = new RelayCommand(p => Navigate(p?.ToString()));
         SelectGroupCommand = new RelayCommand(p => SelectGroup(p as LibraryCardViewModel));
         CloseCollectionCommand = new RelayCommand(_ => CloseCollectionDetail());
@@ -119,11 +152,29 @@ public sealed class MainViewModel : ObservableObject
             ScheduleSessionSave();
         });
         ScanCommand = new AsyncRelayCommand(_ => ScanAsync(), _ => !_scanner.IsScanning && _settings.Current.LibraryFolders.Count > 0);
+        ToggleScanPauseCommand = new RelayCommand(
+            _ =>
+            {
+                if (_scanner.State == ScanLifecycleState.Paused) _scanner.Resume();
+                else _scanner.Pause();
+                UpdateScanState();
+            },
+            _ => _scanner.State is ScanLifecycleState.Running or ScanLifecycleState.Paused);
+        CancelScanCommand = new RelayCommand(
+            _ =>
+            {
+                _scanner.Cancel();
+                UpdateScanState();
+            },
+            _ => _scanner.State is ScanLifecycleState.Running or ScanLifecycleState.Paused);
         RefreshArtworkCacheCommand = new AsyncRelayCommand(_ => RefreshArtworkCacheStatsAsync(), _ => !IsArtworkCacheBusy);
         ClearArtworkCacheCommand = new AsyncRelayCommand(_ => ClearArtworkCacheAsync(), _ => !IsArtworkCacheBusy);
         RebuildArtworkCacheCommand = new AsyncRelayCommand(_ => RebuildArtworkCacheAsync(), _ => !IsArtworkCacheBusy && _allTracks.Count > 0);
         UndoQueueCommand = new RelayCommand(_ => _queue.Undo());
         ClearQueueCommand = new RelayCommand(_ => _queue.Replace([]));
+        RemoveMissingTrackCommand = new AsyncRelayCommand(
+            parameter => RemoveMissingTrackAsync(parameter as Track),
+            parameter => parameter is Track { IsMissing: true });
         LoveCommand = new AsyncRelayCommand(_ => ToggleLoveAsync(), _ => CurrentTrack is not null);
         SeekLyricCommand = new AsyncRelayCommand(p => SeekLyricAsync(p as LyricLineViewModel));
         PlayQueueEntryCommand = new AsyncRelayCommand(p => PlayQueueEntryAsync(p as QueueEntryViewModel));
@@ -135,6 +186,8 @@ public sealed class MainViewModel : ObservableObject
         _audio.PlaybackEnded += AudioOnPlaybackEnded;
         _queue.Changed += QueueOnChanged;
         _scanner.ProgressChanged += ScannerOnProgressChanged;
+        _scanner.SourceStatusesChanged += ScannerOnSourceStatusesChanged;
+        _scanner.FilesChanged += ScannerOnFilesChanged;
         _scanner.ArtworkChanged += ScannerOnArtworkChanged;
         _sleepTimer.Expired += (_, _) => _ = _audio.StopAsync();
         _shortcuts.ActionInvoked += ShortcutsOnActionInvoked;
@@ -153,6 +206,9 @@ public sealed class MainViewModel : ObservableObject
     public ObservableCollection<QueueEntryViewModel> Queue { get; } = new ObservableRangeCollection<QueueEntryViewModel>();
     public ObservableCollection<LyricLineViewModel> Lyrics { get; } = new ObservableRangeCollection<LyricLineViewModel>();
     public ObservableCollection<AudioDeviceInfo> OutputDevices { get; } = new ObservableRangeCollection<AudioDeviceInfo>();
+    public ObservableCollection<LibrarySourceStatus> LibrarySources { get; } = new ObservableRangeCollection<LibrarySourceStatus>();
+    public ObservableCollection<DuplicateTrackGroup> DuplicateGroups { get; } = new ObservableRangeCollection<DuplicateTrackGroup>();
+    public string DuplicateScanStatus { get => _duplicateScanStatus; private set => Set(ref _duplicateScanStatus, value); }
 
     public Track? SelectedTrack
     {
@@ -178,13 +234,14 @@ public sealed class MainViewModel : ObservableObject
         }
     }
     public bool HasCurrentTrack => CurrentTrack is not null;
-    public bool HasLibrary => _allTracks.Count > 0;
+    public bool HasLibrary => _allTracks.Any(track => !track.IsMissing);
+    public bool HasMissingTracks => _allTracks.Any(track => track.IsMissing);
     public bool HasBrowseTracks => BrowseTracks.Count > 0;
     public int BrowseTrackSourceCount => _activeTrackPresentation?.Source.Count ?? BrowseTracks.Count;
     public bool HasQueue => Queue.Count > 0;
     public bool IsGroupView => !IsCollectionDetailOpen && CurrentView is "Albums" or "Artists" or "Genres";
     public bool IsCollectionDetailView => IsCollectionDetailOpen && CurrentView is "Albums" or "Artists" or "Genres";
-    public bool IsTrackView => !IsCollectionDetailOpen && CurrentView is "Songs" or "Favorites";
+    public bool IsTrackView => !IsCollectionDetailOpen && CurrentView is "Songs" or "Favorites" or "Missing";
     public bool IsSidebarView => !IsCollectionDetailOpen && CurrentView is "Folders" or "Playlists";
     public bool IsNowPlayingView => !IsCollectionDetailOpen && CurrentView == "Now Playing";
     public string CurrentTitle => CurrentTrack?.Title ?? "Nothing playing";
@@ -229,6 +286,11 @@ public sealed class MainViewModel : ObservableObject
     public double DurationSeconds { get => _durationSeconds; private set => Set(ref _durationSeconds, Math.Max(1, value)); }
     public double Volume { get => _volume; set { if (Set(ref _volume, Math.Clamp(value, 0, 1))) QueueVolumeUpdate(_volume); } }
     public bool IsScanning { get => _isScanning; private set => Set(ref _isScanning, value); }
+    public bool IsLibraryReady { get => _isLibraryReady; private set => Set(ref _isLibraryReady, value); }
+    public bool IsSafeMode { get => _isSafeMode; private set => Set(ref _isSafeMode, value); }
+    public bool IsScanPaused => _scanner.State == ScanLifecycleState.Paused;
+    public string ScanPauseGlyph => IsScanPaused ? "\uE768" : "\uE769";
+    public string ScanPauseText => IsScanPaused ? "Resume library scan" : "Pause library scan";
     public bool QueueVisible { get => _queueVisible; set { if (Set(ref _queueVisible, value)) _ = _settings.UpdateAsync(x => x.QueuePanelVisible = value); } }
     public bool AnimationsEnabled { get => _animationsEnabled; set { if (Set(ref _animationsEnabled, value)) _ = _settings.UpdateAsync(x => x.AnimationsEnabled = value); } }
     public bool DiagnosticsVisible { get => _diagnosticsVisible; set => Set(ref _diagnosticsVisible, value); }
@@ -303,6 +365,8 @@ public sealed class MainViewModel : ObservableObject
     public RelayCommand ToggleShuffleCommand { get; }
     public RelayCommand CycleRepeatCommand { get; }
     public AsyncRelayCommand ScanCommand { get; }
+    public RelayCommand ToggleScanPauseCommand { get; }
+    public RelayCommand CancelScanCommand { get; }
     public AsyncRelayCommand RefreshArtworkCacheCommand { get; }
     public AsyncRelayCommand ClearArtworkCacheCommand { get; }
     public AsyncRelayCommand RebuildArtworkCacheCommand { get; }
@@ -312,24 +376,57 @@ public sealed class MainViewModel : ObservableObject
     public AsyncRelayCommand SeekLyricCommand { get; }
     public AsyncRelayCommand PlayQueueEntryCommand { get; }
     public AsyncRelayCommand RemoveQueueEntryCommand { get; }
+    public AsyncRelayCommand RemoveMissingTrackCommand { get; }
     public RelayCommand PlayQueueEntryNextCommand { get; }
     public RelayCommand ToggleDiagnosticsCommand { get; }
 
-    public Task InitializeAsync() =>
-        _diagnostics.MeasureAsync("startup", "view-model.initialize", InitializeCoreAsync);
+    public async Task InitializeAsync()
+    {
+        await InitializeShellAsync();
+        await InitializeLibraryAsync();
+    }
 
-    private async Task InitializeCoreAsync()
+    public void EnableSafeMode()
+    {
+        IsSafeMode = true;
+        _animationsEnabled = false;
+        _queueVisible = false;
+        Raise(nameof(AnimationsEnabled));
+        Raise(nameof(QueueVisible));
+    }
+
+    public Task InitializeShellAsync() =>
+        _shellInitialization ??= _diagnostics.MeasureAsync(
+            "startup",
+            "view-model.shell-initialize",
+            InitializeShellCoreAsync);
+
+    public Task InitializeLibraryAsync() =>
+        _libraryInitialization ??= _diagnostics.MeasureAsync(
+            "startup",
+            "view-model.library-initialize",
+            InitializeLibraryCoreAsync);
+
+    private async Task InitializeShellCoreAsync()
     {
         await _settings.InitializeAsync(_lifetime.Token);
-        await _repository.InitializeAsync(_lifetime.Token);
         _volume = _settings.Current.Volume; Raise(nameof(Volume));
-        _queueVisible = _settings.Current.QueuePanelVisible; Raise(nameof(QueueVisible));
+        _queueVisible = !IsSafeMode && _settings.Current.QueuePanelVisible; Raise(nameof(QueueVisible));
         _albumTileSize = _settings.Current.AlbumTileSize; Raise(nameof(AlbumTileSize)); Raise(nameof(GalleryItemWidth)); Raise(nameof(GalleryItemHeight));
-        _animationsEnabled = _settings.Current.AnimationsEnabled; Raise(nameof(AnimationsEnabled));
+        _animationsEnabled = !IsSafeMode && _settings.Current.AnimationsEnabled; Raise(nameof(AnimationsEnabled));
         _artworkCacheMegabytes = _settings.Current.ArtworkCacheMegabytes;
         Raise(nameof(ArtworkCacheMegabytes)); Raise(nameof(ArtworkCacheLimitText));
-        await RefreshLibraryAsync(cancellationToken: _lifetime.Token);
-        await RefreshArtworkCacheStatsAsync();
+        _shortcuts.Refresh(_settings.Current.Shortcuts);
+        StatusText = IsSafeMode
+            ? "Safe mode · session restore and visual effects are disabled"
+            : "Loading your library in the background…";
+    }
+
+    private async Task InitializeLibraryCoreAsync()
+    {
+        await _repository.InitializeAsync(_lifetime.Token);
+        var refreshLibrary = RefreshLibraryAsync(cancellationToken: _lifetime.Token);
+        var refreshArtwork = RefreshArtworkCacheStatsAsync();
         Replace(OutputDevices, await _audio.GetOutputDevicesAsync(_lifetime.Token));
         var profile = _settings.Current.OutputProfiles.FirstOrDefault(x => x.DeviceId == _settings.Current.ActiveOutputDeviceId) ?? _settings.Current.OutputProfiles[0];
         await _audio.SetPlaybackOptionsAsync(new AudioPlaybackOptions
@@ -347,9 +444,12 @@ public sealed class MainViewModel : ObservableObject
         }, _lifetime.Token);
         await _audio.ConfigureOutputAsync(profile, _lifetime.Token);
         await _audio.SetVolumeAsync(_volume, _lifetime.Token);
-        _shortcuts.Refresh(_settings.Current.Shortcuts);
+        await Task.WhenAll(refreshLibrary, refreshArtwork);
         _scanner.StartWatching(_settings.Current.LibraryFolders);
-        await RestoreSessionAsync();
+        Replace(LibrarySources, _scanner.SourceStatuses);
+        if (!IsSafeMode)
+            await RestoreSessionAsync();
+        IsLibraryReady = true;
     }
 
     public async Task AddLibraryFolderAsync(string folder)
@@ -357,6 +457,50 @@ public sealed class MainViewModel : ObservableObject
         await _settings.UpdateAsync(x => { if (!x.LibraryFolders.Contains(folder, StringComparer.OrdinalIgnoreCase)) x.LibraryFolders.Add(folder); }, _lifetime.Token);
         _scanner.StartWatching(_settings.Current.LibraryFolders);
         await ScanAsync();
+    }
+
+    internal async Task OpenLaunchTargetsAsync(IEnumerable<string> targets)
+    {
+        await InitializeLibraryAsync();
+        var normalized = targets
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(Path.GetFullPath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var folders = normalized.Where(Directory.Exists).ToArray();
+        if (folders.Length > 0)
+        {
+            await _settings.UpdateAsync(settings =>
+            {
+                foreach (var folder in folders)
+                    if (!settings.LibraryFolders.Contains(folder, StringComparer.OrdinalIgnoreCase))
+                        settings.LibraryFolders.Add(folder);
+            }, _lifetime.Token);
+            _scanner.StartWatching(_settings.Current.LibraryFolders);
+            await ScanAsync();
+        }
+
+        var firstFile = normalized.FirstOrDefault(File.Exists);
+        if (firstFile is null) return;
+        try
+        {
+            var track = await _repository.GetByPathAsync(firstFile, _lifetime.Token)
+                ?? await _metadataReader.ReadAsync(firstFile, _lifetime.Token);
+            _queue.Replace([track]);
+            await ChangeTrackAsync(track);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException
+                or NotSupportedException or InvalidDataException)
+        {
+            StatusText = $"Could not open {Path.GetFileName(firstFile)} · {exception.GetBaseException().Message}";
+            _applicationLog.Write(
+                ApplicationLogLevel.Warning,
+                "launch",
+                "open-target-failed",
+                new Dictionary<string, object?> { ["path"] = firstFile },
+                exception);
+        }
     }
 
     public Task SeekAsync(double seconds) => _audio.SeekAsync(TimeSpan.FromSeconds(Math.Clamp(seconds, 0, DurationSeconds)), _lifetime.Token);
@@ -462,12 +606,28 @@ public sealed class MainViewModel : ObservableObject
         var tracks = string.IsNullOrWhiteSpace(query)
             ? await _repository.GetAllAsync(cancellationToken)
             : await _repository.SearchAsync(query, 5000, cancellationToken);
-        var groups = await Task.Run(() =>
+        LibraryGroupSnapshot groups;
+        await _groupingGate.WaitAsync(cancellationToken);
+        try
         {
-            using var scope = _diagnostics.Measure("library", "group-construction",
-                _diagnostics.Enabled ? new Dictionary<string, object?> { ["tracks"] = tracks.Count } : null);
-            return BuildGroups(tracks);
-        }, cancellationToken);
+            groups = await Task.Run(() =>
+            {
+                using var scope = _diagnostics.Measure(
+                    "library",
+                    "group-index-reset",
+                    _diagnostics.Enabled
+                        ? new Dictionary<string, object?>
+                        {
+                            ["tracks"] = tracks.Count
+                        }
+                        : null);
+                return _groupingIndex.Reset(tracks);
+            }, cancellationToken);
+        }
+        finally
+        {
+            _groupingGate.Release();
+        }
         IReadOnlyList<LibraryCardViewModel> playlistCards;
         using (_diagnostics.Measure("library", "playlist-card-construction"))
             playlistCards = await BuildPlaylistCardsAsync(query, cancellationToken);
@@ -492,14 +652,26 @@ public sealed class MainViewModel : ObservableObject
             _activeTrackPresentation = null;
             Replace(Albums, groups.Albums); Replace(Artists, groups.Artists); Replace(Genres, groups.Genres); Replace(Folders, groups.Folders); Replace(Playlists, playlistCards);
             StatusText = tracks.Count == 0 ? (_settings.Current.LibraryFolders.Count == 0 ? "Add a music folder to begin" : "No matching tracks") : $"{tracks.Count:N0} tracks · {groups.Albums.Count:N0} albums · {groups.Artists.Count:N0} artists";
+            var availableCount = tracks.Count(track => !track.IsMissing);
+            StatusText = availableCount == 0
+                ? (_settings.Current.LibraryFolders.Count == 0
+                    ? "Add a music folder to begin"
+                    : tracks.Count > 0
+                        ? $"{tracks.Count:N0} files are currently missing"
+                        : "No matching tracks")
+                : $"{availableCount:N0} tracks · {groups.Albums.Count:N0} albums · {groups.Artists.Count:N0} artists";
             Raise(nameof(HasLibrary));
+            Raise(nameof(HasMissingTracks));
             ApplyCurrentView(true);
         });
     }
 
     private static LibraryGroups BuildGroups(IReadOnlyList<Track> tracks)
     {
-        var indexed = tracks.Select((track, index) => new IndexedTrack(index, track)).ToArray();
+        var indexed = tracks
+            .Select((track, index) => new IndexedTrack(index, track))
+            .Where(item => !item.Track.IsMissing)
+            .ToArray();
         var albums = indexed.GroupBy(x => new { Album = x.Track.DisplayAlbum, Artist = string.IsNullOrWhiteSpace(x.Track.AlbumArtist) ? x.Track.DisplayArtist : x.Track.AlbumArtist })
             .Select(group =>
             {
@@ -676,12 +848,26 @@ public sealed class MainViewModel : ObservableObject
             case "Playlists": ViewSubtitle = $"{Playlists.Count:N0} saved and smart playlists"; SetSidebarGroups(Playlists); SelectDefault(Playlists, resetSelection, selectFirst: false); break;
             case "Favorites":
                 ViewSubtitle = "Tracks you have marked as loved";
-                SetBrowseTracks(_allTracks.Where(x => x.IsLoved).OrderBy(x => x.Artist).ThenBy(x => x.Album).ThenBy(x => x.TrackNumber), "Favorites", $"{_allTracks.Count(x => x.IsLoved):N0} loved tracks", PrimaryViewStateKey);
+                SetBrowseTracks(_allTracks.Where(x => !x.IsMissing && x.IsLoved).OrderBy(x => x.Artist).ThenBy(x => x.Album).ThenBy(x => x.TrackNumber), "Favorites", $"{_allTracks.Count(x => !x.IsMissing && x.IsLoved):N0} loved tracks", PrimaryViewStateKey);
                 break;
             case "Songs":
-                ViewSubtitle = $"{_allTracks.Count:N0} tracks, stored offline";
-                SetBrowseTracks(_allTracks, "All songs", StatusText, PrimaryViewStateKey, initialCount: 500);
+            {
+                var available = _allTracks.Where(track => !track.IsMissing).ToArray();
+                ViewSubtitle = $"{available.Length:N0} tracks, stored offline";
+                SetBrowseTracks(available, "All songs", StatusText, PrimaryViewStateKey, initialCount: 500);
                 break;
+            }
+            case "Missing":
+            {
+                var missing = _allTracks.Where(track => track.IsMissing).ToArray();
+                ViewSubtitle = $"{missing.Length:N0} files need attention";
+                SetBrowseTracks(
+                    missing,
+                    "Missing files",
+                    "Locate a moved file, remove its library record, or reconnect its source.",
+                    PrimaryViewStateKey);
+                break;
+            }
             case "Now Playing":
                 SetContentViewStateKey(PrimaryViewStateKey);
                 ViewSubtitle = CurrentTrack is null ? "Choose a track to begin" : CurrentArtist;
@@ -821,7 +1007,12 @@ public sealed class MainViewModel : ObservableObject
         var presentation = _galleryViews.GetOrCreate(
             PrimaryViewStateKey,
             () => groups,
-            28,
+            // Gallery cards are already grouped and allocated before the view is
+            // selected.  Giving WPF the complete reference list makes the
+            // virtualizing panel's extent authoritative and avoids relying on a
+            // near-bottom ScrollChanged notification to reveal the next page.
+            // Only visible ListBoxItems and artwork Images are still realized.
+            int.MaxValue,
             out var cacheHit);
         using var scope = _diagnostics.Measure("view", "gallery-application",
             _diagnostics.Enabled ? new Dictionary<string, object?>
@@ -1041,11 +1232,423 @@ public sealed class MainViewModel : ObservableObject
     private async Task ScanAsync()
     {
         if (_settings.Current.LibraryFolders.Count == 0) { StatusText = "Add a music folder first"; return; }
-        try { IsScanning = true; await _scanner.ScanAsync(_settings.Current.LibraryFolders, _settings.Current.ExcludedFolders, _lifetime.Token); await RefreshLibraryAsync(SearchText, _lifetime.Token); }
-        finally { IsScanning = false; }
+        try
+        {
+            IsScanning = true;
+            UpdateScanState();
+            _activeScanTask = _scanner.ScanAsync(
+                _settings.Current.LibraryFolders,
+                _settings.Current.ExcludedFolders,
+                _lifetime.Token);
+            await _activeScanTask;
+            await RefreshLibraryAsync(SearchText, _lifetime.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            if (!_lifetime.IsCancellationRequested)
+                StatusText = "Library scan cancelled · progress will resume next time";
+        }
+        finally
+        {
+            _activeScanTask = null;
+            IsScanning = false;
+            UpdateScanState();
+        }
     }
 
     private void ScannerOnArtworkChanged(string path) => _artworkImages.InvalidatePath(path);
+
+    private void ScannerOnFilesChanged(
+        object? sender,
+        LibraryFilesChangedEventArgs args)
+    {
+        // A scan explicitly started by this view model performs its own refresh
+        // after completion. Watcher and overflow-rescan changes arrive here.
+        if (_activeScanTask is not null) return;
+        lock (_pendingLibraryChangeGate)
+            _pendingLibraryChanges.AddRange(args.Changes);
+
+        var previous = _libraryChangeCancellation;
+        previous?.Cancel();
+        previous?.Dispose();
+        _libraryChangeCancellation =
+            CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        var token = _libraryChangeCancellation.Token;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(180, token);
+                LibraryFileChange[] changes;
+                lock (_pendingLibraryChangeGate)
+                {
+                    changes = _pendingLibraryChanges.ToArray();
+                    _pendingLibraryChanges.Clear();
+                }
+
+                if (changes.Length == 0) return;
+                if (!string.IsNullOrWhiteSpace(SearchText)
+                    || changes.Any(change =>
+                        change.Kind == LibraryFileChangeKind.FullRefresh))
+                {
+                    await RefreshLibraryAsync(SearchText, token);
+                    return;
+                }
+
+                await ApplyLibraryChangesAsync(changes, token);
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception exception)
+            {
+                _applicationLog.Write(
+                    ApplicationLogLevel.Warning,
+                    "library",
+                    "watcher-refresh-failed",
+                    new Dictionary<string, object?>
+                    {
+                        ["changes"] = args.Changes.Count,
+                        ["fullRefresh"] = args.RequiresFullRefresh
+                    },
+                    exception);
+            }
+        }, token);
+    }
+
+    private async Task ApplyLibraryChangesAsync(
+        IReadOnlyList<LibraryFileChange> changes,
+        CancellationToken cancellationToken)
+    {
+        var trackUpdates = new List<LibraryTrackUpdate>(changes.Count);
+        foreach (var change in changes)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var track = change.Kind == LibraryFileChangeKind.FullRefresh
+                ? null
+                : await _repository.GetByPathAsync(
+                    change.Path,
+                    cancellationToken);
+            trackUpdates.Add(new LibraryTrackUpdate(change, track));
+        }
+
+        LibraryGroupingUpdate update;
+        await _groupingGate.WaitAsync(cancellationToken);
+        try
+        {
+            update = await Task.Run(
+                () => _groupingIndex.Apply(trackUpdates),
+                cancellationToken);
+        }
+        finally
+        {
+            _groupingGate.Release();
+        }
+
+        await Application.Current.Dispatcher.InvokeAsync(() =>
+        {
+            _allTracks = update.Tracks;
+            foreach (var mutation in update.Mutations)
+                ApplyGroupMutation(mutation);
+
+            // Folder/sidebar and track presentations are intentionally paged
+            // copies. Invalidate only those projections; the gallery uses its
+            // complete ObservableCollection as a live virtualized source.
+            if (update.AffectedKinds.Contains(
+                    "Folder",
+                    StringComparer.OrdinalIgnoreCase))
+                _sidebarViews.Remove("primary:Folders");
+            _trackViews.Clear();
+            _activeTrackPresentation = null;
+
+            var affectedViews = update.AffectedKinds
+                .Select(kind => kind + "s")
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (CurrentView is "Songs" or "Favorites" or "Missing"
+                || affectedViews.Contains(CurrentView))
+                ApplyCurrentView(false);
+
+            var availableCount = _allTracks.Count(track => !track.IsMissing);
+            StatusText =
+                $"{availableCount:N0} tracks · {Albums.Count:N0} albums · {Artists.Count:N0} artists";
+            Raise(nameof(HasLibrary));
+            Raise(nameof(HasMissingTracks));
+        });
+
+        _applicationLog.Write(
+            ApplicationLogLevel.Information,
+            "library",
+            "watcher-groups-updated",
+            new Dictionary<string, object?>
+            {
+                ["changes"] = changes.Count,
+                ["affectedGroups"] = update.Mutations.Count,
+                ["affectedKinds"] = string.Join(
+                    ",",
+                    update.AffectedKinds)
+            });
+    }
+
+    private void ApplyGroupMutation(LibraryGroupMutation mutation)
+    {
+        var target = mutation.Kind switch
+        {
+            "Album" => Albums,
+            "Artist" => Artists,
+            "Genre" => Genres,
+            "Folder" => Folders,
+            _ => null
+        };
+        if (target is null) return;
+
+        var existingIndex = -1;
+        for (var index = 0; index < target.Count; index++)
+        {
+            if (!target[index].Kind.Equals(
+                    mutation.Kind,
+                    StringComparison.OrdinalIgnoreCase)
+                || !target[index].Key.Equals(
+                    mutation.Key,
+                    StringComparison.OrdinalIgnoreCase))
+                continue;
+            existingIndex = index;
+            break;
+        }
+
+        var wasSelected = existingIndex >= 0
+                          && ReferenceEquals(
+                              SelectedCard,
+                              target[existingIndex]);
+        if (existingIndex >= 0) target.RemoveAt(existingIndex);
+        if (mutation.Replacement is null)
+        {
+            if (wasSelected) SelectedCard = null;
+            return;
+        }
+
+        var insertionIndex = 0;
+        while (insertionIndex < target.Count
+               && CompareCards(
+                   target[insertionIndex],
+                   mutation.Replacement) <= 0)
+            insertionIndex++;
+        target.Insert(insertionIndex, mutation.Replacement);
+        if (!wasSelected) return;
+        mutation.Replacement.IsSelected = true;
+        SelectedCard = mutation.Replacement;
+    }
+
+    private static int CompareCards(
+        LibraryCardViewModel left,
+        LibraryCardViewModel right)
+    {
+        var title = StringComparer.CurrentCultureIgnoreCase.Compare(
+            left.Title,
+            right.Title);
+        return title != 0
+            ? title
+            : StringComparer.OrdinalIgnoreCase.Compare(left.Key, right.Key);
+    }
+
+    public async Task RelinkMissingTrackAsync(
+        Track track,
+        string replacementPath)
+    {
+        if (!track.IsMissing) return;
+        var replacement = await _metadataReader.ReadAsync(
+            replacementPath,
+            _lifetime.Token);
+        var artwork = await _artwork.GetOrCreateAsync(
+            replacementPath,
+            _lifetime.Token);
+        if (artwork is not null)
+            replacement = replacement with { ArtworkPath = artwork };
+        await _repository.RelinkMissingAsync(
+            track.Id,
+            replacement,
+            _lifetime.Token);
+        await RefreshLibraryAsync(SearchText, _lifetime.Token);
+        StatusText = $"Relinked {track.Title}";
+    }
+
+    public async Task ExportDiagnosticsAsync(string destination)
+    {
+        await _diagnosticsBundles.ExportAsync(
+            destination,
+            _lifetime.Token);
+        StatusText = "Diagnostics bundle exported";
+    }
+
+    public async Task ExportSettingsAsync(string destination)
+    {
+        await _settings.ExportAsync(destination, _lifetime.Token);
+        StatusText = "Settings exported";
+    }
+
+    public async Task ImportSettingsAsync(string source)
+    {
+        await _settings.ImportAsync(source, _lifetime.Token);
+        await ApplyImportedSettingsAsync();
+        StatusText = "Settings imported";
+    }
+
+    public async Task ResetSettingsAsync(SettingsResetScope scope)
+    {
+        await _settings.ResetAsync(scope, _lifetime.Token);
+        await ApplyImportedSettingsAsync();
+        StatusText = $"{scope} settings reset";
+    }
+
+    public async Task ExportUserDataBackupAsync(string destination)
+    {
+        await _userDataBackups.ExportAsync(
+            destination,
+            _lifetime.Token);
+        StatusText = "User-data backup exported";
+    }
+
+    public async Task RestoreUserDataBackupAsync(string source)
+    {
+        _scanner.StopWatching();
+        await _userDataBackups.RestoreAsync(
+            source,
+            _lifetime.Token);
+        await ApplyImportedSettingsAsync();
+        await RefreshLibraryAsync(
+            cancellationToken: _lifetime.Token);
+        _scanner.StartWatching(_settings.Current.LibraryFolders);
+        StatusText = "User-data backup restored";
+    }
+
+    public async Task FindContentDuplicatesAsync()
+    {
+        DuplicateScanStatus = "Analyzing same-size files…";
+        var groups = await _duplicates.FindContentDuplicatesAsync(
+            _lifetime.Token);
+        Replace(DuplicateGroups, groups);
+        var files = groups.Sum(group => group.Tracks.Count);
+        var reclaimable = groups.Sum(
+            group => group.ReclaimableBytes);
+        DuplicateScanStatus = groups.Count == 0
+            ? "No content-identical files found."
+            : $"{groups.Count:N0} groups · {files:N0} files · {FormatBytes(reclaimable)} potentially reclaimable";
+    }
+
+    private async Task ApplyImportedSettingsAsync()
+    {
+        _volume = _settings.Current.Volume;
+        _queueVisible =
+            !IsSafeMode && _settings.Current.QueuePanelVisible;
+        _albumTileSize = _settings.Current.AlbumTileSize;
+        _animationsEnabled =
+            !IsSafeMode && _settings.Current.AnimationsEnabled;
+        _artworkCacheMegabytes =
+            _settings.Current.ArtworkCacheMegabytes;
+        Raise(nameof(Volume));
+        Raise(nameof(QueueVisible));
+        Raise(nameof(AlbumTileSize));
+        Raise(nameof(GalleryItemWidth));
+        Raise(nameof(GalleryItemHeight));
+        Raise(nameof(AnimationsEnabled));
+        Raise(nameof(ArtworkCacheMegabytes));
+        Raise(nameof(ArtworkCacheLimitText));
+        _shortcuts.Refresh(_settings.Current.Shortcuts);
+        _scanner.StopWatching();
+        _scanner.StartWatching(_settings.Current.LibraryFolders);
+        var profile = _settings.Current.OutputProfiles.FirstOrDefault(
+                          item => item.DeviceId.Equals(
+                              _settings.Current.ActiveOutputDeviceId,
+                              StringComparison.OrdinalIgnoreCase))
+                      ?? _settings.Current.OutputProfiles[0];
+        await _audio.ConfigureOutputAsync(
+            profile,
+            _lifetime.Token);
+        await _audio.SetVolumeAsync(
+            _volume,
+            _lifetime.Token);
+    }
+
+    internal async Task RunIdleCleanupAsync()
+    {
+        TrimStack(_backHistory, 48);
+        TrimStack(_forwardHistory, 48);
+
+        var activeTrackKey = ContentViewStateKey;
+        _trackViews.RemoveWhere(
+            key => !key.StartsWith(
+                       "primary:",
+                       StringComparison.Ordinal)
+                   && !key.Equals(
+                       activeTrackKey,
+                       StringComparison.Ordinal));
+        foreach (var key in _trackSelections.Keys
+                     .Where(key => !key.StartsWith(
+                                 "primary:",
+                                 StringComparison.Ordinal)
+                             && !key.Equals(
+                                 activeTrackKey,
+                                 StringComparison.Ordinal))
+                     .Take(Math.Max(0, _trackSelections.Count - 48))
+                     .ToArray())
+            _trackSelections.Remove(key);
+
+        foreach (var pair in _playlistTrackLoads.ToArray())
+        {
+            if (pair.Value.IsValueCreated
+                && pair.Value.Value.IsCompleted)
+                _playlistTrackLoads.TryRemove(pair.Key, out _);
+        }
+
+        var retainedArtworkPaths = new HashSet<string>(
+            StringComparer.OrdinalIgnoreCase);
+        if (CurrentTrack is not null)
+            retainedArtworkPaths.Add(CurrentTrack.Path);
+        foreach (var entry in Queue)
+            retainedArtworkPaths.Add(entry.Track.Path);
+        foreach (var card in ArtworkResolutionPlanner.ForActiveView(
+                     CurrentView,
+                     IsCollectionDetailOpen,
+                     SelectedCard,
+                     GalleryGroups,
+                     SidebarCards))
+        {
+            if (card.RepresentativeTrack is not null)
+                retainedArtworkPaths.Add(card.RepresentativeTrack.Path);
+        }
+        foreach (var key in _resolvedArtwork.Keys)
+        {
+            if (!retainedArtworkPaths.Contains(key))
+                _resolvedArtwork.TryRemove(key, out _);
+        }
+
+        _artworkImages.TrimMemoryCache(4L * 1024 * 1024);
+        await _artwork.PruneAsync(_lifetime.Token);
+        _applicationLog.Write(
+            ApplicationLogLevel.Information,
+            "performance",
+            "idle-cleanup-completed",
+            new Dictionary<string, object?>
+            {
+                ["backHistory"] = _backHistory.Count,
+                ["forwardHistory"] = _forwardHistory.Count,
+                ["resolvedArtwork"] = _resolvedArtwork.Count,
+                ["completedPlaylistJobs"] = _playlistTrackLoads.Count
+            });
+    }
+
+    private static void TrimStack<T>(Stack<T> stack, int maximum)
+    {
+        if (stack.Count <= maximum) return;
+        var retained = stack.Take(maximum).Reverse().ToArray();
+        stack.Clear();
+        foreach (var item in retained) stack.Push(item);
+    }
+
+    private async Task RemoveMissingTrackAsync(Track? track)
+    {
+        if (track is not { IsMissing: true }) return;
+        await _repository.RemoveTracksAsync([track.Id], _lifetime.Token);
+        await RefreshLibraryAsync(SearchText, _lifetime.Token);
+        StatusText = $"Removed missing record for {track.Title}";
+    }
 
     private async Task PlaySelectedAsync()
     {
@@ -1059,7 +1662,9 @@ public sealed class MainViewModel : ObservableObject
         await ChangeTrackAsync(SelectedTrack);
     }
 
-    private async Task ChangeTrackAsync(Track? track)
+    private async Task ChangeTrackAsync(
+        Track? track,
+        HashSet<string>? failedPaths = null)
     {
         if (track is null) return;
         try
@@ -1071,12 +1676,60 @@ public sealed class MainViewModel : ObservableObject
             await _audio.LoadAsync(track, _lifetime.Token);
             var bookmark = track.Id > 0 ? await _repository.GetBookmarkAsync(track.Id, _lifetime.Token) : null;
             if (bookmark.HasValue && bookmark.Value > TimeSpan.Zero && bookmark.Value < track.Duration - TimeSpan.FromSeconds(10)) await _audio.SeekAsync(bookmark.Value, _lifetime.Token);
-            await _audio.QueueNextAsync(PeekUpcomingTrack(), _lifetime.Token);
+            try
+            {
+                await _audio.QueueNextAsync(
+                    PeekUpcomingTrack(),
+                    _lifetime.Token);
+            }
+            catch (Exception exception) when (TrackFailurePolicy.IsRecoverable(exception))
+            {
+                _applicationLog.Write(
+                    ApplicationLogLevel.Warning,
+                    "audio",
+                    "predecode-next-failed",
+                    exception: exception);
+            }
             await _audio.PlayAsync(_lifetime.Token);
             if (track.Id > 0) await _repository.RecordPlayAsync(track.Id, _lifetime.Token);
             LoadLyrics(track);
         }
-        catch (Exception ex) { StatusText = ex.Message; }
+        catch (Exception exception) when (TrackFailurePolicy.IsRecoverable(exception))
+        {
+            failedPaths ??= new HashSet<string>(
+                StringComparer.OrdinalIgnoreCase);
+            failedPaths.Add(track.Path);
+            StatusText =
+                $"Skipped {track.Title} · {TrackFailurePolicy.FriendlyMessage(exception)}";
+            _applicationLog.Write(
+                ApplicationLogLevel.Warning,
+                "audio",
+                "track-skipped",
+                new Dictionary<string, object?>
+                {
+                    ["path"] = track.Path,
+                    ["attempted"] = failedPaths.Count
+                },
+                exception);
+            var next = failedPaths.Count < _queue.Items.Count
+                ? _queue.Advance()
+                : null;
+            if (next is not null
+                && !failedPaths.Contains(next.Path))
+                await ChangeTrackAsync(next, failedPaths);
+            else
+                await _audio.StopAsync(_lifetime.Token);
+        }
+        catch (Exception exception)
+        {
+            StatusText = exception.Message;
+            _applicationLog.Write(
+                ApplicationLogLevel.Error,
+                "audio",
+                "track-load-failed",
+                new Dictionary<string, object?> { ["path"] = track.Path },
+                exception);
+        }
     }
 
     private async Task TogglePlaybackAsync()
@@ -1241,25 +1894,49 @@ public sealed class MainViewModel : ObservableObject
         ActiveLyric = active.Text;
     }
 
-    private void AudioOnStateChanged(object? sender, PlaybackSnapshot snapshot) => RunOnUi(() =>
+    private void AudioOnStateChanged(object? sender, PlaybackSnapshot snapshot)
     {
-        var track = snapshot.Track;
-        if (track is not null && _resolvedArtwork.TryGetValue(track.Path, out var artwork) && artwork is not null) track = track with { ArtworkPath = artwork };
-        CurrentTrack = track;
-        PlayGlyph = snapshot.State == PlaybackState.Playing ? "Ⅱ" : "▶";
-        DurationSeconds = snapshot.Duration.TotalSeconds;
-        DurationText = FormatTime(snapshot.Duration);
-        if (!_isUserSeeking)
+        var trackPath = snapshot.Track?.Path;
+        if (_lastLoggedPlaybackState != snapshot.State
+            || !string.Equals(_lastLoggedTrackPath, trackPath, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(_lastLoggedAudioError, snapshot.Error, StringComparison.Ordinal))
         {
-            PositionSeconds = snapshot.Position.TotalSeconds;
-            PositionText = FormatTime(snapshot.Position);
+            _lastLoggedPlaybackState = snapshot.State;
+            _lastLoggedTrackPath = trackPath;
+            _lastLoggedAudioError = snapshot.Error;
+            _applicationLog.Write(
+                string.IsNullOrWhiteSpace(snapshot.Error)
+                    ? ApplicationLogLevel.Information
+                    : ApplicationLogLevel.Error,
+                "audio",
+                "state-changed",
+                new Dictionary<string, object?>
+                {
+                    ["state"] = snapshot.State.ToString(),
+                    ["track"] = trackPath,
+                    ["error"] = snapshot.Error
+                });
         }
-        if (!string.IsNullOrWhiteSpace(snapshot.Error)) StatusText = snapshot.Error;
-        Raise(nameof(HasAudioDiagnostics)); Raise(nameof(DiagnosticHeadline)); Raise(nameof(DiagnosticMode)); Raise(nameof(DiagnosticSource)); Raise(nameof(DiagnosticOutput)); Raise(nameof(DiagnosticDecoder)); Raise(nameof(DiagnosticBuffer)); Raise(nameof(DiagnosticReason));
-        UpdateLyricsPosition(snapshot.Position);
-        _systemMedia.Update(snapshot with { Track = track }, HasPreviousTrack(), HasNextTrack());
-        if (CurrentView == "Now Playing") { ViewSubtitle = CurrentArtist; Raise(nameof(ViewTitle)); }
-    });
+        RunOnUi(() =>
+        {
+            var track = snapshot.Track;
+            if (track is not null && _resolvedArtwork.TryGetValue(track.Path, out var artwork) && artwork is not null) track = track with { ArtworkPath = artwork };
+            CurrentTrack = track;
+            PlayGlyph = snapshot.State == PlaybackState.Playing ? "Ⅱ" : "▶";
+            DurationSeconds = snapshot.Duration.TotalSeconds;
+            DurationText = FormatTime(snapshot.Duration);
+            if (!_isUserSeeking)
+            {
+                PositionSeconds = snapshot.Position.TotalSeconds;
+                PositionText = FormatTime(snapshot.Position);
+            }
+            if (!string.IsNullOrWhiteSpace(snapshot.Error)) StatusText = snapshot.Error;
+            Raise(nameof(HasAudioDiagnostics)); Raise(nameof(DiagnosticHeadline)); Raise(nameof(DiagnosticMode)); Raise(nameof(DiagnosticSource)); Raise(nameof(DiagnosticOutput)); Raise(nameof(DiagnosticDecoder)); Raise(nameof(DiagnosticBuffer)); Raise(nameof(DiagnosticReason));
+            UpdateLyricsPosition(snapshot.Position);
+            _systemMedia.Update(snapshot with { Track = track }, HasPreviousTrack(), HasNextTrack());
+            if (CurrentView == "Now Playing") { ViewSubtitle = CurrentArtist; Raise(nameof(ViewTitle)); }
+        });
+    }
 
     private void AudioOnTrackTransitioned(object? sender, TrackTransitionedEventArgs e) => _ = HandleTrackTransitionedAsync(e);
     private async Task HandleTrackTransitionedAsync(TrackTransitionedEventArgs e)
@@ -1420,9 +2097,62 @@ public sealed class MainViewModel : ObservableObject
 
     private void ScannerOnProgressChanged(object? sender, ScanProgress progress) => RunOnUi(() =>
     {
+        if (progress.IsComplete || progress.State != ScanLifecycleState.Running)
+            _applicationLog.Write(
+                progress.Failed > 0 ? ApplicationLogLevel.Warning : ApplicationLogLevel.Information,
+                "scanner",
+                progress.IsComplete ? "scan-completed" : "scan-state-changed",
+                new Dictionary<string, object?>
+                {
+                    ["state"] = progress.State.ToString(),
+                    ["discovered"] = progress.Discovered,
+                    ["processed"] = progress.Processed,
+                    ["added"] = progress.Added,
+                    ["updated"] = progress.Updated,
+                    ["failed"] = progress.Failed,
+                    ["resumed"] = progress.ResumedFromCheckpoint
+                });
         IsScanning = !progress.IsComplete;
-        StatusText = progress.IsComplete ? $"Scan complete · {progress.Added} added · {progress.Updated} updated · {progress.Failed} skipped" : $"Scanning {progress.Processed:N0} / {progress.Discovered:N0}";
+        StatusText = progress.IsComplete
+            ? $"Scan complete · {progress.Added} added · {progress.Updated} updated · {progress.Failed} skipped"
+            : progress.State switch
+            {
+                ScanLifecycleState.Paused => $"Scan paused · {progress.Processed:N0} / {progress.Discovered:N0}",
+                ScanLifecycleState.Cancelling => "Cancelling library scan…",
+                _ => $"{(progress.ResumedFromCheckpoint ? "Resuming scan" : "Scanning")} {progress.Processed:N0} / {progress.Discovered:N0}"
+            };
+        UpdateScanState();
     });
+
+    private void ScannerOnSourceStatusesChanged(object? sender, EventArgs args) =>
+        RunOnUi(() =>
+        {
+            var statuses = _scanner.SourceStatuses;
+            Replace(LibrarySources, statuses);
+            foreach (var source in statuses.Where(source => !source.IsOnline || source.Error is not null))
+                _applicationLog.Write(
+                    ApplicationLogLevel.Warning,
+                    "scanner",
+                    "source-unavailable",
+                    new Dictionary<string, object?>
+                    {
+                        ["root"] = source.Root,
+                        ["kind"] = source.Kind.ToString(),
+                        ["online"] = source.IsOnline,
+                        ["watching"] = source.IsWatching,
+                        ["error"] = source.Error
+                    });
+        });
+
+    private void UpdateScanState()
+    {
+        Raise(nameof(IsScanPaused));
+        Raise(nameof(ScanPauseGlyph));
+        Raise(nameof(ScanPauseText));
+        ScanCommand.RaiseCanExecuteChanged();
+        ToggleScanPauseCommand.RaiseCanExecuteChanged();
+        CancelScanCommand.RaiseCanExecuteChanged();
+    }
 
     private void QueueVolumeUpdate(double volume)
     {
@@ -1461,15 +2191,61 @@ public sealed class MainViewModel : ObservableObject
     }
     private static void RunOnUi(Action action) { if (Application.Current.Dispatcher.CheckAccess()) action(); else Application.Current.Dispatcher.BeginInvoke(action); }
 
-    public async Task ShutdownAsync()
+    internal void ReportLibraryInitializationFailure(Exception exception) =>
+        RunOnUi(() => StatusText = "Library could not be loaded · " + exception.GetBaseException().Message);
+
+    internal Task RetryLibraryInitializationAsync()
+    {
+        _libraryInitialization = null;
+        return InitializeLibraryAsync();
+    }
+
+    public Task ShutdownAsync() =>
+        _shutdownTask ??= ShutdownCoreAsync();
+
+    private async Task ShutdownCoreAsync()
     {
         _sessionSaveCancellation?.Cancel();
+        _libraryChangeCancellation?.Cancel();
+        _scanner.Cancel();
+        var activeScan = _activeScanTask;
+        if (activeScan is not null)
+        {
+            try { await activeScan.WaitAsync(TimeSpan.FromSeconds(5)); }
+            catch (OperationCanceledException) { }
+            catch (TimeoutException exception)
+            {
+                _applicationLog.Write(
+                    ApplicationLogLevel.Warning,
+                    "shutdown",
+                    "scan-cancel-timeout",
+                    exception: exception);
+            }
+        }
+        if (_audio.Snapshot.Track is { Id: > 0 } current
+            && _audio.Snapshot.Position > TimeSpan.Zero)
+            await _repository.SaveBookmarkAsync(
+                current.Id,
+                _audio.Snapshot.Position,
+                CancellationToken.None);
         await SaveSessionAsync(CancellationToken.None);
+        await _settings.UpdateAsync(
+            settings =>
+            {
+                settings.Volume = Volume;
+                settings.QueuePanelVisible = QueueVisible;
+            },
+            CancellationToken.None);
+        await _settings.SaveAsync(CancellationToken.None);
         _lifetime.Cancel(); _searchCancellation?.Cancel(); _artworkCancellation?.Cancel(); _queueArtworkCancellation?.Cancel(); _volumeCancellation?.Cancel(); _scanner.StopWatching();
         _scanner.ArtworkChanged -= ScannerOnArtworkChanged;
+        _scanner.ProgressChanged -= ScannerOnProgressChanged;
+        _scanner.SourceStatusesChanged -= ScannerOnSourceStatusesChanged;
+        _scanner.FilesChanged -= ScannerOnFilesChanged;
         _shortcuts.ActionInvoked -= ShortcutsOnActionInvoked; _systemMedia.CommandReceived -= SystemMediaOnCommandReceived;
-        await _settings.UpdateAsync(x => { x.Volume = Volume; x.QueuePanelVisible = QueueVisible; }, CancellationToken.None);
-        _searchCancellation?.Dispose(); _artworkCancellation?.Dispose(); _queueArtworkCancellation?.Dispose(); _sessionSaveCancellation?.Dispose(); _volumeCancellation?.Dispose(); _lifetime.Dispose();
+        await _scanner.DisposeAsync();
+        _searchCancellation?.Dispose(); _artworkCancellation?.Dispose(); _queueArtworkCancellation?.Dispose(); _sessionSaveCancellation?.Dispose(); _volumeCancellation?.Dispose(); _libraryChangeCancellation?.Dispose(); _lifetime.Dispose();
+        _applicationLog.Write(ApplicationLogLevel.Information, "shutdown", "state-flushed");
     }
 
     private sealed record LibraryGroups(IReadOnlyList<LibraryCardViewModel> Albums, IReadOnlyList<LibraryCardViewModel> Artists, IReadOnlyList<LibraryCardViewModel> Genres, IReadOnlyList<LibraryCardViewModel> Folders);

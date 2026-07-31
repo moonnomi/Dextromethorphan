@@ -68,6 +68,40 @@
                             <Button Style="{StaticResource PrimaryButton}" Command="{Binding ScanCommand}" Content="Rescan library" HorizontalAlignment="Left"/>
                         </StackPanel>
                     </Border>
+                    <ItemsControl ItemsSource="{Binding LibrarySources}" Margin="0,12,0,0">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource Card}" Padding="14" Margin="0,0,0,8">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                        <Ellipse Width="8" Height="8" VerticalAlignment="Top" Margin="0,5,0,0">
+                                            <Ellipse.Style><Style TargetType="Ellipse"><Setter Property="Fill" Value="#FFFFB454"/><Style.Triggers><DataTrigger Binding="{Binding IsOnline}" Value="True"><Setter Property="Fill" Value="#FF69D39B"/></DataTrigger></Style.Triggers></Style></Ellipse.Style>
+                                        </Ellipse>
+                                        <StackPanel Grid.Column="1" Margin="8,0,12,0">
+                                            <TextBlock Text="{Binding Root}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Text="{Binding Error}" Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                            <TextBlock Text="{Binding LastSuccessfulScan, StringFormat={}{0:g}}" Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,4,0,0">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding LastSuccessfulScan}" Value="{x:Null}">
+                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2" HorizontalAlignment="Right">
+                                            <TextBlock Text="{Binding Kind}" Foreground="{StaticResource TextMutedBrush}" FontSize="10" HorizontalAlignment="Right"/>
+                                            <TextBlock Text="{Binding IsWatching, StringFormat={}Watcher: {0}}" Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,4,0,0" HorizontalAlignment="Right"/>
+                                            <TextBlock Text="{Binding TrackCount, StringFormat={}{0:N0} tracks}" Foreground="{StaticResource AccentBrush}" FontSize="10" Margin="0,4,0,0" HorizontalAlignment="Right"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                     <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
                         <StackPanel>
                             <TextBlock Text="Artwork cache" FontWeight="SemiBold"/>
@@ -85,11 +119,96 @@
                             </StackPanel>
                         </StackPanel>
                     </Border>
+                    <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Duplicate analysis" FontWeight="SemiBold"/>
+                            <TextBlock Text="A read-only, cancellable SHA-256 comparison runs only for same-size available files. Nothing is removed automatically." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,5,0,10"/>
+                            <TextBlock Text="{Binding DuplicateScanStatus}" Foreground="{StaticResource AccentBrush}" FontSize="10" Margin="0,0,0,12"/>
+                            <Button Content="Find content duplicates" Click="FindDuplicates_Click" HorizontalAlignment="Left"/>
+                            <ItemsControl ItemsSource="{Binding DuplicateGroups}" Margin="0,12,0,0">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Background="#0FFFFFFF" CornerRadius="8" Padding="10" Margin="0,0,0,6">
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding Tracks.Count, StringFormat={}{0} identical files}" FontWeight="SemiBold"/>
+                                                <ItemsControl ItemsSource="{Binding Tracks}" Margin="0,5,0,0">
+                                                    <ItemsControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding Path}" Foreground="{StaticResource TextMutedBrush}" FontSize="9" TextTrimming="CharacterEllipsis"/></DataTemplate></ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
             </ScrollViewer>
         </TabItem>
         <TabItem Header="Appearance">
             <ScrollViewer VerticalScrollBarVisibility="Auto" ui:SmoothScrollBehavior.Enabled="True"><StackPanel Margin="34,28"><TextBlock Text="Appearance" FontSize="25" FontWeight="SemiBold"/><TextBlock Text="Library density and panel behavior" Foreground="{StaticResource TextMutedBrush}" Margin="0,4,0,22"/><Border Style="{StaticResource Card}" Padding="18"><StackPanel><TextBlock Text="Collection cover size" FontWeight="SemiBold"/><Slider Minimum="110" Maximum="210" Value="{Binding AlbumTileSize}" Margin="0,12,0,6"/><CheckBox Content="Show queue panel" IsChecked="{Binding QueueVisible}" Margin="0,14,0,0"/><CheckBox Content="Use interface animations" IsChecked="{Binding AnimationsEnabled}" Margin="0,12,0,0"/><TextBlock Text="Animations use WPF composition transforms only and can be disabled instantly." Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="24,5,0,0"/></StackPanel></Border></StackPanel></ScrollViewer>
+        </TabItem>
+        <TabItem Header="Diagnostics">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" ui:SmoothScrollBehavior.Enabled="True">
+                <StackPanel Margin="34,28">
+                    <TextBlock Text="Diagnostics" FontSize="25" FontWeight="SemiBold"/>
+                    <TextBlock Text="Private, local troubleshooting tools" Foreground="{StaticResource TextMutedBrush}" Margin="0,4,0,22"/>
+                    <Border Style="{StaticResource Card}" Padding="18">
+                        <StackPanel>
+                            <TextBlock Text="Export diagnostics bundle" FontWeight="SemiBold"/>
+                            <TextBlock Text="Includes redacted settings, rotating logs, device summaries, version, and database integrity/schema information. It never includes the music database or media files." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,5,0,14"/>
+                            <Button Style="{StaticResource PrimaryButton}" Content="Export bundle…" Click="ExportDiagnostics_Click" HorizontalAlignment="Left"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Safe mode" FontWeight="SemiBold"/>
+                            <TextBlock Text="Start with --safe-mode to skip session resume and disable animations/effects. Safe mode is also selected automatically after repeated incomplete startups." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,5,0,0"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+        </TabItem>
+        <TabItem Header="Data">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" ui:SmoothScrollBehavior.Enabled="True">
+                <StackPanel Margin="34,28">
+                    <TextBlock Text="Data and recovery" FontSize="25" FontWeight="SemiBold"/>
+                    <TextBlock Text="Portable settings and explicit local backups" Foreground="{StaticResource TextMutedBrush}" Margin="0,4,0,22"/>
+                    <Border Style="{StaticResource Card}" Padding="18">
+                        <StackPanel>
+                            <TextBlock Text="Settings" FontWeight="SemiBold"/>
+                            <TextBlock Text="Export or import validated JSON settings. Import never edits the library database or music files." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,5,0,14"/>
+                            <StackPanel Orientation="Horizontal">
+                                <Button Style="{StaticResource PrimaryButton}" Content="Export settings…" Click="ExportSettings_Click" Margin="0,0,8,0"/>
+                                <Button Content="Import settings…" Click="ImportSettings_Click"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
+                        <StackPanel>
+                            <TextBlock Text="User-data backup" FontWeight="SemiBold"/>
+                            <TextBlock Text="Includes settings, playlists, ratings, love state, play history, bookmarks, and the local library index. It does not include or modify audio files." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,5,0,14"/>
+                            <StackPanel Orientation="Horizontal">
+                                <Button Style="{StaticResource PrimaryButton}" Content="Create backup…" Click="ExportBackup_Click" Margin="0,0,8,0"/>
+                                <Button Content="Restore backup…" Click="RestoreBackup_Click"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Reset sections" FontWeight="SemiBold"/>
+                            <TextBlock Text="Reset one area without deleting the library database." Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,5,0,14"/>
+                            <WrapPanel>
+                                <Button Content="Appearance" Tag="Appearance" Click="ResetSettings_Click" Margin="0,0,8,8"/>
+                                <Button Content="Playback" Tag="Playback" Click="ResetSettings_Click" Margin="0,0,8,8"/>
+                                <Button Content="Library sources" Tag="Library" Click="ResetSettings_Click" Margin="0,0,8,8"/>
+                                <Button Content="Shortcuts" Tag="Shortcuts" Click="ResetSettings_Click" Margin="0,0,8,8"/>
+                                <Button Content="Session" Tag="Session" Click="ResetSettings_Click" Margin="0,0,8,8"/>
+                                <Button Content="All settings" Tag="All" Click="ResetSettings_Click" Margin="0,0,8,8"/>
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
         </TabItem>
         <TabItem Header="Shortcuts">
             <ScrollViewer VerticalScrollBarVisibility="Auto" ui:SmoothScrollBehavior.Enabled="True"><StackPanel Margin="34,28"><TextBlock Text="Shortcuts" FontSize="25" FontWeight="SemiBold"/><TextBlock Text="Keyboard, media-key, and mouse navigation" Foreground="{StaticResource TextMutedBrush}" Margin="0,4,0,22"/><Border Style="{StaticResource Card}" Padding="18"><StackPanel><TextBlock Text="Mouse4" FontWeight="SemiBold"/><TextBlock Text="Go back through view and collection history" Foreground="{StaticResource TextMutedBrush}" Margin="0,3,0,12"/><TextBlock Text="Mouse5" FontWeight="SemiBold"/><TextBlock Text="Go forward through view and collection history" Foreground="{StaticResource TextMutedBrush}" Margin="0,3,0,0"/></StackPanel></Border></StackPanel></ScrollViewer>

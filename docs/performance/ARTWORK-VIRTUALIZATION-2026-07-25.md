@@ -15,8 +15,8 @@ This pass addresses the dominant causes identified by the PERF-002 baseline and 
 - Decoded bitmaps are frozen before returning to the UI.
 - Concurrent requests for the same path and pixel width share one decode.
 - A strong 96 MB LRU cache bounds decoded artwork memory.
-- Recycled or unloaded image controls cancel their stale waiters and release their sources.
-- The gallery uses a virtualizing wrap panel with generator-backed container recycling. Cleanup walks realized generator positions from the end, recycles only positions outside the overscan window, and the performance workload validates the original item/data-context mapping after returning to the top.
+- Unloaded image controls cancel their stale waiters and release their sources.
+- The gallery uses a virtualizing wrap panel with generator-backed standard container cleanup. Cleanup walks realized generator positions from the end and removes only positions outside the overscan window. This still bounds the live visual tree to the buffered visible rows, while ensuring every newly realized card gets a freshly prepared template and artwork request.
 - Pixel offsets that remain inside the current realization row invalidate arrangement only; measure, cleanup, and generation run when the overscan row actually changes.
 - Folder/sidebar lists use recycling `VirtualizingStackPanel` containers.
 - Gallery pagination appends to a stable `ObservableCollection` instead of replacing its `ItemsSource`.
@@ -53,6 +53,8 @@ The generator-backed recycling and row-aware layout pass was measured in two fre
 | Settled working set | 288.8 MiB | 267.2 MiB |
 
 The workload materialized 500 cards, traversed the virtualized gallery, returned to the top, and verified the item/data-context mapping for every expected top-row container. The previous disappearing-card failure did not reproduce.
+
+That recycling result was later superseded. A visual run against the real 302-album library showed that large range changes could leave recycled image templates unloaded and the viewport completely blank even though the item/data-context mapping check passed. The gallery now uses standard virtualized removal, and the regression workload checks every realized artwork source at repeated paging and top/middle/bottom checkpoints. See [the gallery rendering regression](GALLERY-RENDERING-REGRESSION-2026-07-28.md).
 
 ## Remaining work
 

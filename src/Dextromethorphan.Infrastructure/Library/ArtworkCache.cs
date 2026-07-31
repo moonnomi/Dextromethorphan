@@ -24,7 +24,18 @@ public sealed class ArtworkCache(AppPaths paths, ISettingsService settings) : IA
             if (!File.Exists(target))
             {
                 var temporary = target + ".tmp";
-                await File.WriteAllBytesAsync(temporary, artwork.ToArray(), cancellationToken);
+                await using (var stream = new FileStream(
+                                 temporary,
+                                 FileMode.Create,
+                                 FileAccess.Write,
+                                 FileShare.None,
+                                 32 * 1024,
+                                 true))
+                {
+                    await stream.WriteAsync(artwork, cancellationToken);
+                    await stream.FlushAsync(cancellationToken);
+                    stream.Flush(flushToDisk: true);
+                }
                 File.Move(temporary, target, true);
             }
             File.SetLastWriteTimeUtc(target, DateTime.UtcNow);

@@ -77,6 +77,8 @@ Add `-Installer` when [Inno Setup 6](https://jrsoftware.org/isinfo.php) is insta
 - [Consumer-readiness roadmap](docs/ROADMAP.md)
 - [Performance fixtures and benchmark setup](docs/PERFORMANCE.md)
 - [Developer diagnostics and support bundles](docs/DIAGNOSTICS.md)
+- [Reliability, recovery, and data safety](docs/RELIABILITY.md)
+- [App-data and uninstall behavior](docs/APP-DATA.md)
 
 ## Project status
 

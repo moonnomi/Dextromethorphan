@@ -8,6 +8,7 @@ The performance-fixture tool creates deterministic, copyright-free library data 
 |---|---:|---:|---:|---:|---:|
 | 10k | 10,000 | 500 | 100 | 500 procedural covers | 20 |
 | 50k | 50,000 | 2,500 | 500 | 2,500 procedural covers | 100 |
+| 100k | 100,000 | 5,000 | 1,000 | 5,000 procedural covers | 100 |
 
 Multi-artist tracks add a small number of guest artist groups. Metadata also varies codec, sample rate, bit depth, genre, year, duration, ReplayGain, rating, love state, play count, last-played time, comments, and lyrics.
 
@@ -22,6 +23,7 @@ dotnet restore Dextromethorphan.slnx
 dotnet build Dextromethorphan.slnx -c Debug --no-restore
 .\scripts\New-PerformanceFixture.ps1 -Tracks 10000
 .\scripts\New-PerformanceFixture.ps1 -Tracks 50000
+.\scripts\New-PerformanceFixture.ps1 -Tracks 100000
 ```
 
 If local PowerShell policy blocks repository scripts, invoke them through `powershell -NoProfile -ExecutionPolicy Bypass -File`.
@@ -71,6 +73,7 @@ Build the Release app, then run:
 ```powershell
 .\scripts\Measure-PerformanceBaseline.ps1 -Tracks 10000
 .\scripts\Measure-PerformanceBaseline.ps1 -Tracks 50000
+.\scripts\Measure-PerformanceBaseline.ps1 -Tracks 100000
 ```
 
 The benchmark opens the normal application against the isolated fixture. Keep the window visible and unobstructed until it closes automatically. Results are written beneath the ignored `performance-results/` directory as individual JSON runs, an aggregate `summary.json`, and a readable `summary.md`.

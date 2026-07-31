@@ -11,7 +11,7 @@ VIEW-004 removes UI notification storms caused by clearing observable collection
 - Track and gallery presentations created by VIEW-003 are constructed before they are bound, avoiding observable add loops entirely on first activation.
 - `ObservableRangeCollection.ReplaceRange` materializes a streaming source once and mutates its backing items before notifying WPF.
 
-Incremental gallery paging still adds a bounded page without clearing the existing presentation; it is intentionally separate from the old clear-and-repopulate pattern.
+This result originally retained incremental gallery paging. The later gallery rendering hardening replaced it with one complete lightweight reference collection so input timing cannot strand the view on a partial library; visual containers and image decoding remain virtualized.
 
 ## Verification
 

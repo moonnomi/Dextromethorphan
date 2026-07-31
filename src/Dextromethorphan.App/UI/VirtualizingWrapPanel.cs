@@ -108,16 +108,23 @@ public sealed class VirtualizingWrapPanel : VirtualizingPanel, IScrollInfo
     private void CleanupItems(int startIndex, int endIndex)
     {
         var generator = ItemContainerGenerator;
-        var recyclingGenerator = generator as IRecyclingItemContainerGenerator;
         for (var childIndex = InternalChildren.Count - 1; childIndex >= 0; childIndex--)
         {
             var position = new GeneratorPosition(childIndex, 0);
             var itemIndex = generator.IndexFromGeneratorPosition(position);
             if (itemIndex >= startIndex && itemIndex <= endIndex) continue;
-            if (recyclingGenerator is not null)
-                recyclingGenerator.Recycle(position, 1);
-            else
-                generator.Remove(position, 1);
+            // WPF's recycling generator can return a reused ListBoxItem before
+            // its template bindings and attached artwork state have caught up
+            // with the new data item.  In a wrap panel that realizes disjoint
+            // ranges after a large pixel scroll, that can leave the viewport
+            // with zero prepared containers or Images cancelled by Unloaded.
+            //
+            // Removing containers is still virtualized (only the buffered
+            // visible rows exist), but makes each realization deterministic:
+            // a fresh container is prepared and its artwork request starts on
+            // Loaded.  Correctness matters more here than retaining a pool of
+            // roughly 20 very small ListBoxItems.
+            generator.Remove(position, 1);
             RemoveInternalChildRange(childIndex, 1);
         }
     }

@@ -1,5 +1,5 @@
 param(
-    [ValidateSet(10000, 50000)]
+    [ValidateSet(10000, 50000, 100000)]
     [int]$Tracks = 10000,
     [int]$Seed = 20260725,
     [ValidateRange(1, 10)]
@@ -21,7 +21,11 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$label = if ($Tracks -eq 10000) { '10k' } else { '50k' }
+$label = switch ($Tracks) {
+    10000 { '10k' }
+    50000 { '50k' }
+    100000 { '100k' }
+}
 if ([string]::IsNullOrWhiteSpace($Fixture)) {
     $Fixture = Join-Path $root "performance-fixtures\library-$label-seed-$Seed"
 }

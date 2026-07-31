@@ -52,4 +52,4 @@ The generated result directories are intentionally not committed. The fixtures, 
 
 ## Optimization outcome
 
-The release pass combines asynchronous/off-thread artwork decoding, bounded strong and persistent thumbnail caches, active-view request planning, generator-backed gallery recycling, row-aware layout invalidation, idle-only gallery paging, paged Songs, and 32-card Folder/Playlist presentation windows. The return-to-top benchmark also verifies that recycling restores the correct top-row item/data-context mappings, covering the prior disappearing-gallery regression.
+The release pass combines asynchronous/off-thread artwork decoding, bounded strong and persistent thumbnail caches, active-view request planning, a complete lightweight gallery source with bounded container realization, row-aware layout invalidation, paged Songs, and 32-card Folder/Playlist presentation windows. Gallery qualification now also verifies rendered artwork across repeated forward/reverse traversal checkpoints and captured top/middle/bottom images; see [the gallery rendering regression](GALLERY-RENDERING-REGRESSION-2026-07-28.md).

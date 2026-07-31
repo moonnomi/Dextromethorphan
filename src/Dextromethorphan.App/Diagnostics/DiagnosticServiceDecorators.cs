@@ -26,6 +26,26 @@ internal sealed class DiagnosticLibraryRepository(ILibraryRepository inner, Deve
         diagnostics.MeasureAsync("repository", "library.remove-missing", () => inner.RemoveMissingAsync(roots, cancellationToken),
             new Dictionary<string, object?> { ["roots"] = roots.Count });
 
+    public Task MarkMissingAsync(IReadOnlyCollection<string> paths, CancellationToken cancellationToken = default) =>
+        diagnostics.MeasureAsync("repository", "library.mark-missing", () => inner.MarkMissingAsync(paths, cancellationToken),
+            new Dictionary<string, object?> { ["paths"] = paths.Count });
+
+    public Task RelinkAsync(string previousPath, Track replacement, CancellationToken cancellationToken = default) =>
+        diagnostics.MeasureAsync("repository", "library.relink", () => inner.RelinkAsync(previousPath, replacement, cancellationToken));
+
+    public Task RelinkMissingAsync(long trackId, Track replacement, CancellationToken cancellationToken = default) =>
+        diagnostics.MeasureAsync("repository", "library.relink-missing", () => inner.RelinkMissingAsync(trackId, replacement, cancellationToken));
+
+    public Task RemoveTracksAsync(IReadOnlyCollection<long> trackIds, CancellationToken cancellationToken = default) =>
+        diagnostics.MeasureAsync("repository", "library.remove-tracks", () => inner.RemoveTracksAsync(trackIds, cancellationToken),
+            new Dictionary<string, object?> { ["tracks"] = trackIds.Count });
+
+    public Task<IReadOnlyList<Track>> GetMissingAsync(CancellationToken cancellationToken = default) =>
+        MeasureCountAsync("library.get-missing", () => inner.GetMissingAsync(cancellationToken));
+
+    public Task<long> CountUnderRootAsync(string root, CancellationToken cancellationToken = default) =>
+        diagnostics.MeasureAsync("repository", "library.count-source", () => inner.CountUnderRootAsync(root, cancellationToken));
+
     public Task<IReadOnlyList<Track>> GetAllAsync(CancellationToken cancellationToken = default) =>
         MeasureCountAsync("library.get-all", () => inner.GetAllAsync(cancellationToken));
 

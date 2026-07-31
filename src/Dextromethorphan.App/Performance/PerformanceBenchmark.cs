@@ -14,7 +14,8 @@ internal sealed record PerformanceBenchmarkOptions(
     string OutputPath,
     string RunKind,
     int ScanFileCount,
-    bool MeasureWorkloads)
+    bool MeasureWorkloads,
+    string? GalleryCaptureDirectory)
 {
     public static PerformanceBenchmarkOptions? Parse(IReadOnlyList<string> args)
     {
@@ -22,6 +23,7 @@ internal sealed record PerformanceBenchmarkOptions(
         var runKind = "warm";
         var scanFileCount = 1_000;
         var workloads = false;
+        string? galleryCaptureDirectory = null;
 
         for (var index = 0; index < args.Count; index++)
         {
@@ -39,6 +41,9 @@ internal sealed record PerformanceBenchmarkOptions(
                 case "--benchmark-workloads":
                     workloads = true;
                     break;
+                case "--gallery-capture-directory":
+                    galleryCaptureDirectory = RequireValue(args, ref index, "--gallery-capture-directory");
+                    break;
             }
         }
 
@@ -47,7 +52,14 @@ internal sealed record PerformanceBenchmarkOptions(
             throw new ArgumentException("--benchmark-kind must be cold or warm.");
         if (scanFileCount is < 100 or > 10_000)
             throw new ArgumentOutOfRangeException(nameof(args), "--benchmark-scan-files must be between 100 and 10000.");
-        return new PerformanceBenchmarkOptions(Path.GetFullPath(output), runKind, scanFileCount, workloads);
+        return new PerformanceBenchmarkOptions(
+            Path.GetFullPath(output),
+            runKind,
+            scanFileCount,
+            workloads,
+            string.IsNullOrWhiteSpace(galleryCaptureDirectory)
+                ? null
+                : Path.GetFullPath(galleryCaptureDirectory));
     }
 
     private static string RequireValue(IReadOnlyList<string> args, ref int index, string name)
@@ -80,6 +92,7 @@ internal sealed class PerformanceBenchmarkReport
     public required FramePerformanceMetrics AlbumScroll { get; init; }
     public required ResourcePerformanceMetrics Resources { get; init; }
     public required CpuPerformanceMetrics Cpu { get; init; }
+    public GalleryVisualRegressionMetrics? GalleryVisualRegression { get; init; }
     public ScanPerformanceMetrics? Scan { get; init; }
     public ConcurrentWorkloadPerformanceMetrics? ConcurrentWorkload { get; init; }
     public string? WorkloadError { get; init; }
@@ -116,6 +129,31 @@ internal sealed record PagedSongsPerformanceMetrics(
         SourceTracks > 500
         && InitialMaterializedTracks == 500
         && MaterializedTracksAfterNextPage == 1_000;
+}
+internal sealed record GalleryVisualRegressionMetrics(
+    int SourceCards,
+    int InitialMaterializedCards,
+    int FinalMaterializedCards,
+    int PageAdvances,
+    int Checkpoints,
+    int RealizedCardsChecked,
+    int ExpectedArtworkSources,
+    int RenderedArtworkSources,
+    int MappingFailures,
+    int MissingArtworkSources,
+    IReadOnlyList<string> Screenshots,
+    string Status)
+{
+    public bool Passed =>
+        SourceCards > 0
+        && InitialMaterializedCards == SourceCards
+        && FinalMaterializedCards == SourceCards
+        && Checkpoints > 0
+        && RealizedCardsChecked > 0
+        && ExpectedArtworkSources > 0
+        && ExpectedArtworkSources == RenderedArtworkSources
+        && MappingFailures == 0
+        && MissingArtworkSources == 0;
 }
 internal sealed record FramePerformanceMetrics(int Samples, double AverageMs, double P50Ms, double P95Ms, double P99Ms, double MaximumMs, int Over16_67Ms, int Over33_33Ms, int Over50Ms, int GalleryCardsLoaded);
 internal sealed record ResourcePerformanceMetrics(
@@ -198,6 +236,11 @@ internal static class PerformanceBenchmarkRunner
         var startupWorkingSet = process.WorkingSet64;
         var startupPeakWorkingSet = process.PeakWorkingSet64;
         var startupArtworkSources = window.ArtworkMetrics.ActiveImageSources;
+        GalleryVisualRegressionMetrics? galleryVisualRegression = null;
+        if (options.GalleryCaptureDirectory is not null)
+            galleryVisualRegression = await window.CaptureGalleryVisualRegressionAsync(
+                options.GalleryCaptureDirectory,
+                cancellationToken);
 
         var tabSwitches = await window.MeasureTabSwitchPerformanceAsync(cancellationToken);
         var navigationHistory = await window.MeasureNavigationHistoryPerformanceAsync(cancellationToken);
@@ -290,6 +333,7 @@ internal static class PerformanceBenchmarkRunner
                 idleCpu.Threads,
                 idleAnimations,
                 compositionState),
+            GalleryVisualRegression = galleryVisualRegression,
             Scan = scan,
             ConcurrentWorkload = concurrentWorkload,
             WorkloadError = workloadError
@@ -424,7 +468,7 @@ internal static class PerformanceBenchmarkRunner
         var repository = new SqliteLibraryRepository(paths);
         await repository.InitializeAsync(cancellationToken);
         var artwork = new ArtworkCache(paths, settings);
-        await using var scanner = new LibraryScanner(repository, new TagLibMetadataReader(), artwork);
+        await using var scanner = new LibraryScanner(repository, new TagLibMetadataReader(), artwork, paths);
         ScanProgress? final = null;
         scanner.ProgressChanged += (_, progress) => { if (progress.IsComplete) final = progress; };
         var timer = Stopwatch.StartNew();
@@ -519,7 +563,8 @@ internal static class PerformanceBenchmarkRunner
         await using var scanner = new LibraryScanner(
             repository,
             new TagLibMetadataReader(),
-            artwork);
+            artwork,
+            paths);
         ScanProgress? final = null;
         scanner.ProgressChanged += (_, progress) =>
         {

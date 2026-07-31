@@ -43,6 +43,105 @@ public sealed class PersistenceTests : IDisposable
     }
 
     [Fact]
+    public async Task SettingsRecoverInterruptedAtomicSaveAndLastGoodBackup()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var paths = new AppPaths(_root);
+        paths.EnsureCreated();
+        await File.WriteAllTextAsync(
+            paths.SettingsFile + ".tmp",
+            """{"SchemaVersion":3,"Volume":0.35,"Theme":"Dark"}""",
+            cancellationToken);
+
+        var interrupted = new JsonSettingsService(paths);
+        await interrupted.InitializeAsync(cancellationToken);
+        Assert.Equal(0.35, interrupted.Current.Volume);
+        Assert.False(File.Exists(paths.SettingsFile + ".tmp"));
+
+        await interrupted.UpdateAsync(
+            settings => settings.Volume = 0.72,
+            cancellationToken);
+        Assert.True(File.Exists(paths.SettingsFile + ".bak"));
+        await File.WriteAllTextAsync(
+            paths.SettingsFile,
+            "{ broken json",
+            cancellationToken);
+
+        var restored = new JsonSettingsService(paths);
+        await restored.InitializeAsync(cancellationToken);
+
+        Assert.Equal(0.35, restored.Current.Volume);
+        Assert.NotEmpty(Directory.GetFiles(_root, "settings.json.invalid-*"));
+    }
+
+    [Fact]
+    public void SettingsValidationRetainsOfflineSourcesAndNormalizesEveryRiskyField()
+    {
+        var offline = Path.Combine(_root, "offline-library");
+        var settings = new AppSettings
+        {
+            Theme = "unsupported",
+            AccentColor = "transparent",
+            FontFamily = "\0",
+            FontSize = double.NaN,
+            Volume = double.PositiveInfinity,
+            ReplayGainPreampDb = 999,
+            PlaybackSpeed = double.NegativeInfinity,
+            LibraryFolders = [offline, offline, "relative"],
+            ExcludedFolders = [Path.Combine(offline, "excluded")],
+            ActiveOutputDeviceId = "missing-device",
+            OutputProfiles =
+            [
+                new()
+                {
+                    DeviceId = "endpoint",
+                    Name = "",
+                    Mode = (WasapiMode)99,
+                    DsdMode = (DsdMode)99,
+                    FallbackPolicy = (OutputFallbackPolicy)99,
+                    BufferMilliseconds = -5,
+                    PreferredSampleRate = 999_999,
+                    PreferredBitDepth = 2,
+                    CrossfadeSeconds = 99
+                }
+            ],
+            PlaybackSession = new()
+            {
+                QueuePaths = [Path.Combine(offline, "missing.flac")],
+                CurrentIndex = 900,
+                PositionSeconds = double.NaN,
+                LastView = "Missing"
+            }
+        };
+
+        JsonSettingsService.Normalize(settings);
+
+        Assert.Equal("Dark", settings.Theme);
+        Assert.Equal("#FF8A3D", settings.AccentColor);
+        Assert.Equal("Segoe UI Variable Text", settings.FontFamily);
+        Assert.Equal(14, settings.FontSize);
+        Assert.Equal(0.82, settings.Volume);
+        Assert.Equal(20, settings.ReplayGainPreampDb);
+        Assert.Equal(1, settings.PlaybackSpeed);
+        Assert.Equal([Path.GetFullPath(offline)], settings.LibraryFolders);
+        Assert.Equal(
+            [Path.GetFullPath(Path.Combine(offline, "excluded"))],
+            settings.ExcludedFolders);
+        var profile = Assert.Single(settings.OutputProfiles);
+        Assert.Equal(WasapiMode.Shared, profile.Mode);
+        Assert.Equal(DsdMode.Disabled, profile.DsdMode);
+        Assert.Equal(OutputFallbackPolicy.SharedMode, profile.FallbackPolicy);
+        Assert.Equal(2, profile.BufferMilliseconds);
+        Assert.Equal(768_000, profile.PreferredSampleRate);
+        Assert.Equal(8, profile.PreferredBitDepth);
+        Assert.Equal(10, profile.CrossfadeSeconds);
+        Assert.Equal("endpoint", settings.ActiveOutputDeviceId);
+        Assert.Equal(0, settings.PlaybackSession.CurrentIndex);
+        Assert.Equal(0, settings.PlaybackSession.PositionSeconds);
+        Assert.Equal("Albums", settings.PlaybackSession.LastView);
+    }
+
+    [Fact]
     public async Task LibraryUpsertPreservesUserStateAndSearchesMetadata()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -174,7 +273,8 @@ public sealed class PersistenceTests : IDisposable
         await using var scanner = new LibraryScanner(
             repository,
             reader,
-            new ArtworkCache(paths, settings));
+            new ArtworkCache(paths, settings),
+            paths);
 
         await scanner.ScanAsync([mediaRoot], cancellationToken: cancellationToken);
         Assert.Equal(coverPng, (await repository.GetByPathAsync(media, cancellationToken))?.ArtworkPath);

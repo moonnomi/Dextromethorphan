@@ -69,6 +69,16 @@ public sealed class AppSettings
     ];
 }
 
+public enum SettingsResetScope
+{
+    Appearance,
+    Playback,
+    Library,
+    Shortcuts,
+    Session,
+    All
+}
+
 public sealed class PlaybackSessionSettings
 {
     public List<string> QueuePaths { get; set; } = [];
@@ -80,5 +90,60 @@ public sealed class PlaybackSessionSettings
     public string LastView { get; set; } = "Albums";
 }
 
-public sealed record ScanProgress(int Discovered, int Processed, int Added, int Updated, int Failed, string? CurrentPath, bool IsComplete);
+public enum ScanLifecycleState
+{
+    Idle,
+    Running,
+    Paused,
+    Cancelling
+}
+
+public enum LibrarySourceKind
+{
+    Local,
+    Removable,
+    Network,
+    Unknown
+}
+
+public sealed record ScanProgress(
+    int Discovered,
+    int Processed,
+    int Added,
+    int Updated,
+    int Failed,
+    string? CurrentPath,
+    bool IsComplete,
+    ScanLifecycleState State = ScanLifecycleState.Running,
+    bool ResumedFromCheckpoint = false);
+
+public sealed record LibrarySourceStatus(
+    string Root,
+    LibrarySourceKind Kind,
+    bool IsOnline,
+    bool IsWatching,
+    DateTimeOffset? LastSuccessfulScan,
+    string? Error,
+    long TrackCount = 0);
+
+public enum LibraryFileChangeKind
+{
+    AddedOrUpdated,
+    Missing,
+    Relinked,
+    FullRefresh
+}
+
+public sealed record LibraryFileChange(
+    LibraryFileChangeKind Kind,
+    string Path,
+    string? PreviousPath = null);
+
+public sealed class LibraryFilesChangedEventArgs(
+    IReadOnlyList<LibraryFileChange> changes) : EventArgs
+{
+    public IReadOnlyList<LibraryFileChange> Changes { get; } = changes;
+    public bool RequiresFullRefresh =>
+        Changes.Any(change => change.Kind == LibraryFileChangeKind.FullRefresh);
+}
 public sealed record LibraryStats(long TrackCount, long AlbumCount, long ArtistCount, TimeSpan TotalDuration);

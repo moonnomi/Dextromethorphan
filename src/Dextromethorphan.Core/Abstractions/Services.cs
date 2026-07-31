@@ -2,6 +2,26 @@ using Dextromethorphan.Core.Models;
 
 namespace Dextromethorphan.Core.Abstractions;
 
+public enum ApplicationLogLevel
+{
+    Debug,
+    Information,
+    Warning,
+    Error,
+    Critical
+}
+
+public interface IApplicationLog
+{
+    void Write(
+        ApplicationLogLevel level,
+        string category,
+        string operation,
+        IReadOnlyDictionary<string, object?>? data = null,
+        Exception? exception = null);
+    Task CompleteAsync(CancellationToken cancellationToken = default);
+}
+
 public interface ISettingsService
 {
     AppSettings Current { get; }
@@ -9,6 +29,9 @@ public interface ISettingsService
     Task InitializeAsync(CancellationToken cancellationToken = default);
     Task SaveAsync(CancellationToken cancellationToken = default);
     Task UpdateAsync(Action<AppSettings> update, CancellationToken cancellationToken = default);
+    Task ExportAsync(string path, CancellationToken cancellationToken = default);
+    Task ImportAsync(string path, CancellationToken cancellationToken = default);
+    Task ResetAsync(SettingsResetScope scope, CancellationToken cancellationToken = default);
 }
 
 public interface ILibraryRepository
@@ -19,6 +42,12 @@ public interface ILibraryRepository
     Task UpsertAsync(Track track, CancellationToken cancellationToken = default);
     Task UpsertBatchAsync(IReadOnlyCollection<Track> tracks, CancellationToken cancellationToken = default);
     Task RemoveMissingAsync(IReadOnlyCollection<string> roots, CancellationToken cancellationToken = default);
+    Task MarkMissingAsync(IReadOnlyCollection<string> paths, CancellationToken cancellationToken = default);
+    Task RelinkAsync(string previousPath, Track replacement, CancellationToken cancellationToken = default);
+    Task RelinkMissingAsync(long trackId, Track replacement, CancellationToken cancellationToken = default);
+    Task RemoveTracksAsync(IReadOnlyCollection<long> trackIds, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<Track>> GetMissingAsync(CancellationToken cancellationToken = default);
+    Task<long> CountUnderRootAsync(string root, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Track>> GetAllAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Track>> SearchAsync(string query, int limit = 250, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Track>> GetRecentlyAddedAsync(int limit = 100, CancellationToken cancellationToken = default);
@@ -82,9 +111,16 @@ public sealed record ArtworkCacheStats(
 public interface ILibraryScanner : IAsyncDisposable
 {
     bool IsScanning { get; }
+    ScanLifecycleState State { get; }
+    IReadOnlyList<LibrarySourceStatus> SourceStatuses { get; }
     event EventHandler<ScanProgress>? ProgressChanged;
+    event EventHandler? SourceStatusesChanged;
+    event EventHandler<LibraryFilesChangedEventArgs>? FilesChanged;
     event Action<string>? ArtworkChanged;
     Task ScanAsync(IEnumerable<string> roots, IEnumerable<string>? excluded = null, CancellationToken cancellationToken = default);
+    void Pause();
+    void Resume();
+    void Cancel();
     void StartWatching(IEnumerable<string> roots);
     void StopWatching();
 }

@@ -60,7 +60,7 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 
 ### View virtualization and state changes
 
-- [x] **P0 VIEW-001** Replace the gallery `WrapPanel` with a virtualizing wrap panel; incremental loading alone is not virtualization. See [the artwork and virtualization result](performance/ARTWORK-VIRTUALIZATION-2026-07-25.md).
+- [x] **P0 VIEW-001** Replace the gallery `WrapPanel` with a virtualizing wrap panel; incremental loading alone is not virtualization. See [the artwork and virtualization result](performance/ARTWORK-VIRTUALIZATION-2026-07-25.md) and [the real-library rendering regression](performance/GALLERY-RENDERING-REGRESSION-2026-07-28.md).
 - [x] **P0 VIEW-002** Preserve the scroll position and selected item independently for every primary and collection tab. See [the navigation state retention result](performance/NAVIGATION-STATE-RETENTION-2026-07-28.md).
 - [x] **P0 VIEW-003** Stop rebuilding or replacing view collections when switching to already-indexed tabs. See [the presentation collection reuse result](performance/PRESENTATION-COLLECTION-REUSE-2026-07-28.md) and [the paged sidebar result](performance/PAGED-SIDEBAR-PRESENTATION-2026-07-28.md).
 - [x] **P0 VIEW-004** Replace `ObservableCollection.Clear` plus per-track `Add` loops with range replacement or an immutable/paged view source. See [the batched collection result](performance/BATCHED-COLLECTION-APPLICATION-2026-07-28.md).
@@ -68,8 +68,8 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 - [x] **P0 VIEW-006** Remove the playlist N+1 query pattern by loading playlist summaries and tracks in a bounded or joined operation. See [the playlist query result](performance/PLAYLIST-QUERY-BOUNDS-2026-07-28.md).
 - [x] **P0 VIEW-007** Ensure hidden views do not keep expensive effects, bindings, and image sources alive. See [the hidden-view lifetime result](performance/HIDDEN-VIEW-RESOURCE-LIFETIME-2026-07-28.md).
 - [x] **P1 VIEW-008** Page or window the Songs view instead of loading every database row into presentation state. See [the paged Songs result](performance/PAGED-SONGS-PRESENTATION-2026-07-28.md).
-- [ ] **P1 VIEW-009** Cache stable grouping/sorting indexes and update only affected groups after file-watcher changes.
-- [ ] **P1 VIEW-010** Move the largest reusable views into separate controls so WPF does not parse and retain one monolithic visual tree.
+- [x] **P1 VIEW-009** Cache stable grouping/sorting indexes and update only affected groups after file-watcher changes. See [the Milestone 1 completion report](performance/MILESTONE-1-COMPLETION-2026-07-29.md).
+- [x] **P1 VIEW-010** Move the largest reusable views into separate controls so WPF does not parse and retain one monolithic visual tree. See [the Milestone 1 completion report](performance/MILESTONE-1-COMPLETION-2026-07-29.md).
 
 ### Scrolling and rendering
 
@@ -78,18 +78,18 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 - [x] **P0 SCROLL-003** Stop the render callback immediately when a viewer unloads, becomes hidden, or reaches its target. See [the scroll pipeline result](performance/SCROLL-PIPELINE-2026-07-28.md).
 - [x] **P0 SCROLL-004** Avoid layout-triggering work, image decode, and collection mutation during active scrolling. See [the scroll pipeline result](performance/SCROLL-PIPELINE-2026-07-28.md).
 - [x] **P0 SCROLL-005** Reduce or cache software-rendered blur and drop-shadow effects, especially on Now Playing. See [the scroll pipeline result](performance/SCROLL-PIPELINE-2026-07-28.md).
-- [ ] **P1 SCROLL-006** Respect Windows reduced-motion and animation settings in addition to the app toggle.
-- [ ] **P1 SCROLL-007** Add keyboard, page, Home/End, and scrollbar scrolling tests for every list.
+- [x] **P1 SCROLL-006** Respect Windows reduced-motion and animation settings in addition to the app toggle. See [the Milestone 1 completion report](performance/MILESTONE-1-COMPLETION-2026-07-29.md).
+- [x] **P1 SCROLL-007** Add keyboard, page, Home/End, and scrollbar scrolling tests for every list. See [the Milestone 1 completion report](performance/MILESTONE-1-COMPLETION-2026-07-29.md).
 
 ### Startup, scanning, and memory
 
-- [ ] **P0 SYS-001** Split startup into shell-ready and background-library phases so the window is interactive before nonessential grouping/artwork work completes.
-- [ ] **P0 SYS-002** Coalesce scan progress updates so thousands of files cannot flood the dispatcher.
-- [ ] **P0 SYS-003** Add scan cancellation, pause/resume, and resumable checkpoints for large or network libraries.
-- [ ] **P0 SYS-004** Bound scanner memory and metadata concurrency independently for SSD, HDD, removable, and SMB sources.
+- [x] **P0 SYS-001** Split startup into shell-ready and background-library phases so the window is interactive before nonessential grouping/artwork work completes. See [the Milestone 1 completion report](performance/MILESTONE-1-COMPLETION-2026-07-29.md).
+- [x] **P0 SYS-002** Coalesce scan progress updates so thousands of files cannot flood the dispatcher. See [the Milestone 1 completion report](performance/MILESTONE-1-COMPLETION-2026-07-29.md).
+- [x] **P0 SYS-003** Add scan cancellation, pause/resume, and resumable checkpoints for large or network libraries. See [the Milestone 1 completion report](performance/MILESTONE-1-COMPLETION-2026-07-29.md).
+- [x] **P0 SYS-004** Bound scanner memory and metadata concurrency independently for SSD, HDD, removable, and SMB sources. See [the Milestone 1 completion report](performance/MILESTONE-1-COMPLETION-2026-07-29.md).
 - [x] **P0 SYS-005** Profile and eliminate event-handler, bitmap, cancellation-token, and view-model retention leaks. See [the idle resource-lifetime result](performance/IDLE-RESOURCE-LIFETIME-2026-07-28.md).
-- [ ] **P1 SYS-006** Add an idle cleanup policy for thumbnails, navigation history, stale group state, and completed background jobs.
-- [ ] **P1 SYS-007** Hardware-test scan throughput and responsiveness at 10k, 50k, and 100k tracks.
+- [x] **P1 SYS-006** Add an idle cleanup policy for thumbnails, navigation history, stale group state, and completed background jobs. See [the Milestone 1 completion report](performance/MILESTONE-1-COMPLETION-2026-07-29.md).
+- [x] **P1 SYS-007** Hardware-test scan throughput and responsiveness at 10k, 50k, and 100k tracks. See [the Milestone 1 completion report](performance/MILESTONE-1-COMPLETION-2026-07-29.md).
 
 ### Milestone 1 exit criteria
 
@@ -105,34 +105,34 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 
 ### Application lifecycle
 
-- [ ] **P0 REL-001** Add single-instance behavior and forward files/folders from later launches to the existing window.
-- [ ] **P0 REL-002** Replace raw exception message boxes with a themed error surface that offers Copy details, Open log folder, and Continue/Restart where safe.
-- [ ] **P0 REL-003** Add structured rotating local logs for startup, scanning, database migrations, audio state, device changes, and handled failures.
-- [ ] **P0 REL-004** Capture dispatcher, task, and AppDomain unhandled exceptions without hiding corrupted state.
-- [ ] **P0 REL-005** Make shutdown cancellation-aware and verify queue, position, bookmarks, settings, and database work are flushed.
-- [ ] **P0 REL-006** Recover cleanly from power loss or process termination during settings save, artwork write, scan batch, and playlist edit.
-- [ ] **P1 REL-007** Add a safe mode that disables custom themes/effects and skips session resume after repeated startup failure.
-- [ ] **P1 REL-008** Add a diagnostics bundle export containing redacted settings, logs, device capabilities, version, and database schema—not the music library itself by default.
+- [x] **P0 REL-001** Add single-instance behavior and forward files/folders from later launches to the existing window.
+- [x] **P0 REL-002** Replace raw exception message boxes with a themed error surface that offers Copy details, Open log folder, and Continue/Restart where safe.
+- [x] **P0 REL-003** Add structured rotating local logs for startup, scanning, database migrations, audio state, device changes, and handled failures.
+- [x] **P0 REL-004** Capture dispatcher, task, and AppDomain unhandled exceptions without hiding corrupted state.
+- [x] **P0 REL-005** Make shutdown cancellation-aware and verify queue, position, bookmarks, settings, and database work are flushed.
+- [x] **P0 REL-006** Recover cleanly from power loss or process termination during settings save, artwork write, scan batch, and playlist edit.
+- [x] **P1 REL-007** Add a safe mode that disables custom themes/effects and skips session resume after repeated startup failure.
+- [x] **P1 REL-008** Add a diagnostics bundle export containing redacted settings, logs, device capabilities, version, and database schema—not the music library itself by default. See [Reliability and data safety](RELIABILITY.md).
 
 ### Database and settings
 
-- [ ] **P0 DATA-001** Introduce explicit numbered SQLite migrations with upgrade, rollback/restore, and fixture coverage.
-- [ ] **P0 DATA-002** Back up the database before destructive migrations and retain a small rotating set.
-- [ ] **P0 DATA-003** Detect corruption, run integrity checks when appropriate, and offer rebuild-from-files without losing playlists/ratings where recoverable.
-- [ ] **P0 DATA-004** Validate and normalize every settings field at load, including colors, fonts, paths, buffers, rates, and device IDs.
-- [ ] **P0 DATA-005** Add settings export/import and a Reset section with scoped reset options.
-- [ ] **P1 DATA-006** Add explicit backup/restore for playlists, ratings, love state, play history, bookmarks, and settings.
-- [ ] **P1 DATA-007** Document app-data layout and define uninstall behavior that never silently deletes the user database.
+- [x] **P0 DATA-001** Introduce explicit numbered SQLite migrations with upgrade, rollback/restore, and fixture coverage.
+- [x] **P0 DATA-002** Back up the database before destructive migrations and retain a small rotating set.
+- [x] **P0 DATA-003** Detect corruption, run integrity checks when appropriate, and offer rebuild-from-files without losing playlists/ratings where recoverable.
+- [x] **P0 DATA-004** Validate and normalize every settings field at load, including colors, fonts, paths, buffers, rates, and device IDs.
+- [x] **P0 DATA-005** Add settings export/import and a Reset section with scoped reset options.
+- [x] **P1 DATA-006** Add explicit backup/restore for playlists, ratings, love state, play history, bookmarks, and settings.
+- [x] **P1 DATA-007** Document app-data layout and define uninstall behavior that never silently deletes the user database. See [App-data and uninstall behavior](APP-DATA.md).
 
 ### Filesystem and network-source failure handling
 
-- [ ] **P0 FILE-001** Treat disconnected SMB, removable, and mounted sources as offline instead of deleting their tracks.
-- [ ] **P0 FILE-002** Show per-source status, last successful scan, errors, offline state, watcher state, and track count.
-- [ ] **P0 FILE-003** Handle rename/move detection without losing ratings, play history, bookmarks, or playlist references.
-- [ ] **P0 FILE-004** Skip corrupt/unsupported tracks during queue playback, explain the failure, and continue according to queue/repeat rules.
-- [ ] **P0 FILE-005** Handle long paths, Unicode normalization, inaccessible directories, symlink/junction loops, and case-insensitive duplicates.
-- [ ] **P1 FILE-006** Add duplicate detection by canonical path and optional audio/content fingerprint.
-- [ ] **P1 FILE-007** Add a Missing files view with locate, relink, remove, and rescan actions.
+- [x] **P0 FILE-001** Treat disconnected SMB, removable, and mounted sources as offline instead of deleting their tracks.
+- [x] **P0 FILE-002** Show per-source status, last successful scan, errors, offline state, watcher state, and track count.
+- [x] **P0 FILE-003** Handle rename/move detection without losing ratings, play history, bookmarks, or playlist references.
+- [x] **P0 FILE-004** Skip corrupt/unsupported tracks during queue playback, explain the failure, and continue according to queue/repeat rules.
+- [x] **P0 FILE-005** Handle long paths, Unicode normalization, inaccessible directories, symlink/junction loops, and case-insensitive duplicates.
+- [x] **P1 FILE-006** Add duplicate detection by canonical path and optional content fingerprint.
+- [x] **P1 FILE-007** Add a Missing files view with locate, relink, remove, and rescan actions.
 
 ---
 

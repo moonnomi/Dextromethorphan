@@ -217,6 +217,33 @@ public sealed class ArtworkImageService : IDisposable
             _diagnostics.Mark("artwork", "thumbnail.memory-cache-cleared");
     }
 
+    internal void TrimMemoryCache(long targetBytes)
+    {
+        targetBytes = Math.Clamp(
+            targetBytes,
+            0,
+            DefaultBudgetBytes);
+        lock (_cacheGate)
+        {
+            while (_cacheBytes > targetBytes
+                   && _lru.Last is { } last)
+            {
+                _lru.RemoveLast();
+                if (!_cache.Remove(last.Value, out var removed)) continue;
+                _cacheBytes -= removed.Bytes;
+            }
+        }
+        if (_diagnostics.Enabled)
+            _diagnostics.Mark(
+                "artwork",
+                "thumbnail.memory-cache-trimmed",
+                new Dictionary<string, object?>
+                {
+                    ["targetBytes"] = targetBytes,
+                    ["cacheBytes"] = _cacheBytes
+                });
+    }
+
     internal void InvalidatePath(string path)
     {
         var fullPath = Path.GetFullPath(path);
@@ -614,8 +641,9 @@ public static class AsyncArtwork
         {
             image.BeginAnimation(UIElement.OpacityProperty, null);
             image.Opacity = 1;
-            if (!SystemParameters.ClientAreaAnimation
-                || Window.GetWindow(image)?.DataContext is MainViewModel { AnimationsEnabled: false })
+            if (!MotionPolicy.IsEnabled(
+                    Window.GetWindow(image)?.DataContext is not MainViewModel viewModel
+                        || viewModel.AnimationsEnabled))
                 return;
 
             var animation = new DoubleAnimation(

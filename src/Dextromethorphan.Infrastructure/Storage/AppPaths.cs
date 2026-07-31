@@ -14,6 +14,9 @@ public sealed class AppPaths
             : configuredRoot);
         SettingsFile = Path.Combine(Root, "settings.json");
         DatabaseFile = Path.Combine(Root, "library.db");
+        ScanCheckpointFile = Path.Combine(Root, "scan-checkpoint.json");
+        StartupStateFile = Path.Combine(Root, "startup-state.json");
+        DatabaseBackups = Path.Combine(Root, "backups");
         ArtworkCache = Path.Combine(Root, "artwork");
         Logs = Path.Combine(Root, "logs");
     }
@@ -21,6 +24,9 @@ public sealed class AppPaths
     public string Root { get; }
     public string SettingsFile { get; }
     public string DatabaseFile { get; }
+    public string ScanCheckpointFile { get; }
+    public string StartupStateFile { get; }
+    public string DatabaseBackups { get; }
     public string ArtworkCache { get; }
     public string Logs { get; }
 
@@ -28,6 +34,7 @@ public sealed class AppPaths
     {
         Directory.CreateDirectory(Root);
         Directory.CreateDirectory(ArtworkCache);
+        Directory.CreateDirectory(DatabaseBackups);
         Directory.CreateDirectory(Logs);
     }
 }

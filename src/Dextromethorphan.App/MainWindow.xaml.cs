@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Reflection;
 using System.Windows;
 using System.Windows.Input;
@@ -8,6 +9,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Dextromethorphan.App.Performance;
 using Dextromethorphan.App.Diagnostics;
@@ -44,6 +46,10 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _sidebarPageCancellation;
     private CancellationTokenSource? _trackPageCancellation;
     private int _viewTransitionAnimationVersion;
+    private readonly DispatcherTimer _idleCleanupTimer;
+    private DateTimeOffset _lastInteraction = DateTimeOffset.UtcNow;
+    private DateTimeOffset _lastIdleCleanup = DateTimeOffset.MinValue;
+    private bool _idleCleanupRunning;
 
     public MainWindow(
         MainViewModel viewModel,
@@ -65,6 +71,16 @@ public partial class MainWindow : Window
         PerformanceOverlay.Attach(this);
         DataContext = viewModel;
         ViewModel.PropertyChanged += ViewModelOnPropertyChanged;
+        PreviewMouseMove += RecordUserInteraction;
+        PreviewMouseWheel += RecordUserInteraction;
+        PreviewTouchDown += RecordUserInteraction;
+        Activated += RecordWindowActivation;
+        _idleCleanupTimer = new DispatcherTimer(
+            TimeSpan.FromMinutes(1),
+            DispatcherPriority.ApplicationIdle,
+            IdleCleanupTimer_Tick,
+            Dispatcher);
+        _idleCleanupTimer.Start();
     }
 
     public MainViewModel ViewModel { get; }
@@ -72,11 +88,78 @@ public partial class MainWindow : Window
     internal DateTimeOffset? FirstGalleryArtworkRenderedAt => _firstGalleryArtworkRenderedAt;
     internal ArtworkRuntimeMetrics ArtworkMetrics => _artworkImages.GetRuntimeMetrics();
 
+    private void RecordUserInteraction(
+        object? sender,
+        InputEventArgs args) =>
+        _lastInteraction = DateTimeOffset.UtcNow;
+
+    private void RecordWindowActivation(
+        object? sender,
+        EventArgs args) =>
+        _lastInteraction = DateTimeOffset.UtcNow;
+
+    private async void IdleCleanupTimer_Tick(
+        object? sender,
+        EventArgs args)
+    {
+        if (_idleCleanupRunning) return;
+        var now = DateTimeOffset.UtcNow;
+        if (!IdleCleanupPolicy.ShouldRun(
+                now,
+                _lastInteraction,
+                _lastIdleCleanup,
+                IsActive,
+                ViewModel.IsScanning,
+                ArtworkMetrics.QueueDepth))
+            return;
+
+        _idleCleanupRunning = true;
+        try
+        {
+            await ViewModel.RunIdleCleanupAsync();
+            _viewStates.Trim(
+                new HashSet<string>(StringComparer.Ordinal)
+                {
+                    ViewModel.PrimaryViewStateKey,
+                    ViewModel.ContentViewStateKey
+                },
+                now.AddMinutes(-20),
+                maximumEntries: 32);
+            _lastIdleCleanup = now;
+        }
+        catch (OperationCanceledException) { }
+        finally
+        {
+            _idleCleanupRunning = false;
+        }
+    }
+
+    internal void ApplySafeModePresentation()
+    {
+        if (!ViewModel.IsSafeMode) return;
+        DisableEffects(this);
+    }
+
+    private static void DisableEffects(DependencyObject parent)
+    {
+        if (parent is UIElement element)
+        {
+            element.Effect = null;
+            element.CacheMode = null;
+        }
+        for (var index = 0;
+             index < VisualTreeHelper.GetChildrenCount(parent);
+             index++)
+            DisableEffects(VisualTreeHelper.GetChild(parent, index));
+    }
+
     public void BeginStartupPresentation()
     {
         _startupStartedAt = DateTime.UtcNow;
         StartupOverlay.Visibility = Visibility.Visible;
         StartupOverlay.Opacity = 1;
+        if (!MotionPolicy.IsEnabled(ViewModel.AnimationsEnabled))
+            return;
 
         var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
         StartupBrand.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(220)) { EasingFunction = ease });
@@ -91,15 +174,14 @@ public partial class MainWindow : Window
 
     public async Task CompleteStartupPresentationAsync()
     {
-        var remaining = TimeSpan.FromMilliseconds(420) - (DateTime.UtcNow - _startupStartedAt);
-        if (remaining > TimeSpan.Zero) await Task.Delay(remaining);
-
-        if (!ViewModel.AnimationsEnabled)
+        if (!MotionPolicy.IsEnabled(ViewModel.AnimationsEnabled))
         {
             StopStartupMotion();
             StartupOverlay.Visibility = Visibility.Collapsed;
             return;
         }
+        var remaining = TimeSpan.FromMilliseconds(420) - (DateTime.UtcNow - _startupStartedAt);
+        if (remaining > TimeSpan.Zero) await Task.Delay(remaining);
 
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var fade = new DoubleAnimation(1, 0, TimeSpan.FromMilliseconds(220))
@@ -188,7 +270,7 @@ public partial class MainWindow : Window
             var center = container.TranslatePoint(new Point(0, container.ActualHeight / 2), scroller).Y;
             var start = scroller.VerticalOffset;
             var target = Math.Clamp(start + center - (scroller.ViewportHeight / 2), 0, scroller.ScrollableHeight);
-            if (!ViewModel.AnimationsEnabled)
+            if (!MotionPolicy.IsEnabled(ViewModel.AnimationsEnabled))
             {
                 scroller.ScrollToVerticalOffset(target);
                 return;
@@ -232,7 +314,8 @@ public partial class MainWindow : Window
     private void AnimateViewTransition()
     {
         var animationVersion = ++_viewTransitionAnimationVersion;
-        if (!ViewModel.AnimationsEnabled || StartupOverlay.Visibility == Visibility.Visible)
+        if (!MotionPolicy.IsEnabled(ViewModel.AnimationsEnabled)
+            || StartupOverlay.Visibility == Visibility.Visible)
         {
             ReleaseViewTransitionAnimations(animationVersion);
             ViewTransitionHost.Opacity = 1;
@@ -283,8 +366,8 @@ public partial class MainWindow : Window
         var version = _topTabAnimationVersions.GetValueOrDefault(tab) + 1;
         _topTabAnimationVersions[tab] = version;
         indicator.BeginAnimation(OpacityProperty, null);
-        if (DataContext is not MainViewModel { AnimationsEnabled: true }
-            || !SystemParameters.ClientAreaAnimation)
+        if (DataContext is not MainViewModel viewModel
+            || !MotionPolicy.IsEnabled(viewModel.AnimationsEnabled))
             return;
 
         var animation = new DoubleAnimation(
@@ -324,11 +407,6 @@ public partial class MainWindow : Window
         var handle = new WindowInteropHelper(this).Handle;
         _shortcuts.Attach(handle);
         _systemMedia.Attach(handle);
-    }
-
-    private void TrackList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
-    {
-        if (ViewModel.PlaySelectedCommand.CanExecute(null)) ViewModel.PlaySelectedCommand.Execute(null);
     }
 
     private void QueueList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -377,12 +455,6 @@ public partial class MainWindow : Window
     {
         if (!_restoringScrollState && GalleryList.IsVisible && e.OriginalSource is ScrollViewer)
             _viewStates.Capture(ViewModel.PrimaryViewStateKey, e.VerticalOffset, ViewModel.GalleryGroups.Count);
-        if (e.ExtentHeight <= 0 || e.VerticalOffset + e.ViewportHeight < e.ExtentHeight - 260)
-        {
-            _galleryPageCancellation?.Cancel();
-            return;
-        }
-        SchedulePageLoad(GalleryList, PageTarget.Gallery);
     }
 
     private void GalleryList_Loaded(object sender, RoutedEventArgs e) => ScheduleScrollStateRestore();
@@ -554,6 +626,179 @@ public partial class MainWindow : Window
         }
         return samples;
     }
+
+    internal async Task<GalleryVisualRegressionMetrics> CaptureGalleryVisualRegressionAsync(
+        string outputDirectory,
+        CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(outputDirectory);
+        ViewModel.NavigateCommand.Execute("Albums");
+        await NextRenderedFrameTimestampAsync(cancellationToken);
+        GalleryList.UpdateLayout();
+        var viewer = FindVisualChild<ScrollViewer>(GalleryList)
+            ?? throw new InvalidOperationException("The album gallery scroll viewer is unavailable.");
+
+        var sourceCards = ViewModel.ActiveGroups.Count;
+        var initialCards = ViewModel.GalleryGroups.Count;
+        var pageAdvances = 0;
+        var checkpoints = 0;
+        var realizedCards = 0;
+        var expectedArtwork = 0;
+        var renderedArtwork = 0;
+        var mappingFailures = 0;
+        var missingArtwork = 0;
+        var screenshots = new List<string>();
+
+        async Task InspectAsync()
+        {
+            await WaitForBackgroundIdleAsync(cancellationToken);
+            await NextRenderedFrameTimestampAsync(cancellationToken);
+            GalleryList.UpdateLayout();
+            var inspection = InspectRealizedGalleryCards();
+            checkpoints++;
+            realizedCards += inspection.RealizedCards;
+            expectedArtwork += inspection.ExpectedArtwork;
+            renderedArtwork += inspection.RenderedArtwork;
+            mappingFailures += inspection.MappingFailures;
+            missingArtwork += inspection.MissingArtwork;
+        }
+
+        await InspectAsync();
+        var maximumPageAttempts = Math.Max(1, (int)Math.Ceiling(sourceCards / 28d) + 4);
+        while (ViewModel.GalleryGroups.Count < sourceCards && pageAdvances < maximumPageAttempts)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var before = ViewModel.GalleryGroups.Count;
+            viewer.ScrollToEnd();
+            var wait = Stopwatch.StartNew();
+            while (ViewModel.GalleryGroups.Count <= before
+                   && wait.Elapsed < TimeSpan.FromSeconds(5))
+                await Task.Delay(50, cancellationToken);
+            if (ViewModel.GalleryGroups.Count <= before) break;
+            pageAdvances++;
+            GalleryList.UpdateLayout();
+            await InspectAsync();
+        }
+
+        var capturedRatios = new Dictionary<double, string>
+        {
+            [0d] = "top",
+            [0.5d] = "middle",
+            [1d] = "bottom"
+        };
+        var capturedNames = new HashSet<string>(StringComparer.Ordinal);
+        var traversalRatios = Enumerable.Range(0, 11)
+            .Select(index => index / 10d)
+            // Revisit distant ranges in both directions to exercise container
+            // removal/recreation and async artwork cancellation, not just a
+            // monotonic trip from the top to the bottom.
+            .Concat([0.75d, 0.25d, 1d, 0d])
+            .ToArray();
+        foreach (var ratio in traversalRatios)
+        {
+            viewer.ScrollToVerticalOffset(viewer.ScrollableHeight * ratio);
+            await NextRenderedFrameTimestampAsync(cancellationToken);
+            await InspectAsync();
+            if (!capturedRatios.TryGetValue(ratio, out var name)
+                || !capturedNames.Add(name))
+                continue;
+            var screenshot = Path.Combine(
+                outputDirectory,
+                $"gallery-{name}.png");
+            CaptureVisualPng(screenshot);
+            screenshots.Add(screenshot);
+        }
+
+        var finalCards = ViewModel.GalleryGroups.Count;
+        var status = finalCards != sourceCards
+            ? $"Paging stopped at {finalCards:N0} of {sourceCards:N0} cards."
+            : mappingFailures > 0
+                ? $"{mappingFailures:N0} realized card mappings were incorrect."
+                : missingArtwork > 0
+                    ? $"{missingArtwork:N0} expected artwork sources were blank."
+                    : $"Rendered all {sourceCards:N0} cards and every expected visible artwork source.";
+        return new GalleryVisualRegressionMetrics(
+            sourceCards,
+            initialCards,
+            finalCards,
+            pageAdvances,
+            checkpoints,
+            realizedCards,
+            expectedArtwork,
+            renderedArtwork,
+            mappingFailures,
+            missingArtwork,
+            screenshots,
+            status);
+    }
+
+    private GalleryVisualInspection InspectRealizedGalleryCards()
+    {
+        var realized = 0;
+        var expectedArtwork = 0;
+        var renderedArtwork = 0;
+        var mappingFailures = 0;
+        var missingArtwork = 0;
+        var containers = new HashSet<ListBoxItem>();
+        for (var index = 0; index < ViewModel.GalleryGroups.Count; index++)
+        {
+            if (GalleryList.ItemContainerGenerator.ContainerFromIndex(index) is not ListBoxItem container)
+                continue;
+            realized++;
+            if (!containers.Add(container)
+                || !ReferenceEquals(container.DataContext, ViewModel.GalleryGroups[index]))
+                mappingFailures++;
+
+            if (container.DataContext is not LibraryCardViewModel card
+                || string.IsNullOrWhiteSpace(card.ArtworkPath)
+                || !File.Exists(card.ArtworkPath))
+                continue;
+            var artworkPath = card.ArtworkPath;
+            expectedArtwork++;
+            var image = FindVisualChildren<Image>(container)
+                .FirstOrDefault(candidate =>
+                    string.Equals(
+                        AsyncArtwork.GetPath(candidate),
+                        artworkPath,
+                        StringComparison.OrdinalIgnoreCase));
+            if (image?.Source is not null)
+                renderedArtwork++;
+            else
+                missingArtwork++;
+        }
+        return new GalleryVisualInspection(
+            realized,
+            expectedArtwork,
+            renderedArtwork,
+            mappingFailures,
+            missingArtwork);
+    }
+
+    private void CaptureVisualPng(string path)
+    {
+        UpdateLayout();
+        var dpi = VisualTreeHelper.GetDpi(this);
+        var width = Math.Max(1, (int)Math.Ceiling(ActualWidth * dpi.DpiScaleX));
+        var height = Math.Max(1, (int)Math.Ceiling(ActualHeight * dpi.DpiScaleY));
+        var bitmap = new RenderTargetBitmap(
+            width,
+            height,
+            dpi.PixelsPerInchX,
+            dpi.PixelsPerInchY,
+            PixelFormats.Pbgra32);
+        bitmap.Render(this);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(bitmap));
+        using var output = File.Open(path, FileMode.Create, FileAccess.Write, FileShare.Read);
+        encoder.Save(output);
+    }
+
+    private readonly record struct GalleryVisualInspection(
+        int RealizedCards,
+        int ExpectedArtwork,
+        int RenderedArtwork,
+        int MappingFailures,
+        int MissingArtwork);
 
     internal async Task<NavigationHistoryPerformanceMetrics> MeasureNavigationHistoryPerformanceAsync(CancellationToken cancellationToken)
     {
@@ -959,6 +1204,28 @@ public partial class MainWindow : Window
         return false;
     }
 
+    private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.OriginalSource is not DependencyObject source
+            || FindVisualParent<ListBox>(source) is not { } list)
+            return;
+        var action = ListScrollKeyboardPolicy.ActionFor(
+            e.Key == Key.System ? e.SystemKey : e.Key,
+            Keyboard.Modifiers);
+        if (action == ListScrollAction.None
+            || FindVisualChild<ScrollViewer>(list) is not { } viewer)
+            return;
+        SmoothScrollBehavior.Cancel(viewer);
+        switch (action)
+        {
+            case ListScrollAction.Home: viewer.ScrollToTop(); break;
+            case ListScrollAction.End: viewer.ScrollToEnd(); break;
+            case ListScrollAction.PageUp: viewer.PageUp(); break;
+            case ListScrollAction.PageDown: viewer.PageDown(); break;
+        }
+        e.Handled = true;
+    }
+
     private void Window_KeyDown(object sender, KeyEventArgs e)
     {
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
@@ -991,6 +1258,7 @@ public partial class MainWindow : Window
 
     private void Window_PreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
+        _lastInteraction = DateTimeOffset.UtcNow;
         var handled = e.ChangedButton switch
         {
             MouseButton.XButton1 => ViewModel.NavigateBack(),
@@ -1010,6 +1278,7 @@ public partial class MainWindow : Window
         await _diagnostics.CompleteAsync();
         _lyricScrollCancellation?.Cancel();
         _lyricScrollCancellation?.Dispose();
+        StopIdleCleanup();
         CancelDeferredPageLoads();
         PerformanceOverlay.Dispose();
         ViewModel.PropertyChanged -= ViewModelOnPropertyChanged;
@@ -1024,6 +1293,7 @@ public partial class MainWindow : Window
         await _diagnostics.CompleteAsync();
         _lyricScrollCancellation?.Cancel();
         _lyricScrollCancellation?.Dispose();
+        StopIdleCleanup();
         CancelDeferredPageLoads();
         PerformanceOverlay.Dispose();
         ViewModel.PropertyChanged -= ViewModelOnPropertyChanged;
@@ -1039,6 +1309,15 @@ public partial class MainWindow : Window
         _sidebarPageCancellation?.Dispose();
         _trackPageCancellation?.Cancel();
         _trackPageCancellation?.Dispose();
+    }
+
+    private void StopIdleCleanup()
+    {
+        _idleCleanupTimer.Stop();
+        PreviewMouseMove -= RecordUserInteraction;
+        PreviewMouseWheel -= RecordUserInteraction;
+        PreviewTouchDown -= RecordUserInteraction;
+        Activated -= RecordWindowActivation;
     }
 
     private enum PageTarget

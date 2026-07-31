@@ -22,6 +22,7 @@ public static class SmoothScrollBehavior
         var viewer = element as ScrollViewer ?? FindDescendant<ScrollViewer>(element);
         return viewer is not null && Targets.ContainsKey(viewer);
     }
+    internal static void Cancel(DependencyObject element) => RemoveViewer(element);
 
     private static void OnEnabledChanged(DependencyObject element, DependencyPropertyChangedEventArgs args)
     {
@@ -71,7 +72,9 @@ public static class SmoothScrollBehavior
             return;
 
         args.Handled = true;
-        if (!SystemParameters.ClientAreaAnimation)
+        if (!MotionPolicy.IsEnabled(
+                Window.GetWindow(viewer)?.DataContext is not ViewModels.MainViewModel
+                    || ((ViewModels.MainViewModel)Window.GetWindow(viewer)!.DataContext).AnimationsEnabled))
         {
             viewer.ScrollToHorizontalOffset(next.Horizontal);
             viewer.ScrollToVerticalOffset(next.Vertical);
@@ -102,6 +105,15 @@ public static class SmoothScrollBehavior
             var viewer = pair.Key;
             if (!viewer.IsLoaded || !viewer.IsVisible)
             {
+                Targets.Remove(viewer);
+                continue;
+            }
+            if (!MotionPolicy.IsEnabled(
+                    Window.GetWindow(viewer)?.DataContext is not ViewModels.MainViewModel
+                        || ((ViewModels.MainViewModel)Window.GetWindow(viewer)!.DataContext).AnimationsEnabled))
+            {
+                viewer.ScrollToHorizontalOffset(pair.Value.Horizontal);
+                viewer.ScrollToVerticalOffset(pair.Value.Vertical);
                 Targets.Remove(viewer);
                 continue;
             }

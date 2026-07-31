@@ -32,6 +32,7 @@ public sealed record Track
     public byte[]? Artwork { get; init; }
     public string? ArtworkPath { get; init; }
     public string Lyrics { get; init; } = "";
+    public bool IsMissing { get; init; }
 
     public string DisplayArtist => string.IsNullOrWhiteSpace(Artist) ? "Unknown artist" : Artist;
     public string DisplayAlbum => string.IsNullOrWhiteSpace(Album) ? "Unknown album" : Album;

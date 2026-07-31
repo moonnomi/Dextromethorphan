@@ -5,51 +5,18 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:ui="clr-namespace:Dextromethorphan.App.UI"
+        xmlns:views="clr-namespace:Dextromethorphan.App.UI.Views"
         mc:Ignorable="d" Title="Dextromethorphan" Icon="Assets/Brand/dextromethorphan.ico" Width="1360" Height="800" MinWidth="800" MinHeight="600"
-        WindowStartupLocation="CenterScreen" WindowStyle="None" ResizeMode="CanResize" KeyDown="Window_KeyDown" PreviewMouseDown="Window_PreviewMouseDown" Closing="Window_Closing">
+        WindowStartupLocation="CenterScreen" WindowStyle="None" ResizeMode="CanResize" PreviewKeyDown="Window_PreviewKeyDown" KeyDown="Window_KeyDown" PreviewMouseDown="Window_PreviewMouseDown" Closing="Window_Closing">
     <shell:WindowChrome.WindowChrome>
         <shell:WindowChrome CaptionHeight="0" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="10" UseAeroCaptionButtons="False"/>
     </shell:WindowChrome.WindowChrome>
 
     <Window.Resources>
         <DataTemplate x:Key="TrackListTemplate">
-            <ListBox Style="{StaticResource TrackListStyle}" ItemsSource="{Binding BrowseTracks}" SelectedItem="{Binding SelectedTrack}" MouseDoubleClick="TrackList_MouseDoubleClick" Loaded="TrackList_Loaded" ScrollViewer.ScrollChanged="TrackList_ScrollChanged">
-                <ListBox.ContextMenu>
-                    <ContextMenu>
-                        <MenuItem Header="Play" Command="{Binding PlacementTarget.DataContext.PlaySelectedCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-                        <MenuItem Header="Play next" Command="{Binding PlacementTarget.DataContext.PlayNextCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding PlacementTarget.SelectedItem, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-                        <MenuItem Header="Add to queue" Command="{Binding PlacementTarget.DataContext.AddToQueueCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding PlacementTarget.SelectedItem, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-                    </ContextMenu>
-                </ListBox.ContextMenu>
-                <ListBox.ItemTemplate>
-                    <DataTemplate>
-                        <Grid Height="58" Margin="6,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="36"/>
-                                <ColumnDefinition Width="1.8*" MinWidth="120"/>
-                                <ColumnDefinition Width="1.05*" MinWidth="90"/>
-                                <ColumnDefinition Width="146"/>
-                                <ColumnDefinition Width="34"/>
-                                <ColumnDefinition Width="58"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="{Binding TrackNumber}" Foreground="{StaticResource TextMutedBrush}" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                            <StackPanel Grid.Column="1" Margin="10,0,12,0" VerticalAlignment="Center">
-                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                                <TextBlock Text="{Binding Artist}" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,3,0,0" TextTrimming="CharacterEllipsis"/>
-                            </StackPanel>
-                            <StackPanel Grid.Column="2" Margin="8,0,14,0" VerticalAlignment="Center">
-                                <TextBlock Text="{Binding Album}" Foreground="#D7F4F6FA" FontSize="12" TextTrimming="CharacterEllipsis"/>
-                                <TextBlock Text="{Binding Year}" Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,3,0,0"/>
-                            </StackPanel>
-                            <TextBlock Grid.Column="3" Text="{Binding QualityText}" Foreground="{StaticResource TextMutedBrush}" FontSize="10" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
-                            <TextBlock Grid.Column="4" Text="&#x2665;" FontSize="14" HorizontalAlignment="Center" VerticalAlignment="Center">
-                                <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/><Setter Property="Opacity" Value="0.18"/><Style.Triggers><DataTrigger Binding="{Binding IsLoved}" Value="True"><Setter Property="Foreground" Value="{StaticResource AccentBrush}"/><Setter Property="Opacity" Value="1"/></DataTrigger></Style.Triggers></Style></TextBlock.Style>
-                            </TextBlock>
-                            <TextBlock Grid.Column="5" Text="{Binding DurationText}" Foreground="{StaticResource TextMutedBrush}" FontSize="11" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,12,0"/>
-                        </Grid>
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-            </ListBox>
+            <views:TrackListView
+                TrackListReady="TrackList_Loaded"
+                TrackScrollChanged="TrackList_ScrollChanged"/>
         </DataTemplate>
 
         <DataTemplate x:Key="GroupCardTemplate">
@@ -104,6 +71,7 @@
                     <Grid Grid.Column="2" Margin="8,11"><TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE721;" Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center" Margin="12,0,0,0" Panel.ZIndex="1"/><TextBox x:Name="SearchBox" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Padding="38,0,10,0" VerticalContentAlignment="Center" ToolTip="Search title, artist, album, genre, filename, or comment"/></Grid>
                     <StackPanel Grid.Column="3" Orientation="Horizontal">
                         <Button Style="{StaticResource IconButton}" Command="{Binding NavigateCommand}" CommandParameter="Favorites" Content="&#xEB52;" ToolTip="Favorites"/>
+                        <Button Style="{StaticResource IconButton}" Command="{Binding NavigateCommand}" CommandParameter="Missing" Content="&#xE7BA;" ToolTip="Missing files" Visibility="{Binding HasMissingTracks, Converter={StaticResource BoolToVisibility}}"/>
                         <Button Style="{StaticResource IconButton}" Command="{Binding ToggleQueueCommand}" Content="&#xE8FD;" ToolTip="Toggle queue"/>
                     </StackPanel>
                     <StackPanel Grid.Column="4" Orientation="Horizontal" HorizontalAlignment="Right">
@@ -124,7 +92,16 @@
                         <Border.Style><Style TargetType="Border"><Setter Property="Visibility" Value="Visible"/><Style.Triggers><DataTrigger Binding="{Binding IsCollectionDetailOpen}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></Border.Style>
                         <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                             <StackPanel VerticalAlignment="Center"><TextBlock Text="{Binding ViewTitle}" FontSize="25" FontWeight="SemiBold"/><TextBlock Text="{Binding ViewSubtitle}" Foreground="{StaticResource TextMutedBrush}" FontSize="12" Margin="0,4,0,0"/></StackPanel>
-                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"><TextBlock Text="{Binding StatusText}" Foreground="{StaticResource TextMutedBrush}" FontSize="11" VerticalAlignment="Center" Margin="0,0,12,0"/><Button Style="{StaticResource IconButton}" Command="{Binding ScanCommand}" Content="&#xE72C;" ToolTip="Rescan library" AutomationProperties.Name="Rescan library"/><Button Style="{StaticResource IconButton}" Click="AddFolder_Click" Content="&#xE8B7;" ToolTip="Add music folder" AutomationProperties.Name="Add music folder"/><Button Style="{StaticResource IconButton}" Command="{Binding ToggleDiagnosticsCommand}" Content="&#xE9D9;" ToolTip="Audio diagnostics" AutomationProperties.Name="Audio diagnostics"/><Button Style="{StaticResource IconButton}" Command="{Binding PerformanceOverlay.ToggleCommand, RelativeSource={RelativeSource AncestorType=Window}}" Content="FPS" FontFamily="Segoe UI" FontSize="9" FontWeight="Bold" ToolTip="Developer performance overlay (Ctrl+Shift+F12)" AutomationProperties.Name="Developer performance overlay"/><Button x:Name="SettingsButton" Style="{StaticResource IconButton}" Click="Settings_Click" Content="&#xE713;" ToolTip="Settings" AutomationProperties.Name="Settings" AutomationProperties.AutomationId="SettingsButton"/></StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding StatusText}" Foreground="{StaticResource TextMutedBrush}" FontSize="11" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                                <Button Style="{StaticResource IconButton}" Command="{Binding ScanCommand}" Content="&#xE72C;" ToolTip="Rescan library" AutomationProperties.Name="Rescan library"/>
+                                <Button Style="{StaticResource IconButton}" Command="{Binding ToggleScanPauseCommand}" Content="{Binding ScanPauseGlyph}" ToolTip="{Binding ScanPauseText}" AutomationProperties.Name="{Binding ScanPauseText}" Visibility="{Binding IsScanning, Converter={StaticResource BoolToVisibility}}"/>
+                                <Button Style="{StaticResource IconButton}" Command="{Binding CancelScanCommand}" Content="&#xE71A;" ToolTip="Cancel library scan" AutomationProperties.Name="Cancel library scan" Visibility="{Binding IsScanning, Converter={StaticResource BoolToVisibility}}"/>
+                                <Button Style="{StaticResource IconButton}" Click="AddFolder_Click" Content="&#xE8B7;" ToolTip="Add music folder" AutomationProperties.Name="Add music folder"/>
+                                <Button Style="{StaticResource IconButton}" Command="{Binding ToggleDiagnosticsCommand}" Content="&#xE9D9;" ToolTip="Audio diagnostics" AutomationProperties.Name="Audio diagnostics"/>
+                                <Button Style="{StaticResource IconButton}" Command="{Binding PerformanceOverlay.ToggleCommand, RelativeSource={RelativeSource AncestorType=Window}}" Content="FPS" FontFamily="Segoe UI" FontSize="9" FontWeight="Bold" ToolTip="Developer performance overlay (Ctrl+Shift+F12)" AutomationProperties.Name="Developer performance overlay"/>
+                                <Button x:Name="SettingsButton" Style="{StaticResource IconButton}" Click="Settings_Click" Content="&#xE713;" ToolTip="Settings" AutomationProperties.Name="Settings" AutomationProperties.AutomationId="SettingsButton"/>
+                            </StackPanel>
                         </Grid>
                     </Border>
 

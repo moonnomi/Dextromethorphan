@@ -20,9 +20,11 @@ internal sealed class PresentationCollectionCache<T>
 
         var source = sourceFactory();
         var count = Math.Clamp(initialCount, 0, source.Count);
-        var created = new PresentationCollection<T>(
-            source,
-            new ObservableCollection<T>(source.Take(count)));
+        var items = count == source.Count
+                    && source is ObservableCollection<T> liveSource
+            ? liveSource
+            : new ObservableCollection<T>(source.Take(count));
+        var created = new PresentationCollection<T>(source, items);
         _entries.Add(key, created);
         cacheHit = false;
         return created;
@@ -38,6 +40,14 @@ internal sealed class PresentationCollectionCache<T>
     }
 
     public void Remove(string key) => _entries.Remove(key);
+
+    public int RemoveWhere(Func<string, bool> predicate)
+    {
+        ArgumentNullException.ThrowIfNull(predicate);
+        var keys = _entries.Keys.Where(predicate).ToArray();
+        foreach (var key in keys) _entries.Remove(key);
+        return keys.Length;
+    }
 
     public void Clear() => _entries.Clear();
 }

@@ -26,4 +26,30 @@ public sealed class NavigationViewStateStoreTests
 
         Assert.Equal(NavigationViewState.Empty, store.Get("collection:Albums:Album:one"));
     }
+
+    [Fact]
+    public void TrimPreservesActiveKeysAndDropsStaleHistory()
+    {
+        var store = new NavigationViewStateStore();
+        store.Capture("primary:Albums", 100, 302);
+        store.Capture("collection:old", 200, 20);
+        store.Capture("collection:current", 300, 30);
+
+        var removed = store.Trim(
+            new HashSet<string>(StringComparer.Ordinal)
+            {
+                "primary:Albums",
+                "collection:current"
+            },
+            DateTimeOffset.UtcNow.AddSeconds(1),
+            maximumEntries: 2);
+
+        Assert.Equal(1, removed);
+        Assert.Equal(
+            NavigationViewState.Empty,
+            store.Get("collection:old"));
+        Assert.Equal(
+            new NavigationViewState(300, 30),
+            store.Get("collection:current"));
+    }
 }

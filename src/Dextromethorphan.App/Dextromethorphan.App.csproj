@@ -6,6 +6,7 @@
     <RootNamespace>Dextromethorphan.App</RootNamespace>
     <StartupObject>Dextromethorphan.App.App</StartupObject>
     <ApplicationIcon>Assets\Brand\dextromethorphan.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <PublishSingleFile>false</PublishSingleFile>
     <SelfContained>false</SelfContained>
   </PropertyGroup>

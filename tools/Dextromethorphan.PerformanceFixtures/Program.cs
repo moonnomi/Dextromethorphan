@@ -69,8 +69,9 @@ internal static class Program
             }
         }
 
-        if (trackCount is not (10_000 or 50_000))
-            throw new ArgumentException("--tracks must be 10000 or 50000.");
+        if (trackCount is not (10_000 or 50_000 or 100_000))
+            throw new ArgumentException(
+                "--tracks must be 10000, 50000, or 100000.");
         if (string.IsNullOrWhiteSpace(output))
             throw new ArgumentException("--output is required.");
         return new PerformanceFixtureOptions(trackCount.Value, output, seed, force);
@@ -87,7 +88,7 @@ internal static class Program
         Console.WriteLine("Generate a deterministic Dextromethorphan performance library.");
         Console.WriteLine();
         Console.WriteLine("  dotnet run --project tools/Dextromethorphan.PerformanceFixtures -c Release -- \\");
-        Console.WriteLine("    --tracks 10000 --output <directory> [--seed 20260725] [--force]");
+        Console.WriteLine("    --tracks 10000|50000|100000 --output <directory> [--seed 20260725] [--force]");
         Console.WriteLine();
         Console.WriteLine("--force only replaces a directory previously created by this generator.");
     }

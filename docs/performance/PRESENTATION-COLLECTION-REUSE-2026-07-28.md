@@ -5,7 +5,7 @@ VIEW-003 removes repeated presentation rebuilding when returning to an already-i
 ## What changed
 
 - Each primary gallery owns a cached `ObservableCollection` instead of sharing one collection that is cleared and repopulated.
-- Materialized gallery pages remain attached to that tab, so returning to a deep Albums or Artists position does not reconstruct earlier pages.
+- The complete lightweight gallery collection remains attached to that tab, so returning to a deep Albums or Artists position does not reconstruct its source.
 - Songs, Favorites, folders, playlists, and collection details reuse their track presentation by navigation-state key.
 - Source factories are lazy on a cache hit; a cached switch does not enumerate or project the source again.
 - A library/search generation invalidates presentation caches before applying new repository results, preventing stale cards or tracks.
