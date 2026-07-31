@@ -8,7 +8,28 @@ namespace Dextromethorphan.App;
 
 public partial class SettingsWindow : Window
 {
+    private bool _decoderCheckStarted;
+
     public SettingsWindow() => InitializeComponent();
+
+    protected override async void OnContentRendered(EventArgs e)
+    {
+        base.OnContentRendered(e);
+        if (_decoderCheckStarted || DataContext is not MainViewModel viewModel)
+            return;
+        _decoderCheckStarted = true;
+        await RunAsync(() => viewModel.RefreshDecoderCapabilitiesAsync());
+    }
+
+    private async void CheckDecoders_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+            await RunAsync(
+                () => viewModel.RefreshDecoderCapabilitiesAsync(
+                    forceRefresh: true));
+    }
 
     private async void OutputDevice_SelectionChanged(
         object sender,

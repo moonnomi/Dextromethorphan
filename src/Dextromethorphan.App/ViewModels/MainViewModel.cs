@@ -7,6 +7,7 @@ using Dextromethorphan.App.UI;
 using Dextromethorphan.Core.Abstractions;
 using Dextromethorphan.Core.Lyrics;
 using Dextromethorphan.Core.Models;
+using Dextromethorphan.Infrastructure.Audio;
 using Dextromethorphan.Infrastructure.Library;
 using Dextromethorphan.Infrastructure.Storage;
 
@@ -33,6 +34,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly DiagnosticsBundleExporter _diagnosticsBundles;
     private readonly UserDataBackupService _userDataBackups;
     private readonly DuplicateDetectionService _duplicates;
+    private readonly AudioDecoderCapabilityService _decoderCapabilities;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly ConcurrentDictionary<string, string?> _resolvedArtwork = new(StringComparer.OrdinalIgnoreCase);
     private readonly Stack<NavigationEntry> _backHistory = new();
@@ -110,6 +112,9 @@ public sealed class MainViewModel : ObservableObject
     private string _outputProfileStatus =
         "Select an output to inspect its capabilities.";
     private bool _isOutputProfileBusy;
+    private string _decoderCapabilityStatus =
+        "Codec availability has not been checked.";
+    private bool _isDecoderCapabilityBusy;
 
     public MainViewModel(
         ISettingsService settings,
@@ -129,7 +134,8 @@ public sealed class MainViewModel : ObservableObject
         ArtworkImageService artworkImages,
         DiagnosticsBundleExporter diagnosticsBundles,
         UserDataBackupService userDataBackups,
-        DuplicateDetectionService duplicates)
+        DuplicateDetectionService duplicates,
+        AudioDecoderCapabilityService decoderCapabilities)
     {
         _settings = settings; _repository = repository; _playlists = playlists; _scanner = scanner; _artwork = artwork; _metadataReader = metadataReader;
         _audio = audio; _queue = queue; _sleepTimer = sleepTimer; _shortcuts = shortcuts; _systemMedia = systemMedia;
@@ -138,6 +144,7 @@ public sealed class MainViewModel : ObservableObject
         _diagnosticsBundles = diagnosticsBundles;
         _userDataBackups = userDataBackups;
         _duplicates = duplicates;
+        _decoderCapabilities = decoderCapabilities;
         NavigateCommand = new RelayCommand(p => Navigate(p?.ToString()));
         SelectGroupCommand = new RelayCommand(p => SelectGroup(p as LibraryCardViewModel));
         CloseCollectionCommand = new RelayCommand(_ => CloseCollectionDetail());
@@ -214,6 +221,7 @@ public sealed class MainViewModel : ObservableObject
     public ObservableCollection<AudioDeviceInfo> OutputDevices { get; } = new ObservableRangeCollection<AudioDeviceInfo>();
     public ObservableCollection<LibrarySourceStatus> LibrarySources { get; } = new ObservableRangeCollection<LibrarySourceStatus>();
     public ObservableCollection<DuplicateTrackGroup> DuplicateGroups { get; } = new ObservableRangeCollection<DuplicateTrackGroup>();
+    public ObservableCollection<DecoderCapability> DecoderCapabilities { get; } = new ObservableRangeCollection<DecoderCapability>();
     public string DuplicateScanStatus { get => _duplicateScanStatus; private set => Set(ref _duplicateScanStatus, value); }
     public AudioOutputProfileDraft OutputProfile { get; } = new();
     public AudioDeviceInfo? SelectedOutputDevice
@@ -247,6 +255,16 @@ public sealed class MainViewModel : ObservableObject
     {
         get => _isOutputProfileBusy;
         private set => Set(ref _isOutputProfileBusy, value);
+    }
+    public string DecoderCapabilityStatus
+    {
+        get => _decoderCapabilityStatus;
+        private set => Set(ref _decoderCapabilityStatus, value);
+    }
+    public bool IsDecoderCapabilityBusy
+    {
+        get => _isDecoderCapabilityBusy;
+        private set => Set(ref _isDecoderCapabilityBusy, value);
     }
     public IReadOnlyList<WasapiMode> WasapiModes { get; } =
         Enum.GetValues<WasapiMode>();
@@ -551,6 +569,31 @@ public sealed class MainViewModel : ObservableObject
         finally
         {
             IsOutputProfileBusy = false;
+        }
+    }
+
+    public async Task RefreshDecoderCapabilitiesAsync(
+        bool forceRefresh = false)
+    {
+        if (IsDecoderCapabilityBusy) return;
+        IsDecoderCapabilityBusy = true;
+        DecoderCapabilityStatus = "Checking installed decoder paths…";
+        try
+        {
+            var capabilities = await _decoderCapabilities.InspectAsync(
+                forceRefresh,
+                _lifetime.Token);
+            Replace(DecoderCapabilities, capabilities);
+            var unavailable = capabilities.Count(
+                capability => capability.State
+                    == DecoderCapabilityState.Unavailable);
+            DecoderCapabilityStatus = unavailable == 0
+                ? $"All {capabilities.Count} codec paths are available."
+                : $"{unavailable} of {capabilities.Count} codec paths are unavailable.";
+        }
+        finally
+        {
+            IsDecoderCapabilityBusy = false;
         }
     }
 

@@ -27,7 +27,7 @@ public sealed class TagLibMetadataReader : ITrackMetadataReader
             AlbumArtist = albumArtist,
             Album = string.IsNullOrWhiteSpace(tag.Album) ? "Unknown album" : tag.Album.Trim(),
             Genre = Join(tag.Genres),
-            Comment = tag.Comment?.Trim() ?? "",
+            Comment = ReadComment(file, tag),
             Year = checked((int)tag.Year),
             TrackNumber = checked((int)tag.Track),
             DiscNumber = checked((int)tag.Disc),
@@ -84,6 +84,17 @@ public sealed class TagLibMetadataReader : ITrackMetadataReader
     {
         var value = ReadTagValue(file, key);
         return short.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var fixedPoint) ? fixedPoint / 256d : null;
+    }
+
+    private static string ReadComment(TagLib.File file, TagLib.Tag tag)
+    {
+        var value = tag.Comment;
+        if (string.IsNullOrWhiteSpace(value)
+            && file.GetTag(TagLib.TagTypes.Xiph, false)
+                is TagLib.Ogg.XiphComment xiph)
+            value = xiph.GetFirstField("COMMENT")
+                    ?? xiph.GetFirstField("DESCRIPTION");
+        return value?.Trim() ?? "";
     }
 
     private static string? ReadTagValue(TagLib.File file, string key)

@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Dextromethorphan.Core.Abstractions;
+using Dextromethorphan.Infrastructure.Audio;
 using Dextromethorphan.Infrastructure.Storage;
 
 namespace Dextromethorphan.App.Diagnostics;
@@ -14,7 +15,8 @@ public sealed partial class DiagnosticsBundleExporter(
     AppPaths paths,
     ISettingsService settings,
     IAudioEngine audio,
-    SqliteLibraryRepository library)
+    SqliteLibraryRepository library,
+    AudioDecoderCapabilityService decoders)
 {
     private static readonly JsonSerializerOptions JsonOptions =
         new() { WriteIndented = true };
@@ -135,6 +137,13 @@ public sealed partial class DiagnosticsBundleExporter(
                     archive,
                     "database.json",
                     database,
+                    cancellationToken);
+
+                await WriteJsonAsync(
+                    archive,
+                    "decoder-capabilities.json",
+                    await decoders.InspectAsync(
+                        cancellationToken: cancellationToken),
                     cancellationToken);
 
                 var devices = new List<object>();

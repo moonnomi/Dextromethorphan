@@ -1,0 +1,98 @@
+﻿{
+    "schemaVersion":  1,
+    "generator":  "scripts/New-AudioFormatCorpus.ps1",
+    "source":  "synthetic 997 Hz sine wave; no copyrighted audio",
+    "generatedWith":  "ffmpeg version 8.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers",
+    "files":  [
+                  {
+                      "file":  "aac.aac",
+                      "bytes":  41072,
+                      "sha256":  "b51002032b301d4293d9af1f9d17e78823221d84992ba0df57f734062a828673"
+                  },
+                  {
+                      "file":  "aac.m4a",
+                      "bytes":  41696,
+                      "sha256":  "9d3ac51bb307bd8cd0c6bd192e65562310b845f26d1a645723ce733a62d3d3c0"
+                  },
+                  {
+                      "file":  "alac.m4a",
+                      "bytes":  44292,
+                      "sha256":  "f0b073af083f99ad9947df7ebb05f5b4e8a16cd797b53ac62a07cd7a1a13988b"
+                  },
+                  {
+                      "file":  "generated-cover.bmp",
+                      "bytes":  12342,
+                      "sha256":  "6003b753b5538dc6de660c2d30fba7a5a485cc05ffa165e0b5214373b7b7f05d"
+                  },
+                  {
+                      "file":  "malformed-header.flac",
+                      "bytes":  17,
+                      "sha256":  "b7131d219973cec04a5afff2fcbde620ba081f022124bc9a693a01dbc9d472f5"
+                  },
+                  {
+                      "file":  "metadata-heavy.flac",
+                      "bytes":  60804,
+                      "sha256":  "93297e8c9b4c4f1282390982960782327ed7e847fd0bc940dbee378a7189f2b1"
+                  },
+                  {
+                      "file":  "README.md",
+                      "bytes":  693,
+                      "sha256":  "14e77a91bccd4454b8542862859bc017461e69129572b8589bb7f61e05f75dc2"
+                  },
+                  {
+                      "file":  "reference.aiff",
+                      "bytes":  384088,
+                      "sha256":  "b0da2cac4fbf31125ccdadafb1bad342385f3ae526691e1654a1b453b9fbb02d"
+                  },
+                  {
+                      "file":  "reference.dff",
+                      "bytes":  108,
+                      "sha256":  "662ffc0eb6492e1c149b53f8d1afbd95b31729260b5633403196ac2dd77323c5"
+                  },
+                  {
+                      "file":  "reference.dsf",
+                      "bytes":  100,
+                      "sha256":  "9811b51dbf1295565be5e5cefbdc722861a6644c43130addcd654f21a2f4ad9c"
+                  },
+                  {
+                      "file":  "reference.flac",
+                      "bytes":  36338,
+                      "sha256":  "11a4d755970f1b8c5c87284628e85b34047164a0d79f731971ec3c28d4c6c1c6"
+                  },
+                  {
+                      "file":  "reference.mp3",
+                      "bytes":  9243,
+                      "sha256":  "be6c8b5f11965e0cdfa9f6f1ba56c67591ccd36bdc4f64fceb7ab86a59032bfe"
+                  },
+                  {
+                      "file":  "reference.ogg",
+                      "bytes":  12251,
+                      "sha256":  "5e01017343db6f0eaa591ac66f07963831701f73988a6719b450ec8e66fc2f70"
+                  },
+                  {
+                      "file":  "reference.opus",
+                      "bytes":  37547,
+                      "sha256":  "f54213ffe4fe11a26265d44348ddd7c5fd5a6529369d2f096c18b984b0268a59"
+                  },
+                  {
+                      "file":  "reference.wav",
+                      "bytes":  384078,
+                      "sha256":  "134a499b4ceed946335fb359fa643d0f5e31873334a8e98c4a0242e2b083ff9b"
+                  },
+                  {
+                      "file":  "reference.wma",
+                      "bytes":  52040,
+                      "sha256":  "23bf75073cae75925de3e722cd91d27e848c354ef6d6ad6f3aee51995d7f53fc"
+                  },
+                  {
+                      "file":  "truncated.mp3",
+                      "bytes":  96,
+                      "sha256":  "648fac7f7ef7b292ebff79fcdf3d5d3e37c6e41dcfca797ae9a85af4538891d8"
+                  },
+                  {
+                      "file":  "unicode-音楽-alac.m4a",
+                      "bytes":  44292,
+                      "sha256":  "f0b073af083f99ad9947df7ebb05f5b4e8a16cd797b53ac62a07cd7a1a13988b"
+                  }
+              ]
+}

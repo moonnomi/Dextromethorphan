@@ -39,6 +39,7 @@ public partial class App : Application
             services.AddSingleton<UserDataBackupService>();
             services.AddSingleton<DatabaseRecoveryService>();
             services.AddSingleton<DuplicateDetectionService>();
+            services.AddSingleton<AudioDecoderCapabilityService>();
             services.AddSingleton<AppPaths>();
             services.AddSingleton<IApplicationLog>(x =>
                 new StructuredApplicationLog(x.GetRequiredService<AppPaths>()));

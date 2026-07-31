@@ -3,6 +3,7 @@ using Dextromethorphan.App.Diagnostics;
 using Dextromethorphan.Core.Abstractions;
 using Dextromethorphan.Core.Models;
 using Dextromethorphan.Infrastructure.Settings;
+using Dextromethorphan.Infrastructure.Audio;
 using Dextromethorphan.Infrastructure.Storage;
 using Microsoft.Data.Sqlite;
 
@@ -38,7 +39,8 @@ public sealed class DiagnosticsBundleTests : IDisposable
                 paths,
                 settings,
                 new StubAudioEngine(),
-                library)
+                library,
+                new AudioDecoderCapabilityService())
             .ExportAsync(destination, cancellationToken);
 
         using var archive = ZipFile.OpenRead(destination);
@@ -68,6 +70,14 @@ public sealed class DiagnosticsBundleTests : IDisposable
         Assert.Contains("\"FallbackActive\": true", pipeline);
         Assert.Contains("\"RecoveryAttempts\": 2", pipeline);
         Assert.Contains("\"MaximumCallbackMilliseconds\": 1.75", pipeline);
+        var decoderEntry = Assert.Single(
+            archive.Entries,
+            entry => entry.FullName == "decoder-capabilities.json");
+        using var decoderReader = new StreamReader(decoderEntry.Open());
+        var decoderReport = await decoderReader.ReadToEndAsync(
+            cancellationToken);
+        Assert.Contains("\"Format\": \"Opus\"", decoderReport);
+        Assert.DoesNotContain("\"State\": \"Unavailable\"", decoderReport);
     }
 
     public void Dispose()

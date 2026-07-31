@@ -18,11 +18,12 @@ internal static class AudioDecoderFactory
             ".mp3" => new Mp3FileReader(track.Path),
             ".flac" => new FlacReader(track.Path),
             ".ogg" => new VorbisWaveReader(track.Path),
+            ".opus" => new OpusWaveStream(track.Path),
             ".dsf" => new DsfDopWaveStream(track.Path),
             ".dff" => new DffDopWaveStream(track.Path),
             _ => new MediaFoundationReader(track.Path)
         };
-        var decoder = extension switch { ".dsf" => "Native DSF → DoP 1.1", ".dff" => "Native DSDIFF → DoP 1.1", ".flac" => "Managed FLAC decoder", ".ogg" => "NVorbis managed decoder", ".wav" or ".wave" or ".aif" or ".aiff" or ".mp3" => "NAudio native", _ => "Windows Media Foundation" };
+        var decoder = extension switch { ".dsf" => "Native DSF → DoP 1.1", ".dff" => "Native DSDIFF → DoP 1.1", ".flac" => "Managed FLAC decoder", ".ogg" => "NVorbis managed decoder", ".opus" => "Managed Concentus Opus decoder", ".wav" or ".wave" or ".aif" or ".aiff" or ".mp3" => "NAudio native", _ => "Windows Media Foundation" };
         return new DecodedAudio(track, reader, decoder);
     }
 

@@ -152,10 +152,10 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 
 ### Decoder and format coverage
 
-- [ ] **P0 DEC-001** Maintain a generated/legal format corpus covering FLAC, MP3, WAV, AIFF, Ogg Vorbis, Opus, AAC/M4A, ALAC, WMA, DSF, and DFF.
-- [ ] **P0 DEC-002** Bundle or validate dependable decoder coverage on a clean supported Windows installation; do not rely on an assumed Media Foundation transform.
-- [ ] **P0 DEC-003** Test malformed headers, truncated files, unusual metadata blocks, large tags, embedded covers, VBR duration, and Unicode paths.
-- [ ] **P0 DEC-004** Verify seeking accuracy and end-of-stream behavior for every supported codec.
+- [x] **P0 DEC-001** Maintain a generated/legal format corpus covering FLAC, MP3, WAV, AIFF, Ogg Vorbis, Opus, AAC/M4A, ALAC, WMA, DSF, and DFF. See [decoder corpus and coverage](audio/DECODER-CORPUS-AND-COVERAGE-2026-07-31.md).
+- [x] **P0 DEC-002** Bundle or validate dependable decoder coverage on a clean supported Windows installation; do not rely on an assumed Media Foundation transform. See [decoder corpus and coverage](audio/DECODER-CORPUS-AND-COVERAGE-2026-07-31.md).
+- [x] **P0 DEC-003** Test malformed headers, truncated files, unusual metadata blocks, large tags, embedded covers, VBR duration, and Unicode paths. See [decoder corpus and coverage](audio/DECODER-CORPUS-AND-COVERAGE-2026-07-31.md).
+- [x] **P0 DEC-004** Verify seeking accuracy and end-of-stream behavior for every supported codec. See [decoder corpus and coverage](audio/DECODER-CORPUS-AND-COVERAGE-2026-07-31.md).
 - [ ] **P1 DEC-005** Add CUE sheet and single-image album support with per-track boundaries and metadata.
 - [ ] **P1 DEC-006** Add chapters for formats that support them.
 - [ ] **P2 DEC-007** Add DST-compressed DFF support.
