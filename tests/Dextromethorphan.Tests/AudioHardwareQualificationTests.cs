@@ -17,26 +17,35 @@ public sealed class AudioHardwareQualificationTests
                 "DEXTROMETHORPHAN_RUN_AUDIO_HARDWARE_TESTS") != "1")
             return;
 
-        using var enumerator = new MMDeviceEnumerator();
-        using var endpoint = enumerator.GetDefaultAudioEndpoint(
-            DataFlow.Render,
-            Role.Multimedia);
-        var volumeBefore =
-            endpoint.AudioEndpointVolume.MasterVolumeLevelScalar;
         await using var engine = new WasapiAudioEngine();
         var devices = await engine.GetOutputDevicesAsync(
             TestContext.Current.CancellationToken);
-        var systemDefault = Assert.Single(
+        var requestedDeviceId = Environment.GetEnvironmentVariable(
+            "DEXTROMETHORPHAN_AUDIO_DEVICE_ID");
+        if (string.IsNullOrWhiteSpace(requestedDeviceId))
+            requestedDeviceId = "default";
+        var selectedDevice = Assert.Single(
             devices,
-            device => device.Id == "default");
+            device => device.Id.Equals(
+                requestedDeviceId,
+                StringComparison.Ordinal));
 
-        Assert.False(string.IsNullOrWhiteSpace(systemDefault.MixFormat));
+        using var enumerator = new MMDeviceEnumerator();
+        using var endpoint = selectedDevice.Id == "default"
+            ? enumerator.GetDefaultAudioEndpoint(
+                DataFlow.Render,
+                Role.Multimedia)
+            : enumerator.GetDevice(selectedDevice.Id);
+        var volumeBefore =
+            endpoint.AudioEndpointVolume.MasterVolumeLevelScalar;
+
+        Assert.False(string.IsNullOrWhiteSpace(selectedDevice.MixFormat));
         var capabilities =
             await engine.GetDeviceCapabilitiesAsync(
-                systemDefault.Id,
+                selectedDevice.Id,
                 TestContext.Current.CancellationToken);
 
-        Assert.Equal("default", capabilities.DeviceId);
+        Assert.Equal(selectedDevice.Id, capabilities.DeviceId);
         Assert.True(capabilities.MixFormat.SampleRate > 0);
         Assert.True(capabilities.MixFormat.Channels > 0);
         Assert.All(
@@ -103,7 +112,8 @@ public sealed class AudioHardwareQualificationTests
                         capturedAt = DateTimeOffset.UtcNow,
                         device = new
                         {
-                            systemDefault.Name,
+                            selectedDevice.Name,
+                            selectedDevice.IsDefault,
                             id = "redacted",
                             capabilities.MixFormat,
                             capabilities.SupportedExclusiveFormats,
