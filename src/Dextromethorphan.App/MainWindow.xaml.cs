@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Controls;
@@ -72,6 +73,7 @@ public partial class MainWindow : Window
         PerformanceOverlay = performanceOverlay;
         PerformanceOverlay.Attach(this);
         DataContext = viewModel;
+        Loaded += ApplyAutomationNames;
         InstallChapterMarkers();
         ViewModel.PropertyChanged += ViewModelOnPropertyChanged;
         ViewModel.NavigationStarting += ViewModelOnNavigationStarting;
@@ -85,6 +87,25 @@ public partial class MainWindow : Window
             IdleCleanupTimer_Tick,
             Dispatcher);
         _idleCleanupTimer.Start();
+    }
+
+    private void ApplyAutomationNames(object sender, RoutedEventArgs e)
+    {
+        AutomationProperties.SetName(SearchBox, "Search library");
+        AutomationProperties.SetName(SeekSlider, "Playback position");
+        AutomationProperties.SetName(VolumeSlider, "Volume");
+        AutomationProperties.SetName(QueueList, "Playback queue");
+        AutomationProperties.SetName(GalleryList, "Library collections");
+        AutomationProperties.SetName(SidebarList, "Folders and playlists");
+        foreach (var button in FindVisualChildren<Button>(this))
+        {
+            if (!string.IsNullOrWhiteSpace(
+                    AutomationProperties.GetName(button))
+                || button.ToolTip is not string tooltip
+                || string.IsNullOrWhiteSpace(tooltip))
+                continue;
+            AutomationProperties.SetName(button, tooltip);
+        }
     }
 
     private void InstallChapterMarkers()

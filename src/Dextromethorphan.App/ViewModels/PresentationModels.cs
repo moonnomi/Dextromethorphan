@@ -32,7 +32,10 @@ public sealed class QueueEntryViewModel(QueueEntry entry, string? artworkPath) :
     public QueueEntry Entry { get; } = entry;
     public Track Track => Entry.Track;
     public bool IsPlaying => Entry.IsPlaying;
+    public string AutomationName =>
+        $"{Track.Title} by {Track.DisplayArtist}, {Track.DurationText}";
     public string? ArtworkPath { get => _artworkPath; set => Set(ref _artworkPath, value); }
+    public override string ToString() => AutomationName;
 }
 
 public sealed class LyricLineViewModel(LyricLine line, bool isSynced = true) : ObservableObject

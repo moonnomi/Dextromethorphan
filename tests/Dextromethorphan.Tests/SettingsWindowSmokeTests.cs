@@ -35,9 +35,12 @@ public sealed class SettingsWindowSmokeTests
                 Assert.Equal(
                     "Dextromethorphan settings",
                     window.Title);
-                var tabs = Assert.IsType<
-                    System.Windows.Controls.TabControl>(
-                    window.Content);
+                var frame = Assert.IsType<
+                    System.Windows.Controls.Border>(window.Content);
+                var layout = Assert.IsType<
+                    System.Windows.Controls.Grid>(frame.Child);
+                var tabs = Assert.Single(layout.Children.OfType<
+                    System.Windows.Controls.TabControl>());
                 Assert.True(tabs.Items.Count >= 2);
                 var audio = Assert.IsType<
                     System.Windows.Controls.TabItem>(

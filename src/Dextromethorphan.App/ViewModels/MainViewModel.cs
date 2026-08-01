@@ -364,7 +364,7 @@ public sealed class MainViewModel : ObservableObject
             (PlaySelectedCommand as AsyncRelayCommand)?.CanExecute(value);
         }
     }
-    public Track? CurrentTrack { get => _currentTrack; private set { if (Set(ref _currentTrack, value)) { Raise(nameof(HasCurrentTrack)); Raise(nameof(CurrentTitle)); Raise(nameof(CurrentArtist)); Raise(nameof(CurrentArtworkPath)); Raise(nameof(LoveGlyph)); } } }
+    public Track? CurrentTrack { get => _currentTrack; private set { if (Set(ref _currentTrack, value)) { Raise(nameof(HasCurrentTrack)); Raise(nameof(CurrentTitle)); Raise(nameof(CurrentArtist)); Raise(nameof(CurrentArtworkPath)); Raise(nameof(LoveGlyph)); Raise(nameof(LoveText)); } } }
     public LibraryCardViewModel? SelectedCard
     {
         get => _selectedCard;
@@ -391,6 +391,9 @@ public sealed class MainViewModel : ObservableObject
     public string CurrentArtist => CurrentTrack is null ? "Choose something from your library" : $"{CurrentTrack.DisplayArtist} — {CurrentTrack.DisplayAlbum}";
     public string? CurrentArtworkPath => CurrentTrack?.ArtworkPath;
     public string LoveGlyph => CurrentTrack?.IsLoved == true ? "♥" : "♡";
+    public string LoveText => CurrentTrack?.IsLoved == true
+        ? "Remove love from current track"
+        : "Love current track";
     public bool IsCollectionDetailOpen
     {
         get => _isCollectionDetailOpen;
@@ -423,7 +426,16 @@ public sealed class MainViewModel : ObservableObject
     public string SelectedGroupSubtitle { get => _selectedGroupSubtitle; private set => Set(ref _selectedGroupSubtitle, value); }
     public string SearchText { get => _searchText; set { if (Set(ref _searchText, value)) DebounceSearch(); } }
     public string StatusText { get => _statusText; private set => Set(ref _statusText, value); }
-    public string PlayGlyph { get => _playGlyph; private set => Set(ref _playGlyph, value); }
+    public string PlayGlyph
+    {
+        get => _playGlyph;
+        private set
+        {
+            if (Set(ref _playGlyph, value))
+                Raise(nameof(PlaybackActionText));
+        }
+    }
+    public string PlaybackActionText => PlayGlyph == "Ⅱ" ? "Pause" : "Play";
     public string PositionText { get => _positionText; private set => Set(ref _positionText, value); }
     public string DurationText { get => _durationText; private set => Set(ref _durationText, value); }
     public double PositionSeconds { get => _positionSeconds; private set => Set(ref _positionSeconds, value); }
@@ -605,10 +617,32 @@ public sealed class MainViewModel : ObservableObject
         await _audio.SetVolumeAsync(_volume, _lifetime.Token);
         await Task.WhenAll(refreshLibrary, refreshArtwork);
         _scanner.StartWatching(_settings.Current.LibraryFolders);
-        Replace(LibrarySources, _scanner.SourceStatuses);
+        await RefreshLibrarySourceCountsAsync();
         if (!IsSafeMode)
             await RestoreSessionAsync();
         IsLibraryReady = true;
+    }
+
+    private async Task RefreshLibrarySourceCountsAsync()
+    {
+        var statuses = _scanner.SourceStatuses;
+        var refreshed = new List<LibrarySourceStatus>(statuses.Count);
+        foreach (var status in statuses)
+        {
+            try
+            {
+                var count = await _repository.CountUnderRootAsync(
+                    status.Root,
+                    _lifetime.Token);
+                refreshed.Add(status with { TrackCount = count });
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException)
+            {
+                refreshed.Add(status);
+            }
+        }
+        Replace(LibrarySources, refreshed);
     }
 
     public async Task SaveReplayGainSettingsAsync()

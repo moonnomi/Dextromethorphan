@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using Dextromethorphan.App.ViewModels;
 using Dextromethorphan.Core.Models;
 using Microsoft.Win32;
@@ -11,6 +12,32 @@ public partial class SettingsWindow : Window
     private bool _decoderCheckStarted;
 
     public SettingsWindow() => InitializeComponent();
+
+    private void SettingsTitleBar_MouseLeftButtonDown(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left) return;
+        if (e.ClickCount == 2)
+        {
+            WindowState = WindowState == WindowState.Maximized
+                ? WindowState.Normal
+                : WindowState.Maximized;
+            return;
+        }
+        DragMove();
+    }
+
+    private void SettingsMinimize_Click(object sender, RoutedEventArgs e) =>
+        WindowState = WindowState.Minimized;
+
+    private void SettingsMaximize_Click(object sender, RoutedEventArgs e) =>
+        WindowState = WindowState == WindowState.Maximized
+            ? WindowState.Normal
+            : WindowState.Maximized;
+
+    private void SettingsClose_Click(object sender, RoutedEventArgs e) =>
+        Close();
 
     protected override async void OnContentRendered(EventArgs e)
     {
