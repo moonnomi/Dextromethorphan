@@ -29,4 +29,30 @@ public sealed class SoakPlaybackClockTests
         Assert.Equal(TimeSpan.FromMinutes(20), clock.UnobservedGap);
         Assert.Equal(TimeSpan.Zero, clock.NonPlaying);
     }
+
+    [Theory]
+    [InlineData(8, 8, true, true)]
+    [InlineData(7.99, 8, true, false)]
+    [InlineData(8, 7.99, true, false)]
+    [InlineData(8, 8, false, false)]
+    public void MilestoneQualificationRequiresEightRequestedAndObservedHours(
+        double requestedHours,
+        double observedHours,
+        bool runPassed,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            SoakQualificationPolicy.IsQualified(
+                TimeSpan.FromHours(requestedHours),
+                TimeSpan.FromHours(observedHours),
+                runPassed));
+    }
+
+    [Fact]
+    public void UnknownSoakArgumentsAreRejected()
+    {
+        Assert.Throws<ArgumentException>(() =>
+            SoakOptions.Parse(["--unexpected", "value"]));
+    }
 }

@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Dextromethorphan.Core.Models;
 using Dextromethorphan.Infrastructure.Audio;
@@ -9,6 +11,9 @@ namespace Dextromethorphan.AudioSoak;
 
 internal static class Program
 {
+    private static readonly TimeSpan MilestoneQualificationDuration =
+        TimeSpan.FromHours(8);
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true
@@ -66,8 +71,10 @@ internal static class Program
         var cancelled = false;
         var completed = false;
         var deviceName = "Unavailable";
+        var resolvedDeviceId = options.DeviceId;
         float? volumeBefore = null;
         float? volumeAfter = null;
+        var endpointVolumeEverChanged = false;
         long initialWorkingSet = 0;
         long peakWorkingSet = 0;
         long finalWorkingSet = 0;
@@ -76,9 +83,86 @@ internal static class Program
         AudioDiagnostics? finalDiagnostics = null;
         string? fatalError = null;
 
+        SoakReport CreateReport(
+            string reportState,
+            bool reportCompleted,
+            bool reportCancelled,
+            bool runPassed,
+            AudioDiagnostics? diagnostics)
+        {
+            process.Refresh();
+            finalWorkingSet = process.WorkingSet64;
+            peakWorkingSet = Math.Max(
+                peakWorkingSet,
+                Math.Max(finalWorkingSet, process.PeakWorkingSet64));
+            var volumeUnchanged = volumeBefore.HasValue
+                                  && volumeAfter.HasValue
+                                  && volumeBefore.Value.Equals(volumeAfter.Value)
+                                  && !endpointVolumeEverChanged;
+            var memoryGrowth = finalWorkingSet - initialWorkingSet;
+            var peakMemoryGrowth = peakWorkingSet - initialWorkingSet;
+            var cpuTime = process.TotalProcessorTime - initialCpu;
+            var cpuPercent = stopwatch.Elapsed.TotalSeconds <= 0
+                ? 0
+                : cpuTime.TotalSeconds
+                  / stopwatch.Elapsed.TotalSeconds
+                  / Environment.ProcessorCount
+                  * 100;
+            var milestoneQualified = SoakQualificationPolicy.IsQualified(
+                options.Duration,
+                playbackClock.Playing,
+                runPassed,
+                MilestoneQualificationDuration);
+            return new SoakReport(
+                3,
+                reportState,
+                Environment.ProcessId,
+                startedAt,
+                DateTimeOffset.UtcNow,
+                MilestoneQualificationDuration.TotalSeconds,
+                options.Duration.TotalSeconds,
+                stopwatch.Elapsed.TotalSeconds,
+                playbackClock.Playing.TotalSeconds,
+                playbackClock.UnobservedGap.TotalSeconds,
+                playbackClock.NonPlaying.TotalSeconds,
+                reportCompleted,
+                reportCancelled,
+                runPassed,
+                milestoneQualified,
+                new DeviceReport(deviceName, HashDeviceId(resolvedDeviceId)),
+                new ConfigurationReport(
+                    "Shared WASAPI",
+                    options.BufferMilliseconds,
+                    options.TrackSeconds,
+                    options.CrossfadeSeconds,
+                    "Generated PCM silence (44.1/48 kHz, stereo, 16-bit)",
+                    "Fixed; endpoint writes disabled"),
+                Volatile.Read(ref transitionCount),
+                Volatile.Read(ref playbackEndedCount),
+                faults.Distinct().ToArray(),
+                diagnostics,
+                new MemoryReport(
+                    initialWorkingSet,
+                    peakWorkingSet,
+                    finalWorkingSet,
+                    memoryGrowth,
+                    peakMemoryGrowth),
+                new CpuReport(cpuTime.TotalSeconds, cpuPercent),
+                new VolumeReport(
+                    volumeBefore,
+                    volumeAfter,
+                    volumeUnchanged,
+                    endpointVolumeEverChanged),
+                samples.ToArray());
+        }
+
         try
         {
-            (deviceName, volumeBefore) = ReadEndpoint(options.DeviceId);
+            var endpoint = ReadEndpoint(options.DeviceId);
+            resolvedDeviceId = endpoint.Id;
+            deviceName = endpoint.Name;
+            volumeBefore = endpoint.Volume;
+            volumeAfter = endpoint.Volume;
             var fixturePaths = new[]
             {
                 Path.Combine(fixtureRoot, "silence-44100.wav"),
@@ -115,7 +199,7 @@ internal static class Program
             await engine.ConfigureOutputAsync(
                 new AudioOutputProfile
                 {
-                    DeviceId = options.DeviceId,
+                    DeviceId = resolvedDeviceId,
                     Name = deviceName,
                     Mode = WasapiMode.Shared,
                     BufferMilliseconds = options.BufferMilliseconds,
@@ -211,6 +295,28 @@ internal static class Program
                         snapshot.Diagnostics?.RecoveryAttempts ?? 0,
                         snapshot.Diagnostics?.LastCallbackMilliseconds ?? 0,
                         snapshot.Diagnostics?.MaximumCallbackMilliseconds ?? 0));
+                    try
+                    {
+                        volumeAfter = ReadEndpoint(resolvedDeviceId).Volume;
+                        if (volumeBefore.HasValue
+                            && !volumeBefore.Value.Equals(volumeAfter.Value))
+                            endpointVolumeEverChanged = true;
+                    }
+                    catch (Exception exception)
+                    {
+                        faults.Enqueue(
+                            "Endpoint-volume checkpoint failed: " +
+                            exception.Message);
+                        throw;
+                    }
+                    await WriteReportAsync(
+                        outputPath,
+                        CreateReport(
+                            "Running",
+                            false,
+                            false,
+                            false,
+                            snapshot.Diagnostics));
                     nextSampleAt = stopwatch.Elapsed
                                    + options.SampleInterval;
                     Console.WriteLine(
@@ -247,7 +353,10 @@ internal static class Program
                 Math.Max(finalWorkingSet, process.PeakWorkingSet64));
             try
             {
-                (_, volumeAfter) = ReadEndpoint(options.DeviceId);
+                volumeAfter = ReadEndpoint(resolvedDeviceId).Volume;
+                if (volumeBefore.HasValue
+                    && !volumeBefore.Value.Equals(volumeAfter.Value))
+                    endpointVolumeEverChanged = true;
             }
             catch (Exception exception)
             {
@@ -256,66 +365,37 @@ internal static class Program
 
             var volumeUnchanged = volumeBefore.HasValue
                                   && volumeAfter.HasValue
-                                  && volumeBefore.Value.Equals(volumeAfter.Value);
-            var memoryGrowth = finalWorkingSet - initialWorkingSet;
+                                  && volumeBefore.Value.Equals(volumeAfter.Value)
+                                  && !endpointVolumeEverChanged;
             var peakMemoryGrowth = peakWorkingSet - initialWorkingSet;
-            var cpuTime = process.TotalProcessorTime - initialCpu;
-            var cpuPercent = stopwatch.Elapsed.TotalSeconds <= 0
-                ? 0
-                : cpuTime.TotalSeconds
-                  / stopwatch.Elapsed.TotalSeconds
-                  / Environment.ProcessorCount
-                  * 100;
-            var qualified = completed
+            var runPassed = completed
                             && !cancelled
                             && faults.IsEmpty
-                            && playbackEndedCount == 0
+                            && Volatile.Read(ref playbackEndedCount) == 0
                             && (finalDiagnostics?.Underruns ?? 0) == 0
                             && (finalDiagnostics?.RecoveryAttempts ?? 0) == 0
                             && volumeUnchanged
                             && peakMemoryGrowth <= 128L * 1_048_576;
-            var report = new SoakReport(
-                2,
-                startedAt,
-                DateTimeOffset.UtcNow,
-                options.Duration.TotalSeconds,
-                stopwatch.Elapsed.TotalSeconds,
-                playbackClock.Playing.TotalSeconds,
-                playbackClock.UnobservedGap.TotalSeconds,
-                playbackClock.NonPlaying.TotalSeconds,
+            var reportState = completed
+                ? "Completed"
+                : cancelled
+                    ? "Cancelled"
+                    : "Failed";
+            var report = CreateReport(
+                reportState,
                 completed,
                 cancelled,
-                qualified,
-                new DeviceReport(deviceName, "redacted"),
-                new ConfigurationReport(
-                    "Shared WASAPI",
-                    options.BufferMilliseconds,
-                    options.TrackSeconds,
-                    options.CrossfadeSeconds,
-                    "Generated PCM silence (44.1/48 kHz, stereo, 16-bit)",
-                    "Fixed; endpoint writes disabled"),
-                transitionCount,
-                playbackEndedCount,
-                faults.Distinct().ToArray(),
-                finalDiagnostics,
-                new MemoryReport(
-                    initialWorkingSet,
-                    peakWorkingSet,
-                    finalWorkingSet,
-                    memoryGrowth,
-                    peakMemoryGrowth),
-                new CpuReport(cpuTime.TotalSeconds, cpuPercent),
-                new VolumeReport(volumeBefore, volumeAfter, volumeUnchanged),
-                samples);
+                runPassed,
+                finalDiagnostics);
             try
             {
-                await File.WriteAllTextAsync(
-                    outputPath,
-                    JsonSerializer.Serialize(report, JsonOptions));
+                await WriteReportAsync(outputPath, report);
                 Console.WriteLine($"Report written to {outputPath}");
-                Console.WriteLine(qualified
-                    ? "QUALIFIED"
-                    : "NOT QUALIFIED; inspect the report before changing HW-004.");
+                Console.WriteLine(report.Qualified
+                    ? "EIGHT-HOUR MILESTONE GATE QUALIFIED"
+                    : report.RunPassed
+                        ? "RUN PASSED; requested duration is below the eight-hour milestone gate."
+                        : "NOT QUALIFIED; inspect the report before changing HW-004.");
             }
             finally
             {
@@ -331,7 +411,7 @@ internal static class Program
 
             if (fatalError is not null)
                 Console.Error.WriteLine(fatalError);
-            Environment.ExitCode = qualified ? 0 : 2;
+            Environment.ExitCode = report.RunPassed ? 0 : 2;
         }
 
         return Environment.ExitCode;
@@ -383,7 +463,18 @@ internal static class Program
         stream.SetLength(stream.Position + dataLength);
     }
 
-    private static (string Name, float Volume) ReadEndpoint(string deviceId)
+    private static async Task WriteReportAsync(
+        string outputPath,
+        SoakReport report)
+    {
+        var temporaryPath = outputPath + ".tmp";
+        await File.WriteAllTextAsync(
+            temporaryPath,
+            JsonSerializer.Serialize(report, JsonOptions));
+        File.Move(temporaryPath, outputPath, true);
+    }
+
+    private static ResolvedEndpoint ReadEndpoint(string deviceId)
     {
         using var enumerator = new MMDeviceEnumerator();
         using var endpoint = deviceId.Equals(
@@ -391,12 +482,16 @@ internal static class Program
             StringComparison.OrdinalIgnoreCase)
             ? enumerator.GetDefaultAudioEndpoint(
                 DataFlow.Render,
-                Role.Multimedia)
+            Role.Multimedia)
             : enumerator.GetDevice(deviceId);
-        return (
+        return new(
+            endpoint.ID,
             endpoint.FriendlyName,
             endpoint.AudioEndpointVolume.MasterVolumeLevelScalar);
     }
+
+    private static string HashDeviceId(string deviceId) => Convert.ToHexString(
+        SHA256.HashData(Encoding.UTF8.GetBytes(deviceId)));
 }
 
 internal sealed record SoakOptions(
@@ -409,6 +504,18 @@ internal sealed record SoakOptions(
     string OutputPath,
     bool Help)
 {
+    private static readonly HashSet<string> ValueNames = new(
+        [
+            "--duration",
+            "--track-seconds",
+            "--crossfade",
+            "--buffer",
+            "--sample-interval",
+            "--device-id",
+            "--output"
+        ],
+        StringComparer.OrdinalIgnoreCase);
+
     public static SoakOptions Parse(string[] args)
     {
         var values = new Dictionary<string, string>(
@@ -418,6 +525,7 @@ internal sealed record SoakOptions(
         {
             if (args[index] is "--help" or "-h") continue;
             if (!args[index].StartsWith("--", StringComparison.Ordinal)
+                || !ValueNames.Contains(args[index])
                 || index + 1 >= args.Length)
                 throw new ArgumentException($"Invalid argument: {args[index]}");
             values[args[index]] = args[++index];
@@ -497,8 +605,11 @@ internal sealed record SoakOptions(
 
 internal sealed record SoakReport(
     int SchemaVersion,
+    string ReportState,
+    int RunnerProcessId,
     DateTimeOffset StartedAt,
     DateTimeOffset FinishedAt,
+    double MinimumQualificationDurationSeconds,
     double RequestedDurationSeconds,
     double ActualDurationSeconds,
     double ObservedPlayingSeconds,
@@ -506,6 +617,7 @@ internal sealed record SoakReport(
     double NonPlayingSeconds,
     bool Completed,
     bool Cancelled,
+    bool RunPassed,
     bool Qualified,
     DeviceReport Device,
     ConfigurationReport Configuration,
@@ -518,7 +630,7 @@ internal sealed record SoakReport(
     VolumeReport EndpointVolume,
     IReadOnlyList<SoakSample> Samples);
 
-internal sealed record DeviceReport(string Name, string Id);
+internal sealed record DeviceReport(string Name, string IdSha256);
 internal sealed record ConfigurationReport(
     string OutputMode,
     int BufferMilliseconds,
@@ -533,7 +645,11 @@ internal sealed record MemoryReport(
     long GrowthBytes,
     long PeakGrowthBytes);
 internal sealed record CpuReport(double TotalProcessorSeconds, double AveragePercent);
-internal sealed record VolumeReport(float? Before, float? After, bool Unchanged);
+internal sealed record VolumeReport(
+    float? Before,
+    float? After,
+    bool Unchanged,
+    bool ObservedChanged);
 internal sealed record SoakSample(
     double ElapsedSeconds,
     double ObservedPlayingSeconds,
@@ -545,6 +661,7 @@ internal sealed record SoakSample(
     int RecoveryAttempts,
     double LastCallbackMilliseconds,
     double MaximumCallbackMilliseconds);
+internal sealed record ResolvedEndpoint(string Id, string Name, float Volume);
 
 internal sealed class SoakPlaybackClock(TimeSpan maximumObservedInterval)
 {
@@ -565,5 +682,20 @@ internal sealed class SoakPlaybackClock(TimeSpan maximumObservedInterval)
             Playing += interval;
         else
             NonPlaying += interval;
+    }
+}
+
+internal static class SoakQualificationPolicy
+{
+    internal static bool IsQualified(
+        TimeSpan requested,
+        TimeSpan observedPlaying,
+        bool runPassed,
+        TimeSpan? minimumDuration = null)
+    {
+        var minimum = minimumDuration ?? TimeSpan.FromHours(8);
+        return runPassed
+               && requested >= minimum
+               && observedPlaying >= minimum;
     }
 }
