@@ -65,3 +65,30 @@ The current production build was qualified against an isolated copy of the live 
 | Live files changed | 0 |
 
 The qualification process used `DEXTROMETHORPHAN_DATA_ROOT` to select the copied app-data directory. It never opened the live database as its writable database, and the SHA-256/length/timestamp snapshot confirmed that the live database, settings, artwork, and sidecars were unchanged.
+
+## Custom-panel removal — 2026-08-01
+
+A further real-world recurrence showed that retaining an authoritative index on each custom-panel child reduced the failure rate but did not eliminate it. The album count remained correct while a partial row could lose its remaining controls, and later scrolling could leave an empty realized range. The remaining common dependency was the hand-written per-card `ItemContainerGenerator` bookkeeping.
+
+The gallery no longer uses a custom virtualizing panel. The complete lightweight card list is packed into responsive rows, and WPF's built-in `VirtualizingStackPanel` virtualizes those rows. Each realized row contains only the small number of cards that fit the current viewport. Standard container removal, a bounded one-page-behind/two-page-ahead cache, and batched row replacement preserve bounded visual-tree size without custom generator positions or recycled artwork state.
+
+The regression harness now resolves the outer row container and every inner card container, verifies the flattened card identity, and checks each expected artwork source. Pure layout tests also repack 302- and 2,500-card inputs at multiple column counts and require every original reference exactly once.
+
+Verification uses an isolated copy of the 531-track / 302-album library database and real artwork cache. The benchmark redirects all writable application state to that copy. A separate SHA-256, length, and timestamp snapshot covered every file in the live app-data directory before and after the run; no live file changed. Top, middle, bottom, and return-to-top captures contained complete rows and real covers.
+
+| Real-library check | Result |
+|---|---:|
+| Source / initially exposed / final cards | 302 / 302 / 302 |
+| Inspection checkpoints | 24 |
+| Expected / rendered artwork | 1,378 / 1,378 |
+| Container mapping failures | 0 |
+| Missing expected images | 0 |
+| Visual-anchor navigation restore | Passed |
+| Album-scroll p95 / maximum | 16.389 ms / 35.546 ms |
+| Frames over 50 ms | 0 |
+| Live app-data files before / after | 781 / 781 |
+| Live app-data files changed | 0 |
+
+The independent 50,000-track / 2,500-album fixture also retained all 2,500 cards through the same 24 checkpoints. It rendered all 875 expected artwork instances with zero mapping failures or missing images; visual-anchor navigation restoration passed, album-scroll p95 was 11.980 ms, the maximum was 27.139 ms, and no frame exceeded 50 ms.
+
+WPF can revise its estimated raw pixel extent after a distant virtualized row is realized. Navigation history therefore captures the first visible row and its within-row displacement, then restores that visual anchor after layout settles. This keeps the same albums in view even when the equivalent raw `VerticalOffset` changes.

@@ -93,6 +93,8 @@ public sealed class MainViewModel : ObservableObject
     private bool _diagnosticsVisible;
     private bool _restoringSession;
     private int _albumTileSize = 172;
+    private int _galleryColumnCount = 1;
+    private readonly ObservableRangeCollection<GalleryRowViewModel> _galleryRows = [];
     private string _activeLyric = "Lyrics will appear here when available.";
     private LyricLineViewModel? _activeLyricLine;
     private bool _hasSyncedLyrics;
@@ -228,6 +230,7 @@ public sealed class MainViewModel : ObservableObject
 
     public ObservableCollection<Track> BrowseTracks { get => _browseTracks; private set => Set(ref _browseTracks, value); }
     public ObservableCollection<LibraryCardViewModel> GalleryGroups { get => _galleryGroups; private set => Set(ref _galleryGroups, value); }
+    public ObservableCollection<GalleryRowViewModel> GalleryRows => _galleryRows;
     public IReadOnlyList<LibraryCardViewModel> ActiveGroups { get => _activeGroups; private set => Set(ref _activeGroups, value); }
     public IReadOnlyList<LibraryCardViewModel> SidebarCards { get => _sidebarCards; private set => Set(ref _sidebarCards, value); }
     public ObservableCollection<LibraryCardViewModel> Albums { get; } = new ObservableRangeCollection<LibraryCardViewModel>();
@@ -531,6 +534,7 @@ public sealed class MainViewModel : ObservableObject
     public AsyncRelayCommand RemoveMissingTrackCommand { get; }
     public RelayCommand PlayQueueEntryNextCommand { get; }
     public RelayCommand ToggleDiagnosticsCommand { get; }
+    public event EventHandler? NavigationStarting;
 
     public async Task InitializeAsync()
     {
@@ -1199,6 +1203,7 @@ public sealed class MainViewModel : ObservableObject
     private void Navigate(string? view)
     {
         if (view is null || !Views.Contains(view, StringComparer.OrdinalIgnoreCase)) return;
+        NavigationStarting?.Invoke(this, EventArgs.Empty);
         using var scope = _diagnostics.Measure("navigation", "command-application",
             _diagnostics.Enabled ? new Dictionary<string, object?> { ["from"] = CurrentView, ["to"] = view } : null);
         var previous = CaptureNavigation();
@@ -1279,6 +1284,7 @@ public sealed class MainViewModel : ObservableObject
     private void SelectGroup(LibraryCardViewModel? card)
     {
         if (card is null) return;
+        NavigationStarting?.Invoke(this, EventArgs.Empty);
         var previous = CaptureNavigation();
         SelectGroupCore(card, CurrentView is "Albums" or "Artists" or "Genres");
         RestartActiveArtworkResolution();
@@ -1320,6 +1326,7 @@ public sealed class MainViewModel : ObservableObject
 
     private void CloseCollectionDetail()
     {
+        NavigationStarting?.Invoke(this, EventArgs.Empty);
         var previous = CaptureNavigation();
         IsCollectionDetailOpen = false;
         ApplyCurrentView(false);
@@ -1357,6 +1364,7 @@ public sealed class MainViewModel : ObservableObject
 
     private void RestoreNavigation(NavigationEntry entry)
     {
+        NavigationStarting?.Invoke(this, EventArgs.Empty);
         IsCollectionDetailOpen = false;
         CurrentView = entry.View;
         Raise(nameof(ViewTitle));
@@ -1399,6 +1407,21 @@ public sealed class MainViewModel : ObservableObject
         _activeGalleryPresentation = presentation;
         ActiveGroups = presentation.Source;
         GalleryGroups = presentation.Items;
+        RebuildGalleryRows();
+    }
+
+    public void SetGalleryColumnCount(int count)
+    {
+        count = Math.Clamp(count, 1, 64);
+        if (_galleryColumnCount == count) return;
+        _galleryColumnCount = count;
+        RebuildGalleryRows();
+    }
+
+    private void RebuildGalleryRows()
+    {
+        var rows = GalleryRowLayout.Pack(GalleryGroups, _galleryColumnCount);
+        _galleryRows.ReplaceRange(rows);
     }
 
     public void LoadMoreGalleryGroups()
@@ -1409,6 +1432,7 @@ public sealed class MainViewModel : ObservableObject
         PresentationCollectionCache<LibraryCardViewModel>.EnsureMaterialized(
             _activeGalleryPresentation,
             GalleryGroups.Count + 28);
+        RebuildGalleryRows();
         RestartActiveArtworkResolution();
     }
 
@@ -1417,6 +1441,7 @@ public sealed class MainViewModel : ObservableObject
         if (_activeGalleryPresentation is null
             || !PresentationCollectionCache<LibraryCardViewModel>.EnsureMaterialized(_activeGalleryPresentation, count))
             return;
+        RebuildGalleryRows();
         RestartActiveArtworkResolution();
     }
 

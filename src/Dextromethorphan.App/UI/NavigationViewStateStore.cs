@@ -5,13 +5,20 @@ internal sealed class NavigationViewStateStore
     private readonly Dictionary<string, StoredNavigationViewState> _states =
         new(StringComparer.Ordinal);
 
-    public void Capture(string key, double verticalOffset, int materializedItemCount = 0)
+    public void Capture(
+        string key,
+        double verticalOffset,
+        int materializedItemCount = 0,
+        int galleryAnchorIndex = -1,
+        double galleryAnchorOffset = 0)
     {
         if (string.IsNullOrWhiteSpace(key)) return;
         _states[key] = new StoredNavigationViewState(
             new NavigationViewState(
                 Math.Max(0, verticalOffset),
-                Math.Max(0, materializedItemCount)),
+                Math.Max(0, materializedItemCount),
+                Math.Max(-1, galleryAnchorIndex),
+                Math.Max(0, galleryAnchorOffset)),
             DateTimeOffset.UtcNow);
     }
 
@@ -49,7 +56,11 @@ internal sealed class NavigationViewStateStore
         DateTimeOffset LastUsed);
 }
 
-internal readonly record struct NavigationViewState(double VerticalOffset, int MaterializedItemCount)
+internal readonly record struct NavigationViewState(
+    double VerticalOffset,
+    int MaterializedItemCount,
+    int GalleryAnchorIndex = -1,
+    double GalleryAnchorOffset = 0)
 {
-    public static NavigationViewState Empty { get; } = new(0, 0);
+    public static NavigationViewState Empty { get; } = new(0, 0, -1, 0);
 }

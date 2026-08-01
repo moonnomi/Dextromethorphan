@@ -28,6 +28,18 @@ public sealed class NavigationViewStateStoreTests
     }
 
     [Fact]
+    public void KeepsAStableGalleryRowAnchorAlongsideDiagnosticPixelOffset()
+    {
+        var store = new NavigationViewStateStore();
+
+        store.Capture("primary:Albums", 721.5, 302, 3, 41.25);
+
+        Assert.Equal(
+            new NavigationViewState(721.5, 302, 3, 41.25),
+            store.Get("primary:Albums"));
+    }
+
+    [Fact]
     public void TrimPreservesActiveKeysAndDropsStaleHistory()
     {
         var store = new NavigationViewStateStore();

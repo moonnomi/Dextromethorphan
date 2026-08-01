@@ -33,6 +33,14 @@
             </Grid>
         </DataTemplate>
 
+        <DataTemplate x:Key="GalleryRowTemplate">
+            <ItemsControl ItemsSource="{Binding Cards}" ItemTemplate="{StaticResource GroupCardTemplate}" HorizontalAlignment="Left" Focusable="False">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+            </ItemsControl>
+        </DataTemplate>
+
         <DataTemplate x:Key="SidebarCardTemplate">
             <Button Style="{StaticResource SidebarCardButton}" Command="{Binding DataContext.SelectGroupCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}">
                 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="46"/><ColumnDefinition Width="*"/><ColumnDefinition Width="32"/></Grid.ColumnDefinitions>
@@ -110,8 +118,8 @@
                         <Grid Visibility="{Binding IsGroupView, Converter={StaticResource BoolToVisibility}}" Margin="24,18,24,16">
                             <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                             <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="Browse collections" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/><StackPanel Grid.Column="1" Orientation="Horizontal"><TextBlock Text="Cover size" Foreground="{StaticResource TextMutedBrush}" FontSize="11" VerticalAlignment="Center" Margin="0,0,8,0"/><Slider Width="100" Minimum="110" Maximum="210" Value="{Binding AlbumTileSize}"/></StackPanel></Grid>
-                            <ListBox x:Name="GalleryList" Grid.Row="1" Margin="0,14,0,0" Style="{StaticResource GalleryListStyle}" ItemsSource="{Binding GalleryGroups}" ItemTemplate="{StaticResource GroupCardTemplate}" Loaded="GalleryList_Loaded" ScrollViewer.ScrollChanged="Gallery_ScrollChanged">
-                                <ListBox.ItemsPanel><ItemsPanelTemplate><ui:VirtualizingWrapPanel ItemWidth="{Binding DataContext.GalleryItemWidth, RelativeSource={RelativeSource AncestorType=ListBox}}" ItemHeight="{Binding DataContext.GalleryItemHeight, RelativeSource={RelativeSource AncestorType=ListBox}}"/></ItemsPanelTemplate></ListBox.ItemsPanel>
+                            <ListBox x:Name="GalleryList" Grid.Row="1" Margin="0,14,0,0" Style="{StaticResource GalleryListStyle}" ItemsSource="{Binding GalleryRows}" ItemTemplate="{StaticResource GalleryRowTemplate}" Loaded="GalleryList_Loaded" SizeChanged="GalleryList_SizeChanged" ScrollViewer.ScrollChanged="Gallery_ScrollChanged">
+                                <ListBox.ItemsPanel><ItemsPanelTemplate><VirtualizingStackPanel/></ItemsPanelTemplate></ListBox.ItemsPanel>
                             </ListBox>
                         </Grid>
 

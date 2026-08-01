@@ -22,6 +22,10 @@ public sealed class LibraryCardViewModel : ObservableObject
     public bool IsSelected { get => _isSelected; set => Set(ref _isSelected, value); }
 }
 
+public sealed record GalleryRowViewModel(
+    int StartIndex,
+    IReadOnlyList<LibraryCardViewModel> Cards);
+
 public sealed class QueueEntryViewModel(QueueEntry entry, string? artworkPath) : ObservableObject
 {
     private string? _artworkPath = artworkPath;

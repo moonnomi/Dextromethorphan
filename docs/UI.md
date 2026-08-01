@@ -14,7 +14,7 @@ The primary tabs are real views rather than decorative labels:
 - Playlists loads persisted manual and smart playlists and their ordered tracks.
 - The logo and mini-player open Now Playing with artwork and timed lyrics.
 
-Search rebuilds the active groups from matching tracks. Gallery rows are added in small increments near the scroll boundary, so changing tabs does not construct hundreds of image controls at once. Artwork bindings decode fixed-size frozen thumbnails and reuse them while available instead of repeatedly decoding full-resolution embedded art.
+Search rebuilds the active groups from matching tracks. Galleries expose the complete lightweight card index, then pack it into responsive rows. WPF's built-in vertical virtualization creates only the visible and nearby rows, while artwork bindings decode fixed-size frozen thumbnails and reuse them instead of repeatedly decoding full-resolution embedded art.
 
 Clicking an album, artist, or genre adds a temporary context tab to the top bar. Its focused page contains real artwork when one exists, collection metadata, and the track list. Closing that tab returns to the cover grid. Missing art is left neutral; the UI does not synthesize a gradient cover.
 
@@ -22,7 +22,7 @@ Navigation keeps browser-style history. Mouse4 goes back through primary tabs, s
 
 Selected top-bar tabs animate their accent marker with opacity and transform clocks; view content uses a short fade-and-rise transition. These animations do not trigger layout and create no per-frame application timer. They can be disabled from Settings > Appearance.
 
-Mouse-wheel input is coalesced and eased at render cadence for gallery, track, queue, lyrics, sidebar, and settings scrolling. Track lists retain pixel-based recycling, while galleries still append cards incrementally near the scroll boundary.
+Mouse-wheel input is coalesced and eased at render cadence for gallery, track, queue, lyrics, sidebar, and settings scrolling. Track lists retain pixel-based recycling. Gallery rows use pixel scrolling, bounded ahead/behind caching, and standard container removal so a recycled custom panel cannot lose card mappings or artwork lifecycles.
 
 ## Track and queue presentation
 

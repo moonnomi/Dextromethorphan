@@ -51,6 +51,7 @@ public partial class MainWindow : Window
     private DateTimeOffset _lastInteraction = DateTimeOffset.UtcNow;
     private DateTimeOffset _lastIdleCleanup = DateTimeOffset.MinValue;
     private bool _idleCleanupRunning;
+    private EventHandler? _pendingGalleryScrollReapplication;
 
     public MainWindow(
         MainViewModel viewModel,
@@ -73,6 +74,7 @@ public partial class MainWindow : Window
         DataContext = viewModel;
         InstallChapterMarkers();
         ViewModel.PropertyChanged += ViewModelOnPropertyChanged;
+        ViewModel.NavigationStarting += ViewModelOnNavigationStarting;
         PreviewMouseMove += RecordUserInteraction;
         PreviewMouseWheel += RecordUserInteraction;
         PreviewTouchDown += RecordUserInteraction;
@@ -270,6 +272,8 @@ public partial class MainWindow : Window
 
     private void ViewModelOnPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(MainViewModel.AlbumTileSize))
+            Dispatcher.BeginInvoke(UpdateGalleryColumns, DispatcherPriority.Render);
         if (e.PropertyName == nameof(MainViewModel.HasLyrics))
         {
             Dispatcher.BeginInvoke(ResetLyricsView, DispatcherPriority.Loaded);
@@ -289,6 +293,29 @@ public partial class MainWindow : Window
         if (e.PropertyName is nameof(MainViewModel.PrimaryViewStateKey) or nameof(MainViewModel.ContentViewStateKey)
             or nameof(MainViewModel.CurrentView) or nameof(MainViewModel.IsCollectionDetailOpen))
             ScheduleScrollStateRestore();
+    }
+
+    private void ViewModelOnNavigationStarting(object? sender, EventArgs e) =>
+        CaptureCurrentPrimaryViewState();
+
+    private void CaptureCurrentPrimaryViewState()
+    {
+        if (_restoringScrollState || !IsLoaded) return;
+        if (GalleryList.IsVisible
+            && FindVisualChild<ScrollViewer>(GalleryList) is { } galleryViewer)
+        {
+            CaptureGalleryViewState(
+                ViewModel.PrimaryViewStateKey,
+                galleryViewer,
+                ViewModel.GalleryGroups.Count);
+            return;
+        }
+        if (SidebarList.IsVisible
+            && FindVisualChild<ScrollViewer>(SidebarList) is { } sidebarViewer)
+            _viewStates.Capture(
+                ViewModel.PrimaryViewStateKey,
+                sidebarViewer.VerticalOffset,
+                ViewModel.SidebarCards.Count);
     }
 
     private void ResetLyricsView()
@@ -499,11 +526,51 @@ public partial class MainWindow : Window
 
     private void Gallery_ScrollChanged(object sender, ScrollChangedEventArgs e)
     {
-        if (!_restoringScrollState && GalleryList.IsVisible && e.OriginalSource is ScrollViewer)
-            _viewStates.Capture(ViewModel.PrimaryViewStateKey, e.VerticalOffset, ViewModel.GalleryGroups.Count);
+        if (!_restoringScrollState
+            && GalleryList.IsVisible
+            && e.OriginalSource is ScrollViewer viewer)
+            CaptureGalleryViewState(
+                ViewModel.PrimaryViewStateKey,
+                viewer,
+                ViewModel.GalleryGroups.Count);
     }
 
-    private void GalleryList_Loaded(object sender, RoutedEventArgs e) => ScheduleScrollStateRestore();
+    private void CaptureGalleryViewState(
+        string stateKey,
+        ScrollViewer viewer,
+        int materializedItemCount)
+    {
+        if (TryGetGalleryViewportAnchor(viewer, out var anchor))
+            _viewStates.Capture(
+                stateKey,
+                viewer.VerticalOffset,
+                materializedItemCount,
+                anchor.RowIndex,
+                anchor.WithinRowOffset);
+        else
+            _viewStates.Capture(
+                stateKey,
+                viewer.VerticalOffset,
+                materializedItemCount);
+    }
+
+    private void GalleryList_Loaded(object sender, RoutedEventArgs e)
+    {
+        UpdateGalleryColumns();
+        ScheduleScrollStateRestore();
+    }
+
+    private void GalleryList_SizeChanged(object sender, SizeChangedEventArgs e) =>
+        UpdateGalleryColumns();
+
+    private void UpdateGalleryColumns()
+    {
+        if (!GalleryList.IsLoaded || GalleryList.ActualWidth <= 0) return;
+        var columns = Math.Max(
+            1,
+            (int)Math.Floor(GalleryList.ActualWidth / ViewModel.GalleryItemWidth));
+        ViewModel.SetGalleryColumnCount(columns);
+    }
 
     private void SidebarList_Loaded(object sender, RoutedEventArgs e) => ScheduleScrollStateRestore();
 
@@ -588,10 +655,19 @@ public partial class MainWindow : Window
         {
             if (GalleryList.IsVisible)
             {
-                var state = _viewStates.Get(ViewModel.PrimaryViewStateKey);
+                var stateKey = ViewModel.PrimaryViewStateKey;
+                var state = _viewStates.Get(stateKey);
                 ViewModel.EnsureGalleryGroupsLoaded(state.MaterializedItemCount);
                 GalleryList.UpdateLayout();
-                FindVisualChild<ScrollViewer>(GalleryList)?.ScrollToVerticalOffset(state.VerticalOffset);
+                if (FindVisualChild<ScrollViewer>(GalleryList) is { } viewer)
+                {
+                    RestoreGalleryVerticalOffset(viewer, state);
+                    if (state.VerticalOffset > 0.5)
+                        ReapplyGalleryScrollStateAtRender(
+                            stateKey,
+                            state,
+                            _lastInteraction);
+                }
             }
 
             if (SidebarList.IsVisible)
@@ -615,6 +691,110 @@ public partial class MainWindow : Window
             }
         }
         finally { _restoringScrollState = false; }
+    }
+
+    private void ReapplyGalleryScrollStateAtRender(
+        string stateKey,
+        NavigationViewState state,
+        DateTimeOffset interactionAtSchedule)
+    {
+        if (_pendingGalleryScrollReapplication is not null)
+            CompositionTarget.Rendering -= _pendingGalleryScrollReapplication;
+        EventHandler? handler = null;
+        handler = (_, _) =>
+        {
+            CompositionTarget.Rendering -= handler;
+            if (ReferenceEquals(_pendingGalleryScrollReapplication, handler))
+                _pendingGalleryScrollReapplication = null;
+            if (!GalleryList.IsVisible
+                || !stateKey.Equals(
+                    ViewModel.PrimaryViewStateKey,
+                    StringComparison.Ordinal)
+                || _lastInteraction != interactionAtSchedule
+                || GalleryList.IsMouseCaptureWithin)
+                return;
+            _restoringScrollState = true;
+            try
+            {
+                GalleryList.UpdateLayout();
+                if (FindVisualChild<ScrollViewer>(GalleryList) is not { } viewer)
+                    return;
+                RestoreGalleryVerticalOffset(viewer, state);
+            }
+            finally
+            {
+                _restoringScrollState = false;
+            }
+        };
+        _pendingGalleryScrollReapplication = handler;
+        CompositionTarget.Rendering += handler;
+    }
+
+    private void RestoreGalleryVerticalOffset(
+        ScrollViewer viewer,
+        NavigationViewState state)
+    {
+        if (ViewModel.GalleryRows.Count == 0)
+        {
+            viewer.ScrollToTop();
+            return;
+        }
+
+        if (state.GalleryAnchorIndex < 0)
+        {
+            viewer.ScrollToVerticalOffset(state.VerticalOffset);
+            return;
+        }
+        var rowIndex = Math.Clamp(
+            state.GalleryAnchorIndex,
+            0,
+            ViewModel.GalleryRows.Count - 1);
+        GalleryList.ScrollIntoView(ViewModel.GalleryRows[rowIndex]);
+        GalleryList.UpdateLayout();
+        if (GalleryList.ItemContainerGenerator.ContainerFromIndex(rowIndex)
+            is not ListBoxItem rowContainer)
+        {
+            viewer.ScrollToVerticalOffset(state.VerticalOffset);
+            return;
+        }
+
+        var rowTop = rowContainer.TransformToAncestor(viewer)
+            .Transform(new Point(0, 0)).Y;
+        viewer.ScrollToVerticalOffset(
+            Math.Clamp(
+                viewer.VerticalOffset + rowTop + state.GalleryAnchorOffset,
+                0,
+                viewer.ScrollableHeight));
+    }
+
+    private bool TryGetGalleryViewportAnchor(
+        ScrollViewer viewer,
+        out GalleryViewportAnchor anchor)
+    {
+        var firstBelowTop = (Index: -1, Top: double.MaxValue);
+        for (var rowIndex = 0; rowIndex < ViewModel.GalleryRows.Count; rowIndex++)
+        {
+            if (GalleryList.ItemContainerGenerator.ContainerFromIndex(rowIndex)
+                is not ListBoxItem container)
+                continue;
+            var top = container.TransformToAncestor(viewer)
+                .Transform(new Point(0, 0)).Y;
+            var bottom = top + Math.Max(1, container.ActualHeight);
+            if (top <= 0 && bottom > 0)
+            {
+                anchor = new GalleryViewportAnchor(rowIndex, -top);
+                return true;
+            }
+            if (top >= 0 && top < firstBelowTop.Top)
+                firstBelowTop = (rowIndex, top);
+        }
+        if (firstBelowTop.Index >= 0)
+        {
+            anchor = new GalleryViewportAnchor(firstBelowTop.Index, 0);
+            return true;
+        }
+        anchor = default;
+        return false;
     }
 
     private static IEnumerable<T> FindVisualChildren<T>(DependencyObject parent) where T : DependencyObject
@@ -808,23 +988,24 @@ public partial class MainWindow : Window
         var renderedArtwork = 0;
         var mappingFailures = 0;
         var missingArtwork = 0;
-        var containers = new HashSet<ListBoxItem>();
-        for (var index = 0; index < ViewModel.GalleryGroups.Count; index++)
+        var containers = new HashSet<DependencyObject>();
+        foreach (var cardContainer in EnumerateRealizedGalleryCards())
         {
-            if (GalleryList.ItemContainerGenerator.ContainerFromIndex(index) is not ListBoxItem container)
-                continue;
-            realized++;
-            if (!containers.Add(container)
-                || !ReferenceEquals(container.DataContext, ViewModel.GalleryGroups[index]))
+            if (cardContainer.Container is not null)
+                realized++;
+            if (cardContainer.Container is null
+                || !containers.Add(cardContainer.Container)
+                || !cardContainer.MappingValid)
                 mappingFailures++;
 
-            if (container.DataContext is not LibraryCardViewModel card
-                || string.IsNullOrWhiteSpace(card.ArtworkPath)
-                || !File.Exists(card.ArtworkPath))
+            var card = cardContainer.Card;
+            if (string.IsNullOrWhiteSpace(card.ArtworkPath)
+                || !File.Exists(card.ArtworkPath)
+                || cardContainer.Container is null)
                 continue;
             var artworkPath = card.ArtworkPath;
             expectedArtwork++;
-            var image = FindVisualChildren<Image>(container)
+            var image = FindVisualChildren<Image>(cardContainer.Container)
                 .FirstOrDefault(candidate =>
                     string.Equals(
                         AsyncArtwork.GetPath(candidate),
@@ -841,6 +1022,37 @@ public partial class MainWindow : Window
             renderedArtwork,
             mappingFailures,
             missingArtwork);
+    }
+
+    private IEnumerable<RealizedGalleryCard> EnumerateRealizedGalleryCards()
+    {
+        for (var rowIndex = 0; rowIndex < ViewModel.GalleryRows.Count; rowIndex++)
+        {
+            if (GalleryList.ItemContainerGenerator.ContainerFromIndex(rowIndex)
+                is not ListBoxItem rowContainer)
+                continue;
+            var row = ViewModel.GalleryRows[rowIndex];
+            var rowMappingValid = ReferenceEquals(rowContainer.DataContext, row);
+            var items = FindVisualChild<ItemsControl>(rowContainer);
+            items?.UpdateLayout();
+            for (var localIndex = 0; localIndex < row.Cards.Count; localIndex++)
+            {
+                var card = row.Cards[localIndex];
+                var container = items?.ItemContainerGenerator.ContainerFromIndex(localIndex);
+                var mappingValid = rowMappingValid
+                    && row.StartIndex + localIndex < ViewModel.GalleryGroups.Count
+                    && ReferenceEquals(
+                        card,
+                        ViewModel.GalleryGroups[row.StartIndex + localIndex])
+                    && container is FrameworkElement element
+                    && ReferenceEquals(element.DataContext, card);
+                yield return new RealizedGalleryCard(
+                    row.StartIndex + localIndex,
+                    card,
+                    container,
+                    mappingValid);
+            }
+        }
     }
 
     private void CaptureVisualPng(string path)
@@ -869,6 +1081,16 @@ public partial class MainWindow : Window
         int MappingFailures,
         int MissingArtwork);
 
+    private readonly record struct RealizedGalleryCard(
+        int FlatIndex,
+        LibraryCardViewModel Card,
+        DependencyObject? Container,
+        bool MappingValid);
+
+    private readonly record struct GalleryViewportAnchor(
+        int RowIndex,
+        double WithinRowOffset);
+
     internal async Task<NavigationHistoryPerformanceMetrics> MeasureNavigationHistoryPerformanceAsync(CancellationToken cancellationToken)
     {
         ViewModel.NavigateCommand.Execute("Albums");
@@ -888,14 +1110,23 @@ public partial class MainWindow : Window
         var originalCollection = ViewModel.GalleryGroups;
         var viewer = FindVisualChild<ScrollViewer>(GalleryList)
             ?? throw new InvalidOperationException("The album gallery scroll viewer is unavailable.");
+        var albumStateKey = ViewModel.PrimaryViewStateKey;
         var targetOffset = Math.Min(viewer.ScrollableHeight, Math.Max(0, viewer.ViewportHeight * 1.5));
         viewer.ScrollToVerticalOffset(targetOffset);
         await NextRenderedFrameTimestampAsync(cancellationToken);
-        var expectedOffset = viewer.VerticalOffset;
+        // A row virtualizer can replace estimated row heights after the first
+        // distant realization. Reapply the target once after that layout so
+        // the expected browser-history position represents the settled view a
+        // user actually leaves, rather than a transient pre-layout estimate.
+        GalleryList.UpdateLayout();
+        viewer.ScrollToVerticalOffset(targetOffset);
+        await NextRenderedFrameTimestampAsync(cancellationToken);
         var expectedCount = ViewModel.GalleryGroups.Count;
         var expectedSelection = ViewModel.SelectedCard?.Key;
 
         ViewModel.NavigateCommand.Execute("Artists");
+        var expectedState = _viewStates.Get(albumStateKey);
+        var expectedOffset = expectedState.VerticalOffset;
         await NextRenderedFrameTimestampAsync(cancellationToken);
 
         var backTimer = Stopwatch.StartNew();
@@ -911,7 +1142,13 @@ public partial class MainWindow : Window
         var restoredOffset = viewer.VerticalOffset;
         var restoredCount = ViewModel.GalleryGroups.Count;
         var collectionReused = ReferenceEquals(originalCollection, ViewModel.GalleryGroups);
-        var offsetRestored = Math.Abs(expectedOffset - restoredOffset) <= 3;
+        var offsetRestored = expectedState.GalleryAnchorIndex >= 0
+            ? TryGetGalleryViewportAnchor(viewer, out var restoredAnchor)
+              && restoredAnchor.RowIndex == expectedState.GalleryAnchorIndex
+              && Math.Abs(
+                  restoredAnchor.WithinRowOffset
+                  - expectedState.GalleryAnchorOffset) <= 3
+            : Math.Abs(expectedOffset - restoredOffset) <= 3;
         var selectionRestored = expectedSelection is null || ViewModel.SelectedCard?.Key == expectedSelection;
         var countRestored = restoredCount >= expectedCount;
 
@@ -1110,16 +1347,16 @@ public partial class MainWindow : Window
             GalleryList.UpdateLayout();
 
             var realized = 0;
-            var containers = new HashSet<ListBoxItem>();
-            for (var index = 0; index < ViewModel.GalleryGroups.Count; index++)
+            var containers = new HashSet<DependencyObject>();
+            foreach (var card in EnumerateRealizedGalleryCards())
             {
-                if (GalleryList.ItemContainerGenerator.ContainerFromIndex(index) is not ListBoxItem container)
-                    continue;
+                if (card.Container is null)
+                    throw new InvalidOperationException($"Gallery row omitted card {card.FlatIndex} near {offset:F0}px.");
                 realized++;
-                if (!containers.Add(container))
-                    throw new InvalidOperationException($"Gallery virtualization reused one container for multiple indexes near {offset:F0}px.");
-                if (!ReferenceEquals(container.DataContext, ViewModel.GalleryGroups[index]))
-                    throw new InvalidOperationException($"Gallery virtualization mapped item {index} to the wrong card near {offset:F0}px.");
+                if (!containers.Add(card.Container))
+                    throw new InvalidOperationException($"Gallery virtualization reused one container for multiple cards near {offset:F0}px.");
+                if (!card.MappingValid)
+                    throw new InvalidOperationException($"Gallery virtualization mapped card {card.FlatIndex} incorrectly near {offset:F0}px.");
             }
             if (realized == 0)
                 throw new InvalidOperationException($"Gallery virtualization realized no cards near {offset:F0}px.");
@@ -1128,12 +1365,15 @@ public partial class MainWindow : Window
 
     private void ValidateGalleryReturnToTop()
     {
-        var expected = Math.Min(ViewModel.GalleryGroups.Count, 16);
+        var expected = ViewModel.GalleryRows.FirstOrDefault()?.Cards.Count ?? 0;
+        var realized = EnumerateRealizedGalleryCards()
+            .Where(card => card.Container is not null)
+            .ToDictionary(card => card.FlatIndex);
         for (var index = 0; index < expected; index++)
         {
-            if (GalleryList.ItemContainerGenerator.ContainerFromIndex(index) is not ListBoxItem container)
+            if (!realized.TryGetValue(index, out var card))
                 throw new InvalidOperationException($"Gallery virtualization failed to restore item {index} after scrolling.");
-            if (!ReferenceEquals(container.DataContext, ViewModel.GalleryGroups[index]))
+            if (!card.MappingValid)
                 throw new InvalidOperationException($"Gallery virtualization restored the wrong card at index {index}.");
         }
     }
@@ -1351,6 +1591,7 @@ public partial class MainWindow : Window
         CancelDeferredPageLoads();
         PerformanceOverlay.Dispose();
         ViewModel.PropertyChanged -= ViewModelOnPropertyChanged;
+        ViewModel.NavigationStarting -= ViewModelOnNavigationStarting;
         _allowClose = true;
         Close();
     }
@@ -1366,12 +1607,18 @@ public partial class MainWindow : Window
         CancelDeferredPageLoads();
         PerformanceOverlay.Dispose();
         ViewModel.PropertyChanged -= ViewModelOnPropertyChanged;
+        ViewModel.NavigationStarting -= ViewModelOnNavigationStarting;
         _allowClose = true;
         Close();
     }
 
     private void CancelDeferredPageLoads()
     {
+        if (_pendingGalleryScrollReapplication is not null)
+        {
+            CompositionTarget.Rendering -= _pendingGalleryScrollReapplication;
+            _pendingGalleryScrollReapplication = null;
+        }
         _galleryPageCancellation?.Cancel();
         _galleryPageCancellation?.Dispose();
         _sidebarPageCancellation?.Cancel();
