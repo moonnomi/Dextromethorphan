@@ -9,6 +9,7 @@
     <ProjectReference Include="../../src/Dextromethorphan.Infrastructure/Dextromethorphan.Infrastructure.csproj" />
     <ProjectReference Include="../../tools/Dextromethorphan.PerformanceFixtures/Dextromethorphan.PerformanceFixtures.csproj" />
     <ProjectReference Include="../../tools/Dextromethorphan.AudioSoak/Dextromethorphan.AudioSoak.csproj" />
+    <ProjectReference Include="../../tools/Dextromethorphan.DopQualification/Dextromethorphan.DopQualification.csproj" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="xunit.runner.visualstudio">

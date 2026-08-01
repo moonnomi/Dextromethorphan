@@ -42,7 +42,7 @@ SoundTouch runs per track before the gapless/crossfade provider, so crossfade du
 
 DSF and both uncompressed and DST-compressed DFF/DSDIFF are streamed block-by-block as DoP 1.1. DST is decompressed losslessly to native channel-interleaved DSD one 1/75-second frame at a time, then enters the same DoP framer; it is never converted to PCM. Every 16 DSD bits occupy the lower bytes of a 24-bit frame; the most-significant byte alternates `0x05` and `0xFA` across all channels. DSD64 negotiates 176.4 kHz/24-bit PCM. Seeking decodes only the containing DST frame and resumes at the requested DoP frame.
 
-DoP requires an exclusive DAC and `DsdMode: "Dop"`. ReplayGain, crossfade, fades, software volume, and speed/pitch are rejected rather than corrupting DSD. DST compression and ASIO-native DSD are pending.
+DoP requires an exclusive DAC and `DsdMode: "Dop"`. ReplayGain, crossfade, fades, software volume, and speed/pitch are rejected rather than corrupting DSD. DST-compressed DFF is supported on win-x64; ASIO/native DSD remains pending the physical WASAPI/DoP qualification decision.
 
 ## Decoder coverage
 

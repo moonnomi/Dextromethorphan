@@ -23,4 +23,25 @@ The current Realtek onboard endpoint was re-probed after this change. It accepte
 
 ## Remaining physical gate
 
-With a compatible DAC attached, run `scripts/Test-AudioHardware.ps1` and then play generated/legally supplied DSD64 and DSD128 files in exclusive, source-matched, fixed-unity DoP mode. HW-003 closes only when diagnostics show 176.4/352.8 kHz without fallback and the DAC itself indicates the expected DSD rate before and after repeated seeks.
+The repository now includes a deliberately guarded physical runner. Listing endpoints is read-only and does not require a DAC acknowledgement:
+
+```powershell
+./scripts/Test-DopHardware.ps1 -ListDevices
+```
+
+After connecting a compatible DAC, copy its exact endpoint ID and run:
+
+```powershell
+./scripts/Test-DopHardware.ps1 `
+  -ConfirmCompatibleDac `
+  -DeviceId '<exact endpoint ID>' `
+  -DacModel '<manufacturer and model>' `
+  -DriverVersion '<installed driver version>' `
+  -Connection '<USB port/connection>' `
+  -Dsd64Indication Pass `
+  -Dsd128Indication Pass
+```
+
+The runner refuses the mutable Windows default endpoint, generates finite DSD64 and DSD128 silence outside the music library, pins one exact endpoint for the whole run, seeks twice per rate, and requires direct event-driven exclusive 176.4/352.8 kHz 24-bit carriers without fallback. It hashes the endpoint ID in the report and requires bit-identical endpoint volume before and after. A report exits successfully only when both automated cases, traceable hardware metadata, and both operator-observed DAC indications pass. Unknown or failed indications cannot close HW-003.
+
+No compatible DAC is currently attached, so this guarded runner has only been safety-tested in list/refusal modes. HW-003 closes only when its retained physical report says `HardwareQualified: true`; generated framing evidence alone remains insufficient.

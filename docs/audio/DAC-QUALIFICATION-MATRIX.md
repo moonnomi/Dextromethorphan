@@ -41,3 +41,9 @@ HW-003 closes only after the DoP rows pass on physical hardware. HW-004 closes o
 Generated DSD64/128 framing, multichannel interleave, callback alignment, seeking, and high-rate carrier discovery are already covered by the [DoP framing qualification](DOP-FRAMING-QUALIFICATION-2026-07-31.md). The manual rows must confirm that a real driver accepts those carriers and that the DAC actually indicates DSD rather than PCM.
 
 The automated eight-hour shared-mode transition run is documented in [audio soak qualification](AUDIO-SOAK-QUALIFICATION-2026-07-31.md). It complements, but does not replace, the physical-DAC rows above.
+
+## Guarded physical DoP runner
+
+Use `./scripts/Test-DopHardware.ps1 -ListDevices` to obtain the DAC's exact endpoint ID without playing audio. The physical run requires `-ConfirmCompatibleDac`, that exact ID, the DAC model, driver version, and connection description. It never accepts `default`, because a default-device change could otherwise route DoP noise to normal PCM speakers.
+
+The runner submits only generated finite DSD silence and records DSD64/128 carrier negotiation, direct/bit-perfect/event-driven diagnostics, two seeks per rate, endpoint-volume invariance, and the operator's DAC-display observations. The endpoint identifier is retained only as SHA-256. Exit code `0` means the complete physical evidence passed; exit code `3` means the automated carrier checks passed but physical indication evidence is incomplete, and exit code `2` means an automated check failed.
