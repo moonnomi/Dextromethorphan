@@ -57,8 +57,52 @@ public sealed class StructuredApplicationLogTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task CompletionDoesNotDependOnTheCreatingSynchronizationContext()
+    {
+        var completion = new TaskCompletionSource<Exception?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                SynchronizationContext.SetSynchronizationContext(
+                    new NeverDispatchSynchronizationContext());
+                var paths = new AppPaths(Path.Combine(_root, "sync-context"));
+                var log = new StructuredApplicationLog(paths);
+                log.Write(
+                    ApplicationLogLevel.Information,
+                    "test",
+                    "dispatcher-shutdown");
+                log.CompleteAsync().GetAwaiter().GetResult();
+                completion.SetResult(null);
+            }
+            catch (Exception exception)
+            {
+                completion.SetResult(exception);
+            }
+        })
+        {
+            IsBackground = true
+        };
+        thread.Start();
+
+        var error = await completion.Task.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+        Assert.Null(error);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root)) Directory.Delete(_root, true);
+    }
+
+    private sealed class NeverDispatchSynchronizationContext :
+        SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback callback, object? state)
+        {
+        }
     }
 }

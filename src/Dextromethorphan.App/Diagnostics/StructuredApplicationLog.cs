@@ -35,7 +35,10 @@ public sealed class StructuredApplicationLog : IApplicationLog
             SingleWriter = false,
             FullMode = BoundedChannelFullMode.DropOldest
         });
-        _writer = WriteLoopAsync();
+        // The log is created on WPF's dispatcher thread. Running the consumer
+        // directly here captures that synchronization context, which can
+        // deadlock App.OnExit when it synchronously waits for the final flush.
+        _writer = Task.Run(WriteLoopAsync);
     }
 
     public void Write(
@@ -61,7 +64,7 @@ public sealed class StructuredApplicationLog : IApplicationLog
     {
         if (Interlocked.Exchange(ref _completed, 1) != 0) return;
         _events.Writer.TryComplete();
-        await _writer.WaitAsync(cancellationToken);
+        await _writer.WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private async Task WriteLoopAsync()

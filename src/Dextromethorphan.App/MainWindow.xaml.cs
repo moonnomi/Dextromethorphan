@@ -1593,7 +1593,7 @@ public partial class MainWindow : Window
         ViewModel.PropertyChanged -= ViewModelOnPropertyChanged;
         ViewModel.NavigationStarting -= ViewModelOnNavigationStarting;
         _allowClose = true;
-        Close();
+        Application.Current.Shutdown();
     }
 
     internal async Task CloseAfterBenchmarkAsync()
@@ -1609,7 +1609,7 @@ public partial class MainWindow : Window
         ViewModel.PropertyChanged -= ViewModelOnPropertyChanged;
         ViewModel.NavigationStarting -= ViewModelOnNavigationStarting;
         _allowClose = true;
-        Close();
+        Application.Current.Shutdown();
     }
 
     private void CancelDeferredPageLoads()

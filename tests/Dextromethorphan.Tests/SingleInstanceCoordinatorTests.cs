@@ -31,6 +31,40 @@ public sealed class SingleInstanceCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public async Task DisposalDoesNotDependOnTheCreatingSynchronizationContext()
+    {
+        var completion = new TaskCompletionSource<Exception?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                SynchronizationContext.SetSynchronizationContext(
+                    new NeverDispatchSynchronizationContext());
+                var coordinator = new SingleInstanceCoordinator(
+                    "Dextromethorphan-Test-" + Guid.NewGuid().ToString("N"));
+                Assert.True(coordinator.AcquireOrForwardAsync([])
+                    .GetAwaiter().GetResult());
+                coordinator.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                completion.SetResult(null);
+            }
+            catch (Exception exception)
+            {
+                completion.SetResult(exception);
+            }
+        })
+        {
+            IsBackground = true
+        };
+        thread.Start();
+
+        var error = await completion.Task.WaitAsync(
+            TimeSpan.FromSeconds(5),
+            TestContext.Current.CancellationToken);
+        Assert.Null(error);
+    }
+
+    [Fact]
     public async Task LaunchTargetParserSkipsOptionValues()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -54,5 +88,13 @@ public sealed class SingleInstanceCoordinatorTests : IDisposable
     public void Dispose()
     {
         if (Directory.Exists(_root)) Directory.Delete(_root, true);
+    }
+
+    private sealed class NeverDispatchSynchronizationContext :
+        SynchronizationContext
+    {
+        public override void Post(SendOrPostCallback callback, object? state)
+        {
+        }
     }
 }

@@ -181,7 +181,7 @@
                         <StackPanel>
                             <TextBlock Text="Analyze missing loudness data" FontWeight="SemiBold"/>
                             <TextBlock Text="Measures mono/stereo tracks with EBU R128 gating and stores ReplayGain 2.0 track gain, album gain, and sample peak in the local database. Music files are read-only. Analysis automatically waits while playback is active." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,5,0,12"/>
-                            <ProgressBar Minimum="0" Maximum="100" Value="{Binding ReplayGainAnalysisProgress}" Height="4"/>
+                            <ProgressBar Minimum="0" Maximum="100" Value="{Binding ReplayGainAnalysisProgress, Mode=OneWay}" Height="4"/>
                             <TextBlock Text="{Binding ReplayGainAnalysisStatus}" TextWrapping="Wrap" Foreground="{StaticResource AccentBrush}" FontSize="10" Margin="0,8,0,0"/>
                             <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
                                 <Button Style="{StaticResource PrimaryButton}" Content="Analyze missing" Click="AnalyzeReplayGain_Click" Margin="0,0,8,0"/>

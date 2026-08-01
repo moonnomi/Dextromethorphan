@@ -28,7 +28,10 @@ public sealed class SettingsWindowSmokeTests
                             "pack://application:,,,/Dextromethorphan;component/UI/Styles/Theme.xaml",
                             UriKind.Absolute)
                     });
-                window = new SettingsWindow();
+                window = new SettingsWindow
+                {
+                    DataContext = new SettingsBindingProbe()
+                };
                 Assert.Equal(
                     "Dextromethorphan settings",
                     window.Title);
@@ -41,6 +44,10 @@ public sealed class SettingsWindowSmokeTests
                     tabs.Items[0]);
                 Assert.Equal("Audio", audio.Header);
                 Assert.NotNull(audio.Content);
+                window.Show();
+                window.Dispatcher.Invoke(
+                    () => { },
+                    System.Windows.Threading.DispatcherPriority.ApplicationIdle);
                 completion.SetResult(null);
             }
             catch (Exception exception)
@@ -65,4 +72,8 @@ public sealed class SettingsWindowSmokeTests
         Assert.Null(error);
     }
 
+    private sealed class SettingsBindingProbe
+    {
+        public double ReplayGainAnalysisProgress => 42;
+    }
 }

@@ -411,6 +411,7 @@ public sealed class MainViewModel : ObservableObject
         {
             if (!Set(ref _currentView, value)) return;
             Raise(nameof(IsGroupView)); Raise(nameof(IsCollectionDetailView)); Raise(nameof(IsTrackView)); Raise(nameof(IsSidebarView)); Raise(nameof(IsNowPlayingView));
+            Raise(nameof(ViewTitle));
             Raise(nameof(PrimaryViewStateKey)); Raise(nameof(ContentViewStateKey));
         }
     }

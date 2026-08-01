@@ -35,7 +35,10 @@ internal sealed class SingleInstanceCoordinator : IAsyncDisposable
         if (created)
         {
             _ownsMutex = true;
-            _listener = ListenAsync(_lifetime.Token);
+            // This coordinator is acquired on WPF's dispatcher thread. Keep
+            // the pipe listener independent from that synchronization context
+            // so a synchronous OnExit disposal cannot deadlock the process.
+            _listener = Task.Run(() => ListenAsync(_lifetime.Token));
             return true;
         }
 
@@ -106,7 +109,7 @@ internal sealed class SingleInstanceCoordinator : IAsyncDisposable
         _lifetime.Cancel();
         if (_listener is not null)
         {
-            try { await _listener; }
+            try { await _listener.ConfigureAwait(false); }
             catch (OperationCanceledException) { }
         }
         if (_ownsMutex)
