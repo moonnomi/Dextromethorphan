@@ -1,12 +1,28 @@
 # Library and playlists
 
+## Sources
+
+Settings contains a complete source manager. Each local, removable, mounted, or SMB source can be added, removed, enabled, rescanned, and independently watched. Exclusions apply recursively. Source cards show online state, watcher state, track count, the last successful scan, and any source-level failure.
+
+Removing a source deletes only its rows from Dextromethorphan's SQLite index. It never deletes or edits music files. Disabling a source keeps its index records but removes them from browsing and scanning until it is enabled again.
+
+Folders dropped anywhere on the main window become library sources. Supported audio files dropped together are opened as a temporary queue without implicitly adding their parent directories.
+
 ## Scan pipeline
 
 The scanner enumerates supported files without following inaccessible folders, loads the existing path/mtime/size index once, and parses only new or changed files. Metadata readers run concurrently while a bounded single-consumer channel commits groups of 250 tracks in SQLite transactions. This avoids opening a connection and committing a transaction for every file while also applying backpressure on fast disks.
 
 Watch-folder events are debounced. A watcher overflow schedules a full scan of that root. Missing files are removed only beneath roots included in the completed scan; foreign library roots are left untouched.
 
+The scan panel reports discovered, processed, added, updated, and failed counts plus the current source and path. Scans can be paused, resumed, or cancelled. The latest 200 per-file failures are retained in the UI for diagnosis; cancelling retains a checkpoint so the next scan can safely resume.
+
+Scheduled scans default to hourly and are conservative: they wait while the machine is on battery or the active connection is metered. Both protections can be explicitly overridden in Settings. No scheduled scan starts while another scan is active.
+
 Embedded artwork is extracted into `%APPDATA%\Dextromethorphan\artwork`. Cache keys include the canonical media path and file modification time, so changed files receive a new version without stale-image collisions. Recently used art is retained up to the configured cache limit and older entries are pruned by last access time. SQLite stores only the resulting cache path.
+
+## Folder browsing
+
+The Folders tab builds a hierarchy from enabled source roots and indexed track paths. Parent nodes aggregate the tracks beneath them, while child nodes preserve the actual directory structure. Selecting any level updates the track pane, and watcher changes rebuild only the affected library projection.
 
 ## Search
 

@@ -3,15 +3,19 @@ namespace Dextromethorphan.Infrastructure.Storage;
 public sealed class AppPaths
 {
     public const string DataRootEnvironmentVariable = "DEXTROMETHORPHAN_DATA_ROOT";
+    public const string PortableMarkerFileName = "portable.mode";
 
     public AppPaths(string? root = null)
     {
         var configuredRoot = string.IsNullOrWhiteSpace(root)
             ? Environment.GetEnvironmentVariable(DataRootEnvironmentVariable)
             : root;
-        Root = Path.GetFullPath(string.IsNullOrWhiteSpace(configuredRoot)
-            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Dextromethorphan")
-            : configuredRoot);
+        (Root, IsPortable) = ResolveRoot(
+            configuredRoot,
+            AppContext.BaseDirectory,
+            Environment.GetCommandLineArgs(),
+            File.Exists(Path.Combine(AppContext.BaseDirectory, PortableMarkerFileName)),
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData));
         SettingsFile = Path.Combine(Root, "settings.json");
         DatabaseFile = Path.Combine(Root, "library.db");
         ScanCheckpointFile = Path.Combine(Root, "scan-checkpoint.json");
@@ -22,6 +26,7 @@ public sealed class AppPaths
     }
 
     public string Root { get; }
+    public bool IsPortable { get; }
     public string SettingsFile { get; }
     public string DatabaseFile { get; }
     public string ScanCheckpointFile { get; }
@@ -29,6 +34,23 @@ public sealed class AppPaths
     public string DatabaseBackups { get; }
     public string ArtworkCache { get; }
     public string Logs { get; }
+
+    internal static (string Root, bool Portable) ResolveRoot(
+        string? configuredRoot,
+        string executableDirectory,
+        IEnumerable<string> arguments,
+        bool markerExists,
+        string appDataDirectory)
+    {
+        var portable = string.IsNullOrWhiteSpace(configuredRoot)
+            && (markerExists || arguments.Any(argument => argument.Equals("--portable", StringComparison.OrdinalIgnoreCase)));
+        var root = portable
+            ? Path.Combine(executableDirectory, "data")
+            : string.IsNullOrWhiteSpace(configuredRoot)
+                ? Path.Combine(appDataDirectory, "Dextromethorphan")
+                : configuredRoot;
+        return (Path.GetFullPath(root), portable);
+    }
 
     public void EnsureCreated()
     {

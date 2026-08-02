@@ -31,8 +31,8 @@ Open any album, artist, genre, or folder in its own tab, then play individual tr
 ## Highlights
 
 - **Windows-native audio** — event-driven WASAPI shared and exclusive modes, per-device profiles, gapless playback, crossfade, ReplayGain, speed control, and DSD over PCM (DoP).
-- **Offline library** — local folders, mounted drives, and SMB/UNC paths are scanned into a fast SQLite library with file watching and cached artwork.
-- **Flexible browsing** — albums, artists, genres, songs, folders, playlists, favorites, and fast full-library search.
+- **Offline library** — local folders, mounted drives, and SMB/UNC paths are scanned into a fast SQLite library with per-source controls, guarded scheduled scans, file watching, and cached artwork.
+- **Flexible browsing** — albums, artists, genres, songs, a hierarchical folder tree, playlists, favorites, and fast full-library search.
 - **Modern playback flow** — temporary queue, drag reordering, undo/redo, shuffle, repeat, bookmarks, sleep timer, and Spotify-style previous-track behavior.
 - **Lyrics that belong in the player** — static, LRC, and enhanced-LRC lyrics with line and word timing, automatic scrolling, and click-to-seek.
 - **Desktop integration** — rebindable shortcuts, media keys, Windows media controls, session restore, and an audio diagnostics panel.
@@ -49,6 +49,8 @@ dotnet run --project src/Dextromethorphan.App
 ```
 
 On first launch, select **Add music folder**. Your library, settings, and cache live in `%APPDATA%\Dextromethorphan`.
+
+For a self-contained setup, launch with `--portable` or place `portable.mode` beside the executable. See [Portable mode](docs/PORTABLE-MODE.md).
 
 ## Audio support
 
@@ -72,6 +74,7 @@ Add `-Installer` when [Inno Setup 6](https://jrsoftware.org/isinfo.php) is insta
 - [Audio engine and playback modes](docs/AUDIO.md)
 - [Milestone 3 audio qualification status](docs/audio/MILESTONE-3-STATUS-2026-07-31.md)
 - [Library, scanning, and playlists](docs/LIBRARY.md)
+- [Portable mode](docs/PORTABLE-MODE.md)
 - [Interface and navigation](docs/UI.md)
 - [Windows shortcuts and media controls](docs/WINDOWS-INTEGRATION.md)
 - [Project architecture](docs/ARCHITECTURE.md)

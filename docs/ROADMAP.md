@@ -187,12 +187,12 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 
 ### Sources and scanning UI
 
-- [ ] **P1 LIB-001** Add a source manager with Add, Remove, Enable, Rescan, exclusions, watcher toggle, and per-source status.
-- [ ] **P1 LIB-002** Add scan progress with discovered/processed/added/updated/failed counts, current source, cancel, and failure details.
-- [ ] **P1 LIB-003** Support drag-and-drop of folders and supported files into the app.
-- [ ] **P1 LIB-004** Add scheduled/background scan options without running surprise work on battery or metered networks.
-- [ ] **P1 LIB-005** Build a real hierarchical folder tree, not only a flat list of directories containing tracks.
-- [ ] **P2 LIB-006** Add portable mode with app data beside the executable.
+- [x] **P1 LIB-001** Add a source manager with Add, Remove, Enable, Rescan, exclusions, watcher toggle, and per-source status.
+- [x] **P1 LIB-002** Add scan progress with discovered/processed/added/updated/failed counts, current source, cancel, and failure details.
+- [x] **P1 LIB-003** Support drag-and-drop of folders and supported files into the app.
+- [x] **P1 LIB-004** Add scheduled/background scan options without running surprise work on battery or metered networks.
+- [x] **P1 LIB-005** Build a real hierarchical folder tree, not only a flat list of directories containing tracks.
+- [x] **P2 LIB-006** Add portable mode with app data beside the executable. See [Portable mode](PORTABLE-MODE.md).
 
 ### Metadata correctness and editing
 
