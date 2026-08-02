@@ -29,4 +29,4 @@ The engine chooses the path from observable settings. Direct mode has same-forma
 
 ## Privacy
 
-The application performs no telemetry or network calls. Future metadata, lyrics, scrobble, and sync providers must be opt-in.
+The application performs no telemetry and makes no network request by default. LRCLIB lyric lookup is independently opt-in and runs only after a manual search; requests are attributed, throttled, cached, and require confirmation before use. Future metadata, scrobble, and sync providers must follow the same explicit-consent boundary.

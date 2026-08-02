@@ -19,12 +19,12 @@ This is the master backlog for turning Dextromethorphan from a capable personal 
 - [x] BASE-004 Temporary queue with play-next, add, replace, reordering, shuffle, repeat, undo/redo, and session restore.
 - [x] BASE-005 Event-driven WASAPI shared/exclusive engine with direct and DSP paths.
 - [x] BASE-006 Gapless playback, crossfade, ReplayGain, fades, software volume, speed/pitch, and DoP foundations.
-- [x] BASE-007 Synced LRC/enhanced-LRC parsing, active-line tracking, auto-scroll, and click-to-seek.
+- [x] BASE-007 Complete local and opt-in online lyrics workflow with hardened LRC/enhanced-LRC parsing, line/word highlighting, auto-scroll, editing, and click-to-seek.
 - [x] BASE-008 Rebindable shortcut backend, global hotkeys, media keys, and Windows media transport controls.
 - [x] BASE-009 JSON settings with migrations and atomic persistence.
 - [x] BASE-010 Themed track and queue context menus.
 - [x] BASE-011 Release script, x64/ARM64 targets, Inno Setup project, and self-contained publish support.
-- [x] BASE-012 Automated unit/integration foundation with 38 passing tests.
+- [x] BASE-012 Automated unit/integration foundation with 317 passing tests.
 
 ---
 
@@ -258,14 +258,14 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 
 ### Lyrics
 
-- [ ] **P1 LYR-001** Finish line highlighting, word highlighting, previous/current/next emphasis, and smooth centered scrolling across long files.
-- [ ] **P1 LYR-002** Add a manual synchronization offset control with per-track persistence.
-- [ ] **P1 LYR-003** Add static/synced mode selection, font size, alignment, line spacing, blur strength, and reduced-motion behavior.
-- [ ] **P1 LYR-004** Support multiple timed lines at the same timestamp, instrumental gaps, translations, and romanized lines.
-- [ ] **P1 LYR-005** Add local lyric discovery priority, reload, choose alternate file, edit, save, and remove.
-- [ ] **P1 LYR-006** Handle malformed encodings, BOMs, very long lines, and mixed timestamp formats gracefully.
-- [ ] **P2 LYR-007** Add an opt-in lyric provider with source attribution, rate limiting, caching, and manual confirmation.
-- [ ] **P2 LYR-008** Add karaoke-style per-word animation that remains synchronized under seek and speed changes.
+- [x] **P1 LYR-001** Finish line highlighting, word highlighting, previous/current/next emphasis, and smooth centered scrolling across long files. See [Lyrics](LYRICS.md).
+- [x] **P1 LYR-002** Add a manual synchronization offset control with per-track persistence. See [Lyrics](LYRICS.md).
+- [x] **P1 LYR-003** Add static/synced mode selection, font size, alignment, line spacing, blur strength, and reduced-motion behavior. See [Lyrics](LYRICS.md).
+- [x] **P1 LYR-004** Support multiple timed lines at the same timestamp, instrumental gaps, translations, and romanized lines. See [Lyrics](LYRICS.md).
+- [x] **P1 LYR-005** Add local lyric discovery priority, reload, choose alternate file, edit, save, and remove. See [Lyrics](LYRICS.md).
+- [x] **P1 LYR-006** Handle malformed encodings, BOMs, very long lines, and mixed timestamp formats gracefully. See [Lyrics](LYRICS.md).
+- [x] **P2 LYR-007** Add an opt-in lyric provider with source attribution, rate limiting, caching, and manual confirmation. See [Lyrics](LYRICS.md).
+- [x] **P2 LYR-008** Add karaoke-style per-word animation that remains synchronized under seek and speed changes. See [Lyrics](LYRICS.md).
 
 ### Optional visual playback features
 
@@ -409,7 +409,7 @@ All network features remain disabled until explicitly enabled by the user.
 - [ ] **P2 NET-001** Add a central network/privacy page listing every provider, permission, cache, credential, and last request.
 - [ ] **P2 NET-002** Add Last.fm scrobbling with secure credential storage, offline queueing, now-playing updates, retry, and user controls.
 - [ ] **P2 NET-003** Add MusicBrainz metadata/artwork lookup with preview, attribution, rate limits, and confirmation.
-- [ ] **P2 NET-004** Add one legally usable lyrics provider with attribution, caching, manual matching, and opt-in behavior.
+- [x] **P2 NET-004** Add one legally usable lyrics provider with attribution, caching, manual matching, and opt-in behavior. See [Lyrics](LYRICS.md).
 - [ ] **P2 NET-005** Store API credentials in Windows Credential Manager, never plain settings JSON.
 - [ ] **P2 NET-006** Add cache clear/export and provider-disable behavior that works fully offline afterward.
 

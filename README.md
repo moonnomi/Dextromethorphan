@@ -34,7 +34,7 @@ Open any album, artist, genre, or folder in its own tab, then play individual tr
 - **Offline library** — local folders, mounted drives, and SMB/UNC paths are scanned into a fast SQLite library with per-source controls, guarded scheduled scans, file watching, and cached artwork.
 - **Flexible browsing** — albums, artists, genres, songs, a hierarchical folder tree, playlists, favorites, and fast full-library search.
 - **Modern playback flow** — temporary queue, drag reordering, undo/redo, shuffle, repeat, bookmarks, sleep timer, and Spotify-style previous-track behavior.
-- **Lyrics that belong in the player** — static, LRC, and enhanced-LRC lyrics with line and word timing, automatic scrolling, and click-to-seek.
+- **Lyrics that belong in the player** — static, LRC, and enhanced-LRC lyrics with line/word timing, smooth centered scrolling, click-to-seek, editing, per-track offsets, and an optional manual LRCLIB lookup.
 - **Desktop integration** — rebindable shortcuts, media keys, Windows media controls, session restore, and an audio diagnostics panel.
 
 ## Run it from source
@@ -74,6 +74,7 @@ Add `-Installer` when [Inno Setup 6](https://jrsoftware.org/isinfo.php) is insta
 - [Audio engine and playback modes](docs/AUDIO.md)
 - [Milestone 3 audio qualification status](docs/audio/MILESTONE-3-STATUS-2026-07-31.md)
 - [Library, scanning, and playlists](docs/LIBRARY.md)
+- [Lyrics, timing, local files, and optional lookup](docs/LYRICS.md)
 - [Portable mode](docs/PORTABLE-MODE.md)
 - [Interface and navigation](docs/UI.md)
 - [Windows shortcuts and media controls](docs/WINDOWS-INTEGRATION.md)
