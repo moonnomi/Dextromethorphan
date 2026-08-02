@@ -19,7 +19,8 @@ public sealed record LyricsDocument(
     string DisplayName,
     LyricsSourceKind Kind,
     string? FilePath = null,
-    string? Attribution = null)
+    string? Attribution = null,
+    long? SourceId = null)
 {
     public bool CanEdit => Kind == LyricsSourceKind.LocalFile && FilePath is not null;
 }

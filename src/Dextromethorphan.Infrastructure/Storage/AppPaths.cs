@@ -22,6 +22,7 @@ public sealed class AppPaths
         StartupStateFile = Path.Combine(Root, "startup-state.json");
         DatabaseBackups = Path.Combine(Root, "backups");
         ArtworkCache = Path.Combine(Root, "artwork");
+        LyricsCache = Path.Combine(Root, "lyrics");
         Logs = Path.Combine(Root, "logs");
     }
 
@@ -33,6 +34,7 @@ public sealed class AppPaths
     public string StartupStateFile { get; }
     public string DatabaseBackups { get; }
     public string ArtworkCache { get; }
+    public string LyricsCache { get; }
     public string Logs { get; }
 
     internal static (string Root, bool Portable) ResolveRoot(
@@ -56,6 +58,7 @@ public sealed class AppPaths
     {
         Directory.CreateDirectory(Root);
         Directory.CreateDirectory(ArtworkCache);
+        Directory.CreateDirectory(LyricsCache);
         Directory.CreateDirectory(DatabaseBackups);
         Directory.CreateDirectory(Logs);
     }

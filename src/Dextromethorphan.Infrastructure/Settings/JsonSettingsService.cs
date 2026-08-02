@@ -287,6 +287,7 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
         settings.LyricsBlurStrength = FiniteClamp(settings.LyricsBlurStrength, 0, 20, 5);
         settings.LyricOffsetsMilliseconds = NormalizeLyricOffsets(settings.LyricOffsetsMilliseconds);
         settings.SelectedLyricFiles = NormalizeLyricFiles(settings.SelectedLyricFiles);
+        settings.SelectedOnlineLyrics = NormalizeOnlineLyrics(settings.SelectedOnlineLyrics);
         settings.OutputProfiles = NormalizeOutputProfiles(settings.OutputProfiles);
         settings.ActiveOutputDeviceId = NormalizeText(
             settings.ActiveOutputDeviceId,
@@ -424,6 +425,7 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
                 target.KaraokeWordAnimation = defaults.KaraokeWordAnimation;
                 target.LyricOffsetsMilliseconds = defaults.LyricOffsetsMilliseconds;
                 target.SelectedLyricFiles = defaults.SelectedLyricFiles;
+                target.SelectedOnlineLyrics = defaults.SelectedOnlineLyrics;
                 target.OnlineLyricsEnabled = defaults.OnlineLyricsEnabled;
                 break;
             default:
@@ -462,6 +464,18 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
                     continue;
                 result[track] = lyric;
             }
+            catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException) { }
+        }
+        return result;
+    }
+
+    private static Dictionary<string, long> NormalizeOnlineLyrics(Dictionary<string, long>? values)
+    {
+        var result = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in (values ?? []).Take(100_000))
+        {
+            if (pair.Value <= 0) continue;
+            try { result[Path.GetFullPath(pair.Key)] = pair.Value; }
             catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException) { }
         }
         return result;

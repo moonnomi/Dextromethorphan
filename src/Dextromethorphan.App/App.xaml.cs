@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.IO;
+using System.Net.Http;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
@@ -43,6 +44,8 @@ public partial class App : Application
             services.AddSingleton<AudioDecoderCapabilityService>();
             services.AddSingleton<ReplayGainAnalysisService>();
             services.AddSingleton<LyricsDocumentService>();
+            services.AddSingleton(new HttpClient { Timeout = TimeSpan.FromSeconds(20) });
+            services.AddSingleton<LrclibLyricsProvider>();
             services.AddSingleton<AppPaths>();
             services.AddSingleton<IApplicationLog>(x =>
                 new StructuredApplicationLog(x.GetRequiredService<AppPaths>()));

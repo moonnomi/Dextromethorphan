@@ -121,6 +121,16 @@ public partial class MainWindow : Window
     {
         if (sender is not ComboBox { SelectedItem: LyricsDocument document }
             || ReferenceEquals(document, ViewModel.CurrentLyricsDocument)) return;
+        if (document.Kind == LyricsSourceKind.OnlineCache
+            && !ConfirmationDialog.Show(
+                this,
+                "Use online lyrics?",
+                $"Use this result from {document.Attribution ?? "LRCLIB"}? It will be remembered for this track, but your audio file and tags will not be changed.",
+                "Use lyrics"))
+        {
+            ((ComboBox)sender).SelectedItem = ViewModel.CurrentLyricsDocument;
+            return;
+        }
         try { await ViewModel.SelectLyricsSourceAsync(document); }
         catch (Exception exception) { ErrorDialog.Show(this, exception, "", true, "Lyrics could not be selected"); }
     }

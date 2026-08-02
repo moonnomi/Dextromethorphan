@@ -371,6 +371,7 @@
                         </StackPanel>
                     </Border>
                     <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0"><StackPanel><TextBlock Text="Local lyric files" FontWeight="SemiBold"/><TextBlock Text="The Now Playing panel discovers exact-name LRC/TXT files first, then language variants, title matches, and embedded metadata. Alternate choices and per-track timing offsets are remembered." Foreground="{StaticResource TextMutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel></Border>
+                    <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0"><StackPanel><TextBlock Text="Online lookup" FontWeight="SemiBold"/><CheckBox Content="Enable manual LRCLIB searches" IsChecked="{Binding OnlineLyricsEnabled}" Margin="0,12,0,0"/><TextBlock Text="Off by default. When you press the globe in Now Playing, the track title, artist, album, and duration are sent to LRCLIB. Results are cached locally for 30 days and are never applied until you select and confirm one. LRCLIB is credited beside the selected source." Foreground="{StaticResource TextMutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="24,5,0,0"/></StackPanel></Border>
                 </StackPanel>
             </ScrollViewer>
         </TabItem>

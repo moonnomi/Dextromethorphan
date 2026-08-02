@@ -41,6 +41,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly AudioDecoderCapabilityService _decoderCapabilities;
     private readonly ReplayGainAnalysisService _replayGainAnalysis;
     private readonly LyricsDocumentService _lyricsDocuments;
+    private readonly LrclibLyricsProvider _onlineLyrics;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly ConcurrentDictionary<string, string?> _resolvedArtwork = new(StringComparer.OrdinalIgnoreCase);
     private readonly Stack<NavigationEntry> _backHistory = new();
@@ -126,6 +127,8 @@ public sealed class MainViewModel : ObservableObject
     private double _lyricsLineSpacing = 1.15;
     private double _lyricsBlurStrength = 5;
     private bool _karaokeWordAnimation = true;
+    private bool _onlineLyricsEnabled;
+    private bool _isOnlineLyricsBusy;
     private bool _lyricsEditorVisible;
     private string _lyricsEditorText = string.Empty;
     private string _lyricsStatus = "Local lyrics only";
@@ -182,7 +185,8 @@ public sealed class MainViewModel : ObservableObject
         DuplicateDetectionService duplicates,
         AudioDecoderCapabilityService decoderCapabilities,
         ReplayGainAnalysisService replayGainAnalysis,
-        LyricsDocumentService lyricsDocuments)
+        LyricsDocumentService lyricsDocuments,
+        LrclibLyricsProvider onlineLyrics)
     {
         _settings = settings; _repository = repository; _playlists = playlists; _scanner = scanner; _artwork = artwork; _metadataReader = metadataReader;
         _audio = audio; _queue = queue; _sleepTimer = sleepTimer; _shortcuts = shortcuts; _systemMedia = systemMedia;
@@ -194,6 +198,7 @@ public sealed class MainViewModel : ObservableObject
         _decoderCapabilities = decoderCapabilities;
         _replayGainAnalysis = replayGainAnalysis;
         _lyricsDocuments = lyricsDocuments;
+        _onlineLyrics = onlineLyrics;
         _scheduledScanTimer = new DispatcherTimer(
             TimeSpan.FromMinutes(1),
             DispatcherPriority.Background,
@@ -249,6 +254,7 @@ public sealed class MainViewModel : ObservableObject
         LoveCommand = new AsyncRelayCommand(_ => ToggleLoveAsync(), _ => CurrentTrack is not null);
         SeekLyricCommand = new AsyncRelayCommand(p => SeekLyricAsync(p as LyricLineViewModel));
         ReloadLyricsCommand = new AsyncRelayCommand(_ => ReloadLyricsAsync(), _ => CurrentTrack is not null);
+        FetchOnlineLyricsCommand = new AsyncRelayCommand(_ => FetchOnlineLyricsAsync(), _ => CurrentTrack is not null && OnlineLyricsEnabled && !IsOnlineLyricsBusy);
         SelectLyricsSourceCommand = new AsyncRelayCommand(p => SelectLyricsSourceAsync(p as LyricsDocument), p => p is LyricsDocument);
         ToggleLyricsEditorCommand = new RelayCommand(_ => ToggleLyricsEditor(), _ => CurrentTrack is not null);
         SaveLyricsCommand = new AsyncRelayCommand(_ => SaveLyricsAsync(), _ => CurrentTrack is not null && LyricsEditorVisible);
@@ -417,7 +423,7 @@ public sealed class MainViewModel : ObservableObject
             (PlaySelectedCommand as AsyncRelayCommand)?.CanExecute(value);
         }
     }
-    public Track? CurrentTrack { get => _currentTrack; private set { if (Set(ref _currentTrack, value)) { Raise(nameof(HasCurrentTrack)); Raise(nameof(CurrentTitle)); Raise(nameof(CurrentArtist)); Raise(nameof(CurrentArtworkPath)); Raise(nameof(LoveGlyph)); Raise(nameof(LoveText)); Raise(nameof(CanEditLyrics)); ReloadLyricsCommand.RaiseCanExecuteChanged(); ToggleLyricsEditorCommand.RaiseCanExecuteChanged(); SaveLyricsCommand.RaiseCanExecuteChanged(); } } }
+    public Track? CurrentTrack { get => _currentTrack; private set { if (Set(ref _currentTrack, value)) { Raise(nameof(HasCurrentTrack)); Raise(nameof(CurrentTitle)); Raise(nameof(CurrentArtist)); Raise(nameof(CurrentArtworkPath)); Raise(nameof(LoveGlyph)); Raise(nameof(LoveText)); Raise(nameof(CanEditLyrics)); ReloadLyricsCommand.RaiseCanExecuteChanged(); FetchOnlineLyricsCommand.RaiseCanExecuteChanged(); ToggleLyricsEditorCommand.RaiseCanExecuteChanged(); SaveLyricsCommand.RaiseCanExecuteChanged(); } } }
     public LibraryCardViewModel? SelectedCard
     {
         get => _selectedCard;
@@ -667,6 +673,27 @@ public sealed class MainViewModel : ObservableObject
     public Thickness LyricsLineMargin => new(0, Math.Max(1, (LyricsLineSpacing - 0.8) * 10), 0, Math.Max(1, (LyricsLineSpacing - 0.8) * 10));
     public double LyricsBlurStrength { get => _lyricsBlurStrength; set { var normalized = Math.Clamp(value, 0, 20); if (Set(ref _lyricsBlurStrength, normalized)) _ = _settings.UpdateAsync(settings => settings.LyricsBlurStrength = normalized); } }
     public bool KaraokeWordAnimation { get => _karaokeWordAnimation; set { if (Set(ref _karaokeWordAnimation, value)) _ = _settings.UpdateAsync(settings => settings.KaraokeWordAnimation = value); } }
+    public bool OnlineLyricsEnabled
+    {
+        get => _onlineLyricsEnabled;
+        set
+        {
+            if (!Set(ref _onlineLyricsEnabled, value)) return;
+            _ = _settings.UpdateAsync(settings => settings.OnlineLyricsEnabled = value);
+            FetchOnlineLyricsCommand.RaiseCanExecuteChanged();
+            if (!value && CurrentLyricsDocument?.Kind == LyricsSourceKind.OnlineCache)
+                _ = ReloadLyricsAsync();
+        }
+    }
+    public bool IsOnlineLyricsBusy
+    {
+        get => _isOnlineLyricsBusy;
+        private set
+        {
+            if (!Set(ref _isOnlineLyricsBusy, value)) return;
+            FetchOnlineLyricsCommand.RaiseCanExecuteChanged();
+        }
+    }
     public bool LyricsEditorVisible { get => _lyricsEditorVisible; private set { if (Set(ref _lyricsEditorVisible, value)) SaveLyricsCommand.RaiseCanExecuteChanged(); } }
     public string LyricsEditorText { get => _lyricsEditorText; set => Set(ref _lyricsEditorText, value); }
     public string LyricsStatus { get => _lyricsStatus; private set => Set(ref _lyricsStatus, value); }
@@ -700,6 +727,7 @@ public sealed class MainViewModel : ObservableObject
     public AsyncRelayCommand LoveCommand { get; }
     public AsyncRelayCommand SeekLyricCommand { get; }
     public AsyncRelayCommand ReloadLyricsCommand { get; }
+    public AsyncRelayCommand FetchOnlineLyricsCommand { get; }
     public AsyncRelayCommand SelectLyricsSourceCommand { get; }
     public RelayCommand ToggleLyricsEditorCommand { get; }
     public AsyncRelayCommand SaveLyricsCommand { get; }
@@ -2419,6 +2447,7 @@ public sealed class MainViewModel : ObservableObject
         _lyricsLineSpacing = _settings.Current.LyricsLineSpacing;
         _lyricsBlurStrength = _settings.Current.LyricsBlurStrength;
         _karaokeWordAnimation = _settings.Current.KaraokeWordAnimation;
+        _onlineLyricsEnabled = _settings.Current.OnlineLyricsEnabled;
         Raise(nameof(LyricsDisplayMode));
         Raise(nameof(LyricsFontSize));
         Raise(nameof(LyricsAlignment));
@@ -2428,6 +2457,8 @@ public sealed class MainViewModel : ObservableObject
         Raise(nameof(LyricsLineMargin));
         Raise(nameof(LyricsBlurStrength));
         Raise(nameof(KaraokeWordAnimation));
+        Raise(nameof(OnlineLyricsEnabled));
+        FetchOnlineLyricsCommand.RaiseCanExecuteChanged();
     }
 
     internal async Task RunIdleCleanupAsync()
@@ -2707,7 +2738,13 @@ public sealed class MainViewModel : ObservableObject
     {
         try
         {
-            var sources = await _lyricsDocuments.DiscoverAsync(track, _lifetime.Token);
+            var sources = (await _lyricsDocuments.DiscoverAsync(track, _lifetime.Token)).ToList();
+            var rememberedOnline = await _onlineLyrics.LoadSelectedAsync(track, _lifetime.Token);
+            if (rememberedOnline is not null)
+            {
+                var insertionIndex = sources.FindIndex(source => source.Kind == LyricsSourceKind.Embedded);
+                sources.Insert(insertionIndex < 0 ? sources.Count : insertionIndex, rememberedOnline);
+            }
             RunOnUi(() =>
             {
                 Replace(LyricsSources, sources);
@@ -2738,8 +2775,8 @@ public sealed class MainViewModel : ObservableObject
         if (document is null || string.IsNullOrWhiteSpace(document.Content))
         {
             Replace(Lyrics, []);
-            ActiveLyric = "No lyrics found. Choose a local file or create a sidecar.";
-            LyricsStatus = "No local lyrics found";
+            ActiveLyric = "No lyrics found. Choose a local file, create a sidecar, or use the optional online lookup.";
+            LyricsStatus = OnlineLyricsEnabled ? "No lyrics found" : "No local lyrics found · online lookup is off";
             Raise(nameof(HasLyrics));
             return;
         }
@@ -2769,7 +2806,12 @@ public sealed class MainViewModel : ObservableObject
         ActiveLyric = Lyrics.FirstOrDefault()?.Text ?? "No lyrics";
         LyricsStatus = document.Attribution is { Length: > 0 }
             ? $"Source: {document.Attribution}"
-            : document.Kind == LyricsSourceKind.LocalFile ? "Local sidecar" : "Embedded metadata";
+            : document.Kind switch
+            {
+                LyricsSourceKind.LocalFile => "Local sidecar",
+                LyricsSourceKind.OnlineCache => "Cached online lyrics",
+                _ => "Embedded metadata"
+            };
         Raise(nameof(HasLyrics));
         UpdateLyricsPosition(_audio.Snapshot.Position);
     }
@@ -2792,10 +2834,43 @@ public sealed class MainViewModel : ObservableObject
         if (CurrentTrack is { } track) await LoadLyricsAsync(track);
     }
 
+    private async Task FetchOnlineLyricsAsync()
+    {
+        if (CurrentTrack is not { } track) return;
+        IsOnlineLyricsBusy = true;
+        LyricsStatus = "Searching LRCLIB…";
+        try
+        {
+            var results = await _onlineLyrics.SearchAsync(track, _lifetime.Token);
+            if (CurrentTrack?.Path != track.Path) return;
+            RunOnUi(() =>
+            {
+                foreach (var result in results)
+                    if (!LyricsSources.Any(source => source.Kind == LyricsSourceKind.OnlineCache && source.SourceId == result.SourceId))
+                        LyricsSources.Add(result);
+                LyricsStatus = results.Count == 0
+                    ? "No LRCLIB matches found"
+                    : $"{results.Count} LRCLIB match{(results.Count == 1 ? string.Empty : "es")} · select one to review";
+            });
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception)
+        {
+            LyricsStatus = "Online lyric lookup failed · " + exception.GetBaseException().Message;
+            _applicationLog.Write(ApplicationLogLevel.Warning, "lyrics", "online-lookup-failed", exception: exception);
+        }
+        finally
+        {
+            IsOnlineLyricsBusy = false;
+        }
+    }
+
     public async Task SelectLyricsSourceAsync(LyricsDocument? document)
     {
         if (document is null || CurrentTrack is not { } track) return;
         if (document.FilePath is { } path) document = await _lyricsDocuments.ChooseAsync(track, path, _lifetime.Token);
+        if (document.Kind == LyricsSourceKind.OnlineCache)
+            await _onlineLyrics.RememberSelectionAsync(track, document, _lifetime.Token);
         ApplyLyricsDocument(document, track);
     }
 

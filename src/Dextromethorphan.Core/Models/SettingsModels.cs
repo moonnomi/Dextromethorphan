@@ -2,7 +2,7 @@ namespace Dextromethorphan.Core.Models;
 
 public sealed class AppSettings
 {
-    public const int CurrentSchemaVersion = 6;
+    public const int CurrentSchemaVersion = 7;
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public string Theme { get; set; } = "Dark";
     public string AccentColor { get; set; } = "#FF8A3D";
@@ -40,6 +40,7 @@ public sealed class AppSettings
     public bool KaraokeWordAnimation { get; set; } = true;
     public Dictionary<string, int> LyricOffsetsMilliseconds { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string> SelectedLyricFiles { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, long> SelectedOnlineLyrics { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public bool OnlineLyricsEnabled { get; set; }
     public List<AudioOutputProfile> OutputProfiles { get; set; } = [new()];
     public string ActiveOutputDeviceId { get; set; } = "default";
