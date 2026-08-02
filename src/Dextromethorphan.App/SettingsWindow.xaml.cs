@@ -216,6 +216,35 @@ public partial class SettingsWindow : Window
             await RunAsync(viewModel.FindContentDuplicatesAsync);
     }
 
+    private async void AddLibrarySource_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel viewModel) return;
+        var dialog = new OpenFolderDialog { Title = "Add a music source", Multiselect = false };
+        if (dialog.ShowDialog(this) == true)
+            await RunAsync(() => viewModel.AddLibraryFolderAsync(dialog.FolderName));
+    }
+
+    private async void AddExclusion_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel viewModel) return;
+        var dialog = new OpenFolderDialog { Title = "Exclude a folder from library scans", Multiselect = false };
+        if (dialog.ShowDialog(this) == true)
+            await RunAsync(() => viewModel.AddLibraryExclusionAsync(dialog.FolderName));
+    }
+
+    private async void RemoveLibrarySource_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel viewModel
+            || sender is not Button { Tag: LibrarySourceViewModel source }
+            || !ConfirmationDialog.Show(
+                this,
+                "Remove music source?",
+                $"{source.Root}\n\nIts entries will be removed from Dextromethorphan. Music files are never deleted.",
+                "Remove"))
+            return;
+        await RunAsync(() => viewModel.RemoveLibrarySourceAsync(source));
+    }
+
     private async void SaveReplayGain_Click(
         object sender,
         RoutedEventArgs e)

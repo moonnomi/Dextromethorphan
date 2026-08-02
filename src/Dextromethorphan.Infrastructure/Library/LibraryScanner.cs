@@ -47,6 +47,7 @@ public sealed class LibraryScanner(
         }
     }
     public event EventHandler<ScanProgress>? ProgressChanged;
+    public event EventHandler<LibraryScanFailure>? FailureOccurred;
     public event EventHandler? SourceStatusesChanged;
     public event EventHandler<LibraryFilesChangedEventArgs>? FilesChanged;
     public event Action<string>? ArtworkChanged;
@@ -276,11 +277,18 @@ public sealed class LibraryScanner(
                                 Interlocked.Increment(ref processed);
                                 Report(item.Path);
                             },
-                            () =>
+                            exception =>
                             {
                                 Interlocked.Increment(ref failed);
                                 Interlocked.Increment(ref processed);
                                 Report(item.Path);
+                                FailureOccurred?.Invoke(
+                                    this,
+                                    new LibraryScanFailure(
+                                        item.Root,
+                                        item.Path,
+                                        exception.GetBaseException().Message,
+                                        DateTimeOffset.UtcNow));
                             },
                             token);
                     }
@@ -630,7 +638,7 @@ public sealed class LibraryScanner(
         ConcurrentDictionary<string, ExternalArtworkSelection> directoryArtwork,
         ChannelWriter<PendingWrite> pending,
         Action unchanged,
-        Action failed,
+        Action<Exception> failed,
         CancellationToken cancellationToken)
     {
         try
@@ -702,9 +710,9 @@ public sealed class LibraryScanner(
         {
             throw;
         }
-        catch
+        catch (Exception exception)
         {
-            failed();
+            failed(exception);
         }
     }
 

@@ -263,6 +263,23 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
             settings.TransitionMode = TransitionMode.Gapless;
         settings.LibraryFolders = NormalizePaths(settings.LibraryFolders);
         settings.ExcludedFolders = NormalizePaths(settings.ExcludedFolders);
+        settings.LibrarySources ??= [];
+        var sources = new List<LibrarySourceSettings>();
+        foreach (var source in settings.LibrarySources)
+        {
+            if (source is null || string.IsNullOrWhiteSpace(source.Path)) continue;
+            string path;
+            try { path = Path.GetFullPath(source.Path.Trim()); }
+            catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException) { continue; }
+            if (sources.Any(existing => existing.Path.Equals(path, StringComparison.OrdinalIgnoreCase))) continue;
+            sources.Add(new LibrarySourceSettings { Path = path, Enabled = source.Enabled, WatchEnabled = source.WatchEnabled });
+        }
+        foreach (var path in settings.LibraryFolders)
+            if (!sources.Any(source => source.Path.Equals(path, StringComparison.OrdinalIgnoreCase)))
+                sources.Add(new LibrarySourceSettings { Path = path });
+        settings.LibrarySources = sources;
+        settings.LibraryFolders = sources.Where(source => source.Enabled).Select(source => source.Path).ToList();
+        settings.ScheduledLibraryScanIntervalMinutes = Math.Clamp(settings.ScheduledLibraryScanIntervalMinutes, 15, 1440);
         settings.OutputProfiles = NormalizeOutputProfiles(settings.OutputProfiles);
         settings.ActiveOutputDeviceId = NormalizeText(
             settings.ActiveOutputDeviceId,
@@ -376,6 +393,11 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
             case SettingsResetScope.Library:
                 target.LibraryFolders = defaults.LibraryFolders;
                 target.ExcludedFolders = defaults.ExcludedFolders;
+                target.LibrarySources = defaults.LibrarySources;
+                target.ScheduledLibraryScanEnabled = defaults.ScheduledLibraryScanEnabled;
+                target.ScheduledLibraryScanIntervalMinutes = defaults.ScheduledLibraryScanIntervalMinutes;
+                target.AllowScheduledScanOnBattery = defaults.AllowScheduledScanOnBattery;
+                target.AllowScheduledScanOnMeteredNetwork = defaults.AllowScheduledScanOnMeteredNetwork;
                 target.ArtworkCacheMegabytes =
                     defaults.ArtworkCacheMegabytes;
                 break;

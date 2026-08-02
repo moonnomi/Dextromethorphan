@@ -124,6 +124,10 @@ public sealed class PersistenceTests : IDisposable
         Assert.Equal(20, settings.ReplayGainPreampDb);
         Assert.Equal(1, settings.PlaybackSpeed);
         Assert.Equal([Path.GetFullPath(offline)], settings.LibraryFolders);
+        var source = Assert.Single(settings.LibrarySources);
+        Assert.Equal(Path.GetFullPath(offline), source.Path);
+        Assert.True(source.Enabled);
+        Assert.True(source.WatchEnabled);
         Assert.Equal(
             [Path.GetFullPath(Path.Combine(offline, "excluded"))],
             settings.ExcludedFolders);
@@ -139,6 +143,23 @@ public sealed class PersistenceTests : IDisposable
         Assert.Equal(0, settings.PlaybackSession.CurrentIndex);
         Assert.Equal(0, settings.PlaybackSession.PositionSeconds);
         Assert.Equal("Albums", settings.PlaybackSession.LastView);
+    }
+
+    [Fact]
+    public void DisabledSourceSurvivesNormalizationWithoutReturningToLegacyFolderList()
+    {
+        var root = Path.Combine(_root, "disabled");
+        var settings = new AppSettings
+        {
+            LibrarySources = [new() { Path = root, Enabled = false, WatchEnabled = false }]
+        };
+
+        JsonSettingsService.Normalize(settings);
+
+        Assert.Empty(settings.LibraryFolders);
+        var source = Assert.Single(settings.LibrarySources);
+        Assert.False(source.Enabled);
+        Assert.False(source.WatchEnabled);
     }
 
     [Fact]

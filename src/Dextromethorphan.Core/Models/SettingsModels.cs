@@ -2,7 +2,7 @@ namespace Dextromethorphan.Core.Models;
 
 public sealed class AppSettings
 {
-    public const int CurrentSchemaVersion = 4;
+    public const int CurrentSchemaVersion = 5;
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public string Theme { get; set; } = "Dark";
     public string AccentColor { get; set; } = "#FF8A3D";
@@ -27,6 +27,11 @@ public sealed class AppSettings
     public bool QueuePanelVisible { get; set; } = true;
     public List<string> LibraryFolders { get; set; } = [];
     public List<string> ExcludedFolders { get; set; } = [];
+    public List<LibrarySourceSettings> LibrarySources { get; set; } = [];
+    public bool ScheduledLibraryScanEnabled { get; set; } = true;
+    public int ScheduledLibraryScanIntervalMinutes { get; set; } = 60;
+    public bool AllowScheduledScanOnBattery { get; set; }
+    public bool AllowScheduledScanOnMeteredNetwork { get; set; }
     public List<AudioOutputProfile> OutputProfiles { get; set; } = [new()];
     public string ActiveOutputDeviceId { get; set; } = "default";
     public double SeekStepSeconds { get; set; } = 5;
@@ -67,6 +72,13 @@ public sealed class AppSettings
         new() { Action = ShortcutActions.VolumeUp, Gesture = "Ctrl+Alt+Up", Global = true },
         new() { Action = ShortcutActions.VolumeDown, Gesture = "Ctrl+Alt+Down", Global = true }
     ];
+}
+
+public sealed class LibrarySourceSettings
+{
+    public string Path { get; set; } = string.Empty;
+    public bool Enabled { get; set; } = true;
+    public bool WatchEnabled { get; set; } = true;
 }
 
 public enum SettingsResetScope
@@ -125,6 +137,12 @@ public sealed record LibrarySourceStatus(
     DateTimeOffset? LastSuccessfulScan,
     string? Error,
     long TrackCount = 0);
+
+public sealed record LibraryScanFailure(
+    string SourceRoot,
+    string Path,
+    string Message,
+    DateTimeOffset OccurredAt);
 
 public enum LibraryFileChangeKind
 {

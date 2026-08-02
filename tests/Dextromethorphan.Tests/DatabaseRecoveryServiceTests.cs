@@ -106,6 +106,7 @@ public sealed class DatabaseRecoveryServiceTests : IDisposable
         public ScanLifecycleState State => ScanLifecycleState.Idle;
         public IReadOnlyList<LibrarySourceStatus> SourceStatuses => [];
         public event EventHandler<ScanProgress>? ProgressChanged;
+        public event EventHandler<LibraryScanFailure>? FailureOccurred;
         public event EventHandler? SourceStatusesChanged;
         public event EventHandler<LibraryFilesChangedEventArgs>? FilesChanged;
         public event Action<string>? ArtworkChanged;

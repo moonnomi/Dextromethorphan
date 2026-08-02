@@ -115,6 +115,7 @@ public interface ILibraryScanner : IAsyncDisposable
     ScanLifecycleState State { get; }
     IReadOnlyList<LibrarySourceStatus> SourceStatuses { get; }
     event EventHandler<ScanProgress>? ProgressChanged;
+    event EventHandler<LibraryScanFailure>? FailureOccurred;
     event EventHandler? SourceStatusesChanged;
     event EventHandler<LibraryFilesChangedEventArgs>? FilesChanged;
     event Action<string>? ArtworkChanged;

@@ -86,6 +86,12 @@ public sealed class MainViewModel : ObservableObject
     private double _durationSeconds = 1;
     private double _volume = 0.82;
     private bool _isScanning;
+    private int _scanDiscovered;
+    private int _scanProcessed;
+    private int _scanAdded;
+    private int _scanUpdated;
+    private int _scanFailed;
+    private string _scanCurrentPath = "No scan running";
     private bool _queueVisible = true;
     private bool _isCollectionDetailOpen;
     private bool _isUserSeeking;
@@ -179,7 +185,12 @@ public sealed class MainViewModel : ObservableObject
             Raise(nameof(RepeatText)); Raise(nameof(IsRepeatEnabled)); Raise(nameof(IsRepeatOne));
             ScheduleSessionSave();
         });
-        ScanCommand = new AsyncRelayCommand(_ => ScanAsync(), _ => !_scanner.IsScanning && _settings.Current.LibraryFolders.Count > 0);
+        ScanCommand = new AsyncRelayCommand(_ => ScanAsync(), _ => !_scanner.IsScanning && EnabledSourcePaths().Count > 0);
+        RescanSourceCommand = new AsyncRelayCommand(p => RescanSourceAsync(p as LibrarySourceViewModel), p => p is LibrarySourceViewModel { Enabled: true } && !_scanner.IsScanning);
+        ToggleLibrarySourceCommand = new AsyncRelayCommand(p => ToggleLibrarySourceAsync(p as LibrarySourceViewModel), p => p is LibrarySourceViewModel && !_scanner.IsScanning);
+        ToggleSourceWatcherCommand = new AsyncRelayCommand(p => ToggleSourceWatcherAsync(p as LibrarySourceViewModel), p => p is LibrarySourceViewModel { Enabled: true });
+        RemoveLibrarySourceCommand = new AsyncRelayCommand(p => RemoveLibrarySourceAsync(p as LibrarySourceViewModel), p => p is LibrarySourceViewModel && !_scanner.IsScanning);
+        RemoveExclusionCommand = new AsyncRelayCommand(p => RemoveExclusionAsync(p?.ToString()), p => p is string);
         ToggleScanPauseCommand = new RelayCommand(
             _ =>
             {
@@ -220,6 +231,7 @@ public sealed class MainViewModel : ObservableObject
         _audio.OutputDevicesChanged += AudioOnOutputDevicesChanged;
         _queue.Changed += QueueOnChanged;
         _scanner.ProgressChanged += ScannerOnProgressChanged;
+        _scanner.FailureOccurred += ScannerOnFailureOccurred;
         _scanner.SourceStatusesChanged += ScannerOnSourceStatusesChanged;
         _scanner.FilesChanged += ScannerOnFilesChanged;
         _scanner.ArtworkChanged += ScannerOnArtworkChanged;
@@ -241,7 +253,9 @@ public sealed class MainViewModel : ObservableObject
     public ObservableCollection<QueueEntryViewModel> Queue { get; } = new ObservableRangeCollection<QueueEntryViewModel>();
     public ObservableCollection<LyricLineViewModel> Lyrics { get; } = new ObservableRangeCollection<LyricLineViewModel>();
     public ObservableCollection<AudioDeviceInfo> OutputDevices { get; } = new ObservableRangeCollection<AudioDeviceInfo>();
-    public ObservableCollection<LibrarySourceStatus> LibrarySources { get; } = new ObservableRangeCollection<LibrarySourceStatus>();
+    public ObservableCollection<LibrarySourceViewModel> LibrarySources { get; } = new ObservableRangeCollection<LibrarySourceViewModel>();
+    public ObservableCollection<string> LibraryExclusions { get; } = new ObservableRangeCollection<string>();
+    public ObservableCollection<LibraryScanFailure> ScanFailures { get; } = new ObservableRangeCollection<LibraryScanFailure>();
     public ObservableCollection<DuplicateTrackGroup> DuplicateGroups { get; } = new ObservableRangeCollection<DuplicateTrackGroup>();
     public ObservableCollection<DecoderCapability> DecoderCapabilities { get; } = new ObservableRangeCollection<DecoderCapability>();
     public string DuplicateScanStatus { get => _duplicateScanStatus; private set => Set(ref _duplicateScanStatus, value); }
@@ -442,6 +456,15 @@ public sealed class MainViewModel : ObservableObject
     public double DurationSeconds { get => _durationSeconds; private set => Set(ref _durationSeconds, Math.Max(1, value)); }
     public double Volume { get => _volume; set { if (Set(ref _volume, Math.Clamp(value, 0, 1))) QueueVolumeUpdate(_volume); } }
     public bool IsScanning { get => _isScanning; private set => Set(ref _isScanning, value); }
+    public int ScanDiscovered { get => _scanDiscovered; private set { if (Set(ref _scanDiscovered, value)) Raise(nameof(ScanProgressMaximum)); } }
+    public int ScanProcessed { get => _scanProcessed; private set { if (Set(ref _scanProcessed, value)) Raise(nameof(ScanProgressValue)); } }
+    public int ScanAdded { get => _scanAdded; private set => Set(ref _scanAdded, value); }
+    public int ScanUpdated { get => _scanUpdated; private set => Set(ref _scanUpdated, value); }
+    public int ScanFailed { get => _scanFailed; private set => Set(ref _scanFailed, value); }
+    public double ScanProgressMaximum => Math.Max(1, ScanDiscovered);
+    public double ScanProgressValue => Math.Min(ScanProcessed, ScanProgressMaximum);
+    public string ScanCurrentPath { get => _scanCurrentPath; private set => Set(ref _scanCurrentPath, value); }
+    public bool HasScanFailures => ScanFailures.Count > 0;
     public bool IsLibraryReady { get => _isLibraryReady; private set => Set(ref _isLibraryReady, value); }
     public bool IsSafeMode { get => _isSafeMode; private set => Set(ref _isSafeMode, value); }
     public bool IsScanPaused => _scanner.State == ScanLifecycleState.Paused;
@@ -532,6 +555,11 @@ public sealed class MainViewModel : ObservableObject
     public RelayCommand ToggleShuffleCommand { get; }
     public RelayCommand CycleRepeatCommand { get; }
     public AsyncRelayCommand ScanCommand { get; }
+    public AsyncRelayCommand RescanSourceCommand { get; }
+    public AsyncRelayCommand ToggleLibrarySourceCommand { get; }
+    public AsyncRelayCommand ToggleSourceWatcherCommand { get; }
+    public AsyncRelayCommand RemoveLibrarySourceCommand { get; }
+    public AsyncRelayCommand RemoveExclusionCommand { get; }
     public RelayCommand ToggleScanPauseCommand { get; }
     public RelayCommand CancelScanCommand { get; }
     public AsyncRelayCommand RefreshArtworkCacheCommand { get; }
@@ -616,7 +644,7 @@ public sealed class MainViewModel : ObservableObject
         await _audio.ConfigureOutputAsync(profile, _lifetime.Token);
         await _audio.SetVolumeAsync(_volume, _lifetime.Token);
         await Task.WhenAll(refreshLibrary, refreshArtwork);
-        _scanner.StartWatching(_settings.Current.LibraryFolders);
+        RestartSourceWatchers();
         await RefreshLibrarySourceCountsAsync();
         if (!IsSafeMode)
             await RestoreSessionAsync();
@@ -625,24 +653,32 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task RefreshLibrarySourceCountsAsync()
     {
-        var statuses = _scanner.SourceStatuses;
-        var refreshed = new List<LibrarySourceStatus>(statuses.Count);
-        foreach (var status in statuses)
+        var statuses = _scanner.SourceStatuses.ToDictionary(status => status.Root, StringComparer.OrdinalIgnoreCase);
+        var refreshed = new List<LibrarySourceViewModel>(_settings.Current.LibrarySources.Count);
+        foreach (var source in _settings.Current.LibrarySources)
         {
+            statuses.TryGetValue(source.Path, out var status);
             try
             {
                 var count = await _repository.CountUnderRootAsync(
-                    status.Root,
+                    source.Path,
                     _lifetime.Token);
-                refreshed.Add(status with { TrackCount = count });
+                status = (status ?? new LibrarySourceStatus(
+                    source.Path,
+                    LibrarySourceKind.Unknown,
+                    Directory.Exists(source.Path),
+                    false,
+                    null,
+                    Directory.Exists(source.Path) ? null : "Source is offline.")) with { TrackCount = count };
             }
             catch (Exception exception) when (
                 exception is IOException or UnauthorizedAccessException)
             {
-                refreshed.Add(status);
             }
+            refreshed.Add(new LibrarySourceViewModel(source, status));
         }
         Replace(LibrarySources, refreshed);
+        Replace(LibraryExclusions, _settings.Current.ExcludedFolders);
     }
 
     public async Task SaveReplayGainSettingsAsync()
@@ -868,9 +904,101 @@ public sealed class MainViewModel : ObservableObject
 
     public async Task AddLibraryFolderAsync(string folder)
     {
-        await _settings.UpdateAsync(x => { if (!x.LibraryFolders.Contains(folder, StringComparer.OrdinalIgnoreCase)) x.LibraryFolders.Add(folder); }, _lifetime.Token);
-        _scanner.StartWatching(_settings.Current.LibraryFolders);
-        await ScanAsync();
+        var normalized = Path.GetFullPath(folder);
+        await _settings.UpdateAsync(settings =>
+        {
+            var source = settings.LibrarySources.FirstOrDefault(item => item.Path.Equals(normalized, StringComparison.OrdinalIgnoreCase));
+            if (source is null)
+                settings.LibrarySources.Add(new LibrarySourceSettings { Path = normalized });
+            else
+                source.Enabled = true;
+            if (!settings.LibraryFolders.Contains(normalized, StringComparer.OrdinalIgnoreCase)) settings.LibraryFolders.Add(normalized);
+        }, _lifetime.Token);
+        RestartSourceWatchers();
+        await RefreshLibrarySourceCountsAsync();
+        await ScanAsync([normalized]);
+    }
+
+    public async Task AddLibraryExclusionAsync(string folder)
+    {
+        var normalized = Path.GetFullPath(folder);
+        await _settings.UpdateAsync(settings =>
+        {
+            if (!settings.ExcludedFolders.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+                settings.ExcludedFolders.Add(normalized);
+        }, _lifetime.Token);
+        Replace(LibraryExclusions, _settings.Current.ExcludedFolders);
+    }
+
+    private async Task RemoveExclusionAsync(string? folder)
+    {
+        if (string.IsNullOrWhiteSpace(folder)) return;
+        await _settings.UpdateAsync(settings =>
+            settings.ExcludedFolders.RemoveAll(path => path.Equals(folder, StringComparison.OrdinalIgnoreCase)), _lifetime.Token);
+        Replace(LibraryExclusions, _settings.Current.ExcludedFolders);
+    }
+
+    private async Task ToggleLibrarySourceAsync(LibrarySourceViewModel? source)
+    {
+        if (source is null) return;
+        await _settings.UpdateAsync(settings =>
+        {
+            var configured = settings.LibrarySources.First(item => item.Path.Equals(source.Root, StringComparison.OrdinalIgnoreCase));
+            configured.Enabled = !configured.Enabled;
+            settings.LibraryFolders = settings.LibrarySources.Where(item => item.Enabled).Select(item => item.Path).ToList();
+        }, _lifetime.Token);
+        RestartSourceWatchers();
+        await RefreshLibrarySourceCountsAsync();
+        await RefreshLibraryAsync(SearchText, _lifetime.Token);
+        UpdateScanState();
+    }
+
+    private async Task ToggleSourceWatcherAsync(LibrarySourceViewModel? source)
+    {
+        if (source is null) return;
+        await _settings.UpdateAsync(settings =>
+        {
+            var configured = settings.LibrarySources.First(item => item.Path.Equals(source.Root, StringComparison.OrdinalIgnoreCase));
+            configured.WatchEnabled = !configured.WatchEnabled;
+        }, _lifetime.Token);
+        RestartSourceWatchers();
+        await RefreshLibrarySourceCountsAsync();
+    }
+
+    public async Task RemoveLibrarySourceAsync(LibrarySourceViewModel? source)
+    {
+        if (source is null) return;
+        await _settings.UpdateAsync(settings =>
+        {
+            settings.LibrarySources.RemoveAll(item => item.Path.Equals(source.Root, StringComparison.OrdinalIgnoreCase));
+            settings.LibraryFolders.RemoveAll(path => path.Equals(source.Root, StringComparison.OrdinalIgnoreCase));
+            settings.ExcludedFolders.RemoveAll(path => IsWithinSource(path, source.Root));
+        }, _lifetime.Token);
+        var indexed = await _repository.GetAllAsync(_lifetime.Token);
+        var ids = indexed.Where(track => IsWithinSource(track.Path, source.Root)).Select(track => track.Id).Where(id => id > 0).ToArray();
+        if (ids.Length > 0) await _repository.RemoveTracksAsync(ids, _lifetime.Token);
+        RestartSourceWatchers();
+        await RefreshLibrarySourceCountsAsync();
+        await RefreshLibraryAsync(SearchText, _lifetime.Token);
+        UpdateScanState();
+    }
+
+    private Task RescanSourceAsync(LibrarySourceViewModel? source) =>
+        source is null ? Task.CompletedTask : ScanAsync([source.Root]);
+
+    private IReadOnlyList<string> EnabledSourcePaths() =>
+        _settings.Current.LibrarySources.Where(source => source.Enabled).Select(source => source.Path).ToArray();
+
+    private void RestartSourceWatchers() => _scanner.StartWatching(
+        _settings.Current.LibrarySources
+            .Where(source => source.Enabled && source.WatchEnabled)
+            .Select(source => source.Path));
+
+    private static bool IsWithinSource(string path, string root)
+    {
+        var normalizedPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var normalizedRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return normalizedPath.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase);
     }
 
     internal async Task OpenLaunchTargetsAsync(IEnumerable<string> targets)
@@ -887,11 +1015,16 @@ public sealed class MainViewModel : ObservableObject
             await _settings.UpdateAsync(settings =>
             {
                 foreach (var folder in folders)
+                {
+                    if (!settings.LibrarySources.Any(source => source.Path.Equals(folder, StringComparison.OrdinalIgnoreCase)))
+                        settings.LibrarySources.Add(new LibrarySourceSettings { Path = folder });
                     if (!settings.LibraryFolders.Contains(folder, StringComparer.OrdinalIgnoreCase))
                         settings.LibraryFolders.Add(folder);
+                }
             }, _lifetime.Token);
-            _scanner.StartWatching(_settings.Current.LibraryFolders);
-            await ScanAsync();
+            RestartSourceWatchers();
+            await RefreshLibrarySourceCountsAsync();
+            await ScanAsync(folders);
         }
 
         var firstFile = normalized.FirstOrDefault(File.Exists);
@@ -1017,9 +1150,11 @@ public sealed class MainViewModel : ObservableObject
     {
         using var refreshScope = _diagnostics.Measure("library", "refresh",
             _diagnostics.Enabled ? new Dictionary<string, object?> { ["queryLength"] = query.Length } : null);
-        var tracks = string.IsNullOrWhiteSpace(query)
+        var indexedTracks = string.IsNullOrWhiteSpace(query)
             ? await _repository.GetAllAsync(cancellationToken)
             : await _repository.SearchAsync(query, 5000, cancellationToken);
+        var activeRoots = EnabledSourcePaths();
+        IReadOnlyList<Track> tracks = indexedTracks.Where(track => activeRoots.Any(root => IsWithinSource(track.Path, root))).ToArray();
         LibraryGroupSnapshot groups;
         await _groupingGate.WaitAsync(cancellationToken);
         try
@@ -1664,15 +1799,18 @@ public sealed class MainViewModel : ObservableObject
         await ChangeTrackAsync(tracks[0]);
     }
 
-    private async Task ScanAsync()
+    private async Task ScanAsync(IReadOnlyList<string>? selectedRoots = null)
     {
-        if (_settings.Current.LibraryFolders.Count == 0) { StatusText = "Add a music folder first"; return; }
+        var roots = selectedRoots ?? EnabledSourcePaths();
+        if (roots.Count == 0) { StatusText = "Add or enable a music folder first"; return; }
         try
         {
+            ScanFailures.Clear();
+            Raise(nameof(HasScanFailures));
             IsScanning = true;
             UpdateScanState();
             _activeScanTask = _scanner.ScanAsync(
-                _settings.Current.LibraryFolders,
+                roots,
                 _settings.Current.ExcludedFolders,
                 _lifetime.Token);
             await _activeScanTask;
@@ -1949,7 +2087,7 @@ public sealed class MainViewModel : ObservableObject
         await ApplyImportedSettingsAsync();
         await RefreshLibraryAsync(
             cancellationToken: _lifetime.Token);
-        _scanner.StartWatching(_settings.Current.LibraryFolders);
+        RestartSourceWatchers();
         StatusText = "User-data backup restored";
     }
 
@@ -1999,7 +2137,7 @@ public sealed class MainViewModel : ObservableObject
         Raise(nameof(PreservePitch));
         _shortcuts.Refresh(_settings.Current.Shortcuts);
         _scanner.StopWatching();
-        _scanner.StartWatching(_settings.Current.LibraryFolders);
+        RestartSourceWatchers();
         var profile = _settings.Current.OutputProfiles.FirstOrDefault(
                           item => item.DeviceId.Equals(
                               _settings.Current.ActiveOutputDeviceId,
@@ -2579,6 +2717,16 @@ public sealed class MainViewModel : ObservableObject
                     ["resumed"] = progress.ResumedFromCheckpoint
                 });
         IsScanning = !progress.IsComplete;
+        ScanDiscovered = progress.Discovered;
+        ScanProcessed = progress.Processed;
+        ScanAdded = progress.Added;
+        ScanUpdated = progress.Updated;
+        ScanFailed = progress.Failed;
+        ScanCurrentPath = progress.IsComplete
+            ? "Scan complete"
+            : string.IsNullOrWhiteSpace(progress.CurrentPath)
+                ? "Discovering files…"
+                : progress.CurrentPath;
         StatusText = progress.IsComplete
             ? $"Scan complete · {progress.Added} added · {progress.Updated} updated · {progress.Failed} skipped"
             : progress.State switch
@@ -2594,7 +2742,13 @@ public sealed class MainViewModel : ObservableObject
         RunOnUi(() =>
         {
             var statuses = _scanner.SourceStatuses;
-            Replace(LibrarySources, statuses);
+            var byRoot = statuses.ToDictionary(status => status.Root, StringComparer.OrdinalIgnoreCase);
+            var sources = _settings.Current.LibrarySources.Select(source =>
+            {
+                byRoot.TryGetValue(source.Path, out var status);
+                return new LibrarySourceViewModel(source, status);
+            }).ToArray();
+            Replace(LibrarySources, sources);
             foreach (var source in statuses.Where(source => !source.IsOnline || source.Error is not null))
                 _applicationLog.Write(
                     ApplicationLogLevel.Warning,
@@ -2610,12 +2764,23 @@ public sealed class MainViewModel : ObservableObject
                     });
         });
 
+    private void ScannerOnFailureOccurred(object? sender, LibraryScanFailure failure) =>
+        RunOnUi(() =>
+        {
+            ScanFailures.Insert(0, failure);
+            while (ScanFailures.Count > 200) ScanFailures.RemoveAt(ScanFailures.Count - 1);
+            Raise(nameof(HasScanFailures));
+        });
+
     private void UpdateScanState()
     {
         Raise(nameof(IsScanPaused));
         Raise(nameof(ScanPauseGlyph));
         Raise(nameof(ScanPauseText));
         ScanCommand.RaiseCanExecuteChanged();
+        RescanSourceCommand.RaiseCanExecuteChanged();
+        ToggleLibrarySourceCommand.RaiseCanExecuteChanged();
+        RemoveLibrarySourceCommand.RaiseCanExecuteChanged();
         ToggleScanPauseCommand.RaiseCanExecuteChanged();
         CancelScanCommand.RaiseCanExecuteChanged();
     }
@@ -2707,6 +2872,7 @@ public sealed class MainViewModel : ObservableObject
         _lifetime.Cancel(); _searchCancellation?.Cancel(); _artworkCancellation?.Cancel(); _queueArtworkCancellation?.Cancel(); _volumeCancellation?.Cancel(); _scanner.StopWatching();
         _scanner.ArtworkChanged -= ScannerOnArtworkChanged;
         _scanner.ProgressChanged -= ScannerOnProgressChanged;
+        _scanner.FailureOccurred -= ScannerOnFailureOccurred;
         _scanner.SourceStatusesChanged -= ScannerOnSourceStatusesChanged;
         _scanner.FilesChanged -= ScannerOnFilesChanged;
         _audio.StateChanged -= AudioOnStateChanged;

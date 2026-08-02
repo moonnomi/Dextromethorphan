@@ -153,6 +153,27 @@ public sealed class ScannerControlTests : IDisposable
         Assert.Equal("Source is offline.", status.Error);
     }
 
+    [Fact]
+    public async Task MetadataFailureReportsPathAndReason()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var (paths, repository, settings, media) = await CreateFixtureAsync(1, cancellationToken);
+        await using var scanner = new LibraryScanner(
+            repository,
+            new FailingMetadataReader(),
+            new ArtworkCache(paths, settings),
+            paths);
+        LibraryScanFailure? failure = null;
+        scanner.FailureOccurred += (_, value) => failure = value;
+
+        await scanner.ScanAsync([media], cancellationToken: cancellationToken);
+
+        Assert.NotNull(failure);
+        Assert.Equal(media, failure.SourceRoot);
+        Assert.EndsWith("track-0000.flac", failure.Path);
+        Assert.Contains("synthetic failure", failure.Message);
+    }
+
     private async Task<(
         AppPaths Paths,
         SqliteLibraryRepository Repository,
@@ -213,5 +234,11 @@ public sealed class ScannerControlTests : IDisposable
                 FileSize = info.Length
             };
         }
+    }
+
+    private sealed class FailingMetadataReader : ITrackMetadataReader
+    {
+        public Task<Track> ReadAsync(string path, CancellationToken cancellationToken = default) =>
+            Task.FromException<Track>(new InvalidDataException("synthetic failure"));
     }
 }
