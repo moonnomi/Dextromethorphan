@@ -19,6 +19,7 @@ using Dextromethorphan.App.UI;
 using Dextromethorphan.Core.Abstractions;
 using Dextromethorphan.App.ViewModels;
 using Dextromethorphan.Core.Models;
+using Dextromethorphan.Core.Library;
 using Microsoft.Win32;
 
 namespace Dextromethorphan.App;
@@ -1441,6 +1442,38 @@ public partial class MainWindow : Window
         _settingsWindow = new SettingsWindow { Owner = this, DataContext = ViewModel };
         _settingsWindow.Closed += (_, _) => _settingsWindow = null;
         _settingsWindow.Show();
+    }
+
+    private void Window_PreviewDragEnter(object sender, DragEventArgs e) => UpdateFileDropFeedback(e);
+
+    private void Window_PreviewDragOver(object sender, DragEventArgs e) => UpdateFileDropFeedback(e);
+
+    private void Window_PreviewDragLeave(object sender, DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent(DataFormats.FileDrop)) return;
+        DropOverlay.Visibility = Visibility.Collapsed;
+    }
+
+    private async void Window_PreviewDrop(object sender, DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent(DataFormats.FileDrop)) return;
+        DropOverlay.Visibility = Visibility.Collapsed;
+        e.Handled = true;
+        var paths = e.Data.GetData(DataFormats.FileDrop) as string[] ?? [];
+        await ViewModel.OpenLaunchTargetsAsync(paths);
+    }
+
+    private void UpdateFileDropFeedback(DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent(DataFormats.FileDrop)) return;
+        var paths = e.Data.GetData(DataFormats.FileDrop) as string[] ?? [];
+        var supported = paths.Count(path => Directory.Exists(path) || (File.Exists(path) && SupportedMediaFiles.IsSupported(path)));
+        e.Effects = supported > 0 ? DragDropEffects.Copy : DragDropEffects.None;
+        DropOverlayHint.Text = supported > 0
+            ? $"{supported:N0} supported item{(supported == 1 ? string.Empty : "s")} · folders become sources, files enter the queue"
+            : "No supported audio files or folders in this drop";
+        DropOverlay.Visibility = Visibility.Visible;
+        e.Handled = true;
     }
 
     private void SeekSlider_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)

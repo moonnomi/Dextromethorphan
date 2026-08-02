@@ -2,10 +2,13 @@ using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
+using System.Windows.Threading;
 using Dextromethorphan.App.Diagnostics;
+using Dextromethorphan.App.Library;
 using Dextromethorphan.App.UI;
 using Dextromethorphan.Core.Abstractions;
 using Dextromethorphan.Core.Lyrics;
+using Dextromethorphan.Core.Library;
 using Dextromethorphan.Core.Models;
 using Dextromethorphan.Infrastructure.Audio;
 using Dextromethorphan.Infrastructure.Library;
@@ -62,6 +65,13 @@ public sealed class MainViewModel : ObservableObject
     private Task? _activeScanTask;
     private Task? _shutdownTask;
     private Task _artworkResolutionTask = Task.CompletedTask;
+    private readonly DispatcherTimer _scheduledScanTimer;
+    private DateTimeOffset _lastCompletedLibraryScan = DateTimeOffset.UtcNow;
+    private bool _scheduledScanEnabled = true;
+    private int _scheduledScanIntervalMinutes = 60;
+    private bool _allowScheduledScanOnBattery;
+    private bool _allowScheduledScanOnMeteredNetwork;
+    private string _scheduledScanStatus = "Scheduled scan has not run yet.";
     private IReadOnlyList<Track> _allTracks = [];
     private IReadOnlyList<LibraryCardViewModel> _activeGroups = [];
     private IReadOnlyList<LibraryCardViewModel> _sidebarCards = [];
@@ -167,6 +177,11 @@ public sealed class MainViewModel : ObservableObject
         _duplicates = duplicates;
         _decoderCapabilities = decoderCapabilities;
         _replayGainAnalysis = replayGainAnalysis;
+        _scheduledScanTimer = new DispatcherTimer(
+            TimeSpan.FromMinutes(1),
+            DispatcherPriority.Background,
+            ScheduledScanTimerOnTick,
+            Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher);
         NavigateCommand = new RelayCommand(p => Navigate(p?.ToString()));
         SelectGroupCommand = new RelayCommand(p => SelectGroup(p as LibraryCardViewModel));
         CloseCollectionCommand = new RelayCommand(_ => CloseCollectionDetail());
@@ -465,6 +480,32 @@ public sealed class MainViewModel : ObservableObject
     public double ScanProgressValue => Math.Min(ScanProcessed, ScanProgressMaximum);
     public string ScanCurrentPath { get => _scanCurrentPath; private set => Set(ref _scanCurrentPath, value); }
     public bool HasScanFailures => ScanFailures.Count > 0;
+    public bool ScheduledScanEnabled
+    {
+        get => _scheduledScanEnabled;
+        set { if (Set(ref _scheduledScanEnabled, value)) _ = _settings.UpdateAsync(settings => settings.ScheduledLibraryScanEnabled = value); }
+    }
+    public int ScheduledScanIntervalMinutes
+    {
+        get => _scheduledScanIntervalMinutes;
+        set
+        {
+            var normalized = Math.Clamp(value, 15, 1440);
+            if (Set(ref _scheduledScanIntervalMinutes, normalized))
+                _ = _settings.UpdateAsync(settings => settings.ScheduledLibraryScanIntervalMinutes = normalized);
+        }
+    }
+    public bool AllowScheduledScanOnBattery
+    {
+        get => _allowScheduledScanOnBattery;
+        set { if (Set(ref _allowScheduledScanOnBattery, value)) _ = _settings.UpdateAsync(settings => settings.AllowScheduledScanOnBattery = value); }
+    }
+    public bool AllowScheduledScanOnMeteredNetwork
+    {
+        get => _allowScheduledScanOnMeteredNetwork;
+        set { if (Set(ref _allowScheduledScanOnMeteredNetwork, value)) _ = _settings.UpdateAsync(settings => settings.AllowScheduledScanOnMeteredNetwork = value); }
+    }
+    public string ScheduledScanStatus { get => _scheduledScanStatus; private set => Set(ref _scheduledScanStatus, value); }
     public bool IsLibraryReady { get => _isLibraryReady; private set => Set(ref _isLibraryReady, value); }
     public bool IsSafeMode { get => _isSafeMode; private set => Set(ref _isSafeMode, value); }
     public bool IsScanPaused => _scanner.State == ScanLifecycleState.Paused;
@@ -612,6 +653,14 @@ public sealed class MainViewModel : ObservableObject
         _albumTileSize = _settings.Current.AlbumTileSize; Raise(nameof(AlbumTileSize)); Raise(nameof(GalleryItemWidth)); Raise(nameof(GalleryItemHeight));
         _animationsEnabled = !IsSafeMode && _settings.Current.AnimationsEnabled; Raise(nameof(AnimationsEnabled));
         _artworkCacheMegabytes = _settings.Current.ArtworkCacheMegabytes;
+        _scheduledScanEnabled = _settings.Current.ScheduledLibraryScanEnabled;
+        _scheduledScanIntervalMinutes = _settings.Current.ScheduledLibraryScanIntervalMinutes;
+        _allowScheduledScanOnBattery = _settings.Current.AllowScheduledScanOnBattery;
+        _allowScheduledScanOnMeteredNetwork = _settings.Current.AllowScheduledScanOnMeteredNetwork;
+        Raise(nameof(ScheduledScanEnabled));
+        Raise(nameof(ScheduledScanIntervalMinutes));
+        Raise(nameof(AllowScheduledScanOnBattery));
+        Raise(nameof(AllowScheduledScanOnMeteredNetwork));
         Raise(nameof(ArtworkCacheMegabytes)); Raise(nameof(ArtworkCacheLimitText));
         _replayGainMode = _settings.Current.ReplayGainMode;
         _replayGainPreampDb = _settings.Current.ReplayGainPreampDb;
@@ -649,6 +698,34 @@ public sealed class MainViewModel : ObservableObject
         if (!IsSafeMode)
             await RestoreSessionAsync();
         IsLibraryReady = true;
+        _lastCompletedLibraryScan = DateTimeOffset.UtcNow;
+        _scheduledScanTimer.Start();
+    }
+
+    private async void ScheduledScanTimerOnTick(object? sender, EventArgs e)
+    {
+        if (!IsLibraryReady || _scanner.IsScanning || EnabledSourcePaths().Count == 0) return;
+        if (DateTimeOffset.UtcNow - _lastCompletedLibraryScan < TimeSpan.FromMinutes(ScheduledScanIntervalMinutes)) return;
+        var decision = ScheduledScanDecision.Evaluate(_settings.Current, ScheduledScanEnvironment.Capture());
+        if (!decision.CanScan)
+        {
+            ScheduledScanStatus = decision.Reason;
+            return;
+        }
+        try
+        {
+            ScheduledScanStatus = "Scheduled scan running…";
+            await ScanAsync();
+            ScheduledScanStatus = $"Last scheduled scan {DateTime.Now:g}";
+        }
+        catch (Exception exception)
+        {
+            ScheduledScanStatus = "Scheduled scan failed · " + exception.GetBaseException().Message;
+        }
+        finally
+        {
+            _lastCompletedLibraryScan = DateTimeOffset.UtcNow;
+        }
     }
 
     private async Task RefreshLibrarySourceCountsAsync()
@@ -1001,12 +1078,14 @@ public sealed class MainViewModel : ObservableObject
         return normalizedPath.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase);
     }
 
-    internal async Task OpenLaunchTargetsAsync(IEnumerable<string> targets)
+    public async Task OpenLaunchTargetsAsync(IEnumerable<string> targets)
     {
         await InitializeLibraryAsync();
         var normalized = targets
             .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Select(Path.GetFullPath)
+            .Select(TryFullPath)
+            .Where(path => path is not null)
+            .Select(path => path!)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var folders = normalized.Where(Directory.Exists).ToArray();
@@ -1027,27 +1106,40 @@ public sealed class MainViewModel : ObservableObject
             await ScanAsync(folders);
         }
 
-        var firstFile = normalized.FirstOrDefault(File.Exists);
-        if (firstFile is null) return;
+        var files = normalized
+            .Where(path => File.Exists(path) && SupportedMediaFiles.IsSupported(path))
+            .ToArray();
+        if (files.Length == 0) return;
         try
         {
-            var track = await _repository.GetByPathAsync(firstFile, _lifetime.Token)
-                ?? await _metadataReader.ReadAsync(firstFile, _lifetime.Token);
-            _queue.Replace([track]);
-            await ChangeTrackAsync(track);
+            var tracks = new List<Track>(files.Length);
+            foreach (var file in files)
+                tracks.Add(await _repository.GetByPathAsync(file, _lifetime.Token)
+                    ?? await _metadataReader.ReadAsync(file, _lifetime.Token));
+            _queue.Replace(tracks);
+            await ChangeTrackAsync(tracks[0]);
+            StatusText = files.Length == 1
+                ? $"Opened {Path.GetFileName(files[0])}"
+                : $"Opened {files.Length:N0} dropped tracks";
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException
                 or NotSupportedException or InvalidDataException)
         {
-            StatusText = $"Could not open {Path.GetFileName(firstFile)} · {exception.GetBaseException().Message}";
+            StatusText = $"Could not open dropped music · {exception.GetBaseException().Message}";
             _applicationLog.Write(
                 ApplicationLogLevel.Warning,
                 "launch",
                 "open-target-failed",
-                new Dictionary<string, object?> { ["path"] = firstFile },
+                new Dictionary<string, object?> { ["pathCount"] = files.Length },
                 exception);
         }
+    }
+
+    private static string? TryFullPath(string path)
+    {
+        try { return Path.GetFullPath(path); }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException) { return null; }
     }
 
     public Task SeekAsync(double seconds) => _audio.SeekAsync(TimeSpan.FromSeconds(Math.Clamp(seconds, 0, DurationSeconds)), _lifetime.Token);
@@ -2717,6 +2809,7 @@ public sealed class MainViewModel : ObservableObject
                     ["resumed"] = progress.ResumedFromCheckpoint
                 });
         IsScanning = !progress.IsComplete;
+        if (progress.IsComplete) _lastCompletedLibraryScan = DateTimeOffset.UtcNow;
         ScanDiscovered = progress.Discovered;
         ScanProcessed = progress.Processed;
         ScanAdded = progress.Added;
@@ -2869,6 +2962,7 @@ public sealed class MainViewModel : ObservableObject
             },
             CancellationToken.None);
         await _settings.SaveAsync(CancellationToken.None);
+        _scheduledScanTimer.Stop();
         _lifetime.Cancel(); _searchCancellation?.Cancel(); _artworkCancellation?.Cancel(); _queueArtworkCancellation?.Cancel(); _volumeCancellation?.Cancel(); _scanner.StopWatching();
         _scanner.ArtworkChanged -= ScannerOnArtworkChanged;
         _scanner.ProgressChanged -= ScannerOnProgressChanged;

@@ -7,7 +7,7 @@
         xmlns:ui="clr-namespace:Dextromethorphan.App.UI"
         xmlns:views="clr-namespace:Dextromethorphan.App.UI.Views"
         mc:Ignorable="d" Title="Dextromethorphan" Icon="Assets/Brand/dextromethorphan.ico" Width="1360" Height="800" MinWidth="800" MinHeight="600"
-        WindowStartupLocation="CenterScreen" WindowStyle="None" ResizeMode="CanResize" PreviewKeyDown="Window_PreviewKeyDown" KeyDown="Window_KeyDown" PreviewMouseDown="Window_PreviewMouseDown" Closing="Window_Closing">
+        WindowStartupLocation="CenterScreen" WindowStyle="None" ResizeMode="CanResize" PreviewKeyDown="Window_PreviewKeyDown" KeyDown="Window_KeyDown" PreviewMouseDown="Window_PreviewMouseDown" Closing="Window_Closing" AllowDrop="True" PreviewDragEnter="Window_PreviewDragEnter" PreviewDragOver="Window_PreviewDragOver" PreviewDragLeave="Window_PreviewDragLeave" PreviewDrop="Window_PreviewDrop">
     <shell:WindowChrome.WindowChrome>
         <shell:WindowChrome CaptionHeight="0" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="10" UseAeroCaptionButtons="False"/>
     </shell:WindowChrome.WindowChrome>
@@ -245,6 +245,12 @@
                     <Grid Grid.Column="2" Margin="20,0,2,0"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE767;" VerticalAlignment="Center" Foreground="{StaticResource TextMutedBrush}"/><Slider x:Name="VolumeSlider" Grid.Column="1" Margin="10,0,0,0" Minimum="0" Maximum="1" Value="{Binding Volume, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center" PreviewMouseLeftButtonDown="VolumeSlider_MouseLeftButtonDown" PreviewMouseMove="VolumeSlider_MouseMove" PreviewMouseLeftButtonUp="VolumeSlider_MouseLeftButtonUp"/></Grid>
                 </Grid>
             </Border>
+
+            <Grid x:Name="DropOverlay" Grid.RowSpan="3" Panel.ZIndex="950" Background="#D90B0C10" Visibility="Collapsed" IsHitTestVisible="False">
+                <Border Width="460" Padding="30" CornerRadius="18" Background="#FC181B23" BorderBrush="{StaticResource AccentBrush}" BorderThickness="2" HorizontalAlignment="Center" VerticalAlignment="Center" Effect="{StaticResource SoftShadow}">
+                    <StackPanel><TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8B7;" FontSize="42" Foreground="{StaticResource AccentBrush}" HorizontalAlignment="Center"/><TextBlock Text="Drop music here" FontSize="24" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,14,0,0"/><TextBlock x:Name="DropOverlayHint" Text="Folders become library sources; audio files open in the queue." Foreground="{StaticResource TextMutedBrush}" TextAlignment="Center" TextWrapping="Wrap" Margin="0,7,0,0"/></StackPanel>
+                </Border>
+            </Grid>
 
             <!-- Lightweight in-window startup presentation. It covers initialization, then yields in under a second. -->
             <Grid x:Name="StartupOverlay" Grid.RowSpan="3" Panel.ZIndex="1000" Background="#FF0B0C10">

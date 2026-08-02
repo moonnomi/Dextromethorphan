@@ -303,6 +303,17 @@
                     </Border>
                     <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
                         <StackPanel>
+                            <TextBlock Text="Background scanning" FontWeight="SemiBold"/>
+                            <TextBlock Text="Checks for library changes on a conservative schedule. By default it waits for AC power and an unmetered connection." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,5,0,12"/>
+                            <CheckBox Content="Enable scheduled scans" IsChecked="{Binding ScheduledScanEnabled}"/>
+                            <Grid Margin="24,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="180"/><ColumnDefinition Width="100"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="Interval in minutes (15–1440)" VerticalAlignment="Center"/><TextBox Grid.Column="1" Text="{Binding ScheduledScanIntervalMinutes, UpdateSourceTrigger=LostFocus}"/></Grid>
+                            <CheckBox Content="Allow scheduled scans on battery" IsChecked="{Binding AllowScheduledScanOnBattery}" Margin="24,10,0,0"/>
+                            <CheckBox Content="Allow scheduled scans on metered networks" IsChecked="{Binding AllowScheduledScanOnMeteredNetwork}" Margin="24,8,0,0"/>
+                            <TextBlock Text="{Binding ScheduledScanStatus}" Foreground="{StaticResource AccentBrush}" FontSize="10" Margin="0,12,0,0"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
+                        <StackPanel>
                             <TextBlock Text="Artwork cache" FontWeight="SemiBold"/>
                             <TextBlock Text="{Binding ArtworkCacheStatus}" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,5,0,14"/>
                             <Grid>
