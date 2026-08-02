@@ -8,6 +8,7 @@ using System.Windows;
 using System.Windows.Threading;
 using Dextromethorphan.App.Diagnostics;
 using Dextromethorphan.App.Performance;
+using Dextromethorphan.App.Lyrics;
 using Dextromethorphan.App.UI;
 using Dextromethorphan.App.ViewModels;
 using Dextromethorphan.App.WindowsIntegration;
@@ -41,6 +42,7 @@ public partial class App : Application
             services.AddSingleton<DuplicateDetectionService>();
             services.AddSingleton<AudioDecoderCapabilityService>();
             services.AddSingleton<ReplayGainAnalysisService>();
+            services.AddSingleton<LyricsDocumentService>();
             services.AddSingleton<AppPaths>();
             services.AddSingleton<IApplicationLog>(x =>
                 new StructuredApplicationLog(x.GetRequiredService<AppPaths>()));

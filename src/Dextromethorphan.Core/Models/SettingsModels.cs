@@ -2,7 +2,7 @@ namespace Dextromethorphan.Core.Models;
 
 public sealed class AppSettings
 {
-    public const int CurrentSchemaVersion = 5;
+    public const int CurrentSchemaVersion = 6;
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public string Theme { get; set; } = "Dark";
     public string AccentColor { get; set; } = "#FF8A3D";
@@ -32,6 +32,15 @@ public sealed class AppSettings
     public int ScheduledLibraryScanIntervalMinutes { get; set; } = 60;
     public bool AllowScheduledScanOnBattery { get; set; }
     public bool AllowScheduledScanOnMeteredNetwork { get; set; }
+    public LyricsDisplayMode LyricsDisplayMode { get; set; } = LyricsDisplayMode.Automatic;
+    public double LyricsFontSize { get; set; } = 24;
+    public LyricsTextAlignment LyricsAlignment { get; set; } = LyricsTextAlignment.Left;
+    public double LyricsLineSpacing { get; set; } = 1.15;
+    public double LyricsBlurStrength { get; set; } = 5;
+    public bool KaraokeWordAnimation { get; set; } = true;
+    public Dictionary<string, int> LyricOffsetsMilliseconds { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> SelectedLyricFiles { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public bool OnlineLyricsEnabled { get; set; }
     public List<AudioOutputProfile> OutputProfiles { get; set; } = [new()];
     public string ActiveOutputDeviceId { get; set; } = "default";
     public double SeekStepSeconds { get; set; } = 5;
@@ -88,7 +97,22 @@ public enum SettingsResetScope
     Library,
     Shortcuts,
     Session,
+    Lyrics,
     All
+}
+
+public enum LyricsDisplayMode
+{
+    Automatic,
+    Synced,
+    Static
+}
+
+public enum LyricsTextAlignment
+{
+    Left,
+    Center,
+    Right
 }
 
 public sealed class PlaybackSessionSettings

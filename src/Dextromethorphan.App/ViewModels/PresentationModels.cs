@@ -42,20 +42,44 @@ public sealed class LyricLineViewModel(LyricLine line, bool isSynced = true) : O
 {
     private bool _isActive;
     private bool _isPast;
+    private bool _isPrevious;
+    private bool _isNext;
     public LyricLine Line { get; } = line;
     public string Text => Line.Text;
+    public LyricLineRole Role => Line.Role;
+    public bool IsSecondary => Role is LyricLineRole.Translation or LyricLineRole.Romanization;
+    public bool IsInstrumental => Role == LyricLineRole.Instrumental;
     public bool IsSynced { get; } = isSynced;
     public bool CanSeek => IsSynced;
+    public IReadOnlyList<LyricWordViewModel> Words { get; } = line.Words.Select(word => new LyricWordViewModel(word)).ToArray();
+    public bool HasWords => Words.Count > 0;
     public string TimestampText => IsSynced ? FormatTime(Line.Start) : "";
     public bool IsActive { get => _isActive; set => Set(ref _isActive, value); }
     public bool IsPast { get => _isPast; private set => Set(ref _isPast, value); }
+    public bool IsPrevious { get => _isPrevious; set => Set(ref _isPrevious, value); }
+    public bool IsNext { get => _isNext; set => Set(ref _isNext, value); }
 
-    public void UpdatePosition(TimeSpan position)
+    public void UpdatePosition(TimeSpan position, bool animateWords = true)
     {
         if (!IsSynced) return;
         IsActive = Line.IsActive(position);
         IsPast = !IsActive && Line.Start < position;
+        foreach (var word in Words) word.UpdatePosition(position, animateWords);
     }
 
     private static string FormatTime(TimeSpan time) => time.ToString(time.TotalHours >= 1 ? @"h\:mm\:ss" : @"m\:ss");
+}
+
+public sealed class LyricWordViewModel(LyricWord word) : ObservableObject
+{
+    private double _progress;
+    public string Text => word.Text;
+    public double Progress { get => _progress; private set => Set(ref _progress, value); }
+
+    public void UpdatePosition(TimeSpan position, bool animate = true)
+    {
+        if (position <= word.Start) { Progress = 0; return; }
+        if (!animate || word.End is not { } end || end <= word.Start) { Progress = 1; return; }
+        Progress = Math.Clamp((position - word.Start).TotalMilliseconds / (end - word.Start).TotalMilliseconds, 0, 1);
+    }
 }

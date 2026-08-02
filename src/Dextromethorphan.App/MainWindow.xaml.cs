@@ -14,6 +14,7 @@ using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Dextromethorphan.App.Performance;
+using Dextromethorphan.App.Lyrics;
 using Dextromethorphan.App.Diagnostics;
 using Dextromethorphan.App.UI;
 using Dextromethorphan.Core.Abstractions;
@@ -114,6 +115,41 @@ public partial class MainWindow : Window
     {
         if (e.NewValue is FolderTreeNodeViewModel node)
             ViewModel.SelectFolderNode(node);
+    }
+
+    private async void LyricsSource_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not ComboBox { SelectedItem: LyricsDocument document }
+            || ReferenceEquals(document, ViewModel.CurrentLyricsDocument)) return;
+        try { await ViewModel.SelectLyricsSourceAsync(document); }
+        catch (Exception exception) { ErrorDialog.Show(this, exception, "", true, "Lyrics could not be selected"); }
+    }
+
+    private async void ChooseLyrics_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.CurrentTrack is null) return;
+        var dialog = new OpenFileDialog
+        {
+            Title = "Choose lyrics",
+            Filter = "Lyrics files|*.lrc;*.txt|LRC files|*.lrc|Text files|*.txt",
+            CheckFileExists = true,
+            Multiselect = false
+        };
+        if (dialog.ShowDialog(this) != true) return;
+        try { await ViewModel.ChooseLyricsFileAsync(dialog.FileName); }
+        catch (Exception exception) { ErrorDialog.Show(this, exception, "", true, "Lyrics could not be opened"); }
+    }
+
+    private async void RemoveLyrics_Click(object sender, RoutedEventArgs e)
+    {
+        if (!ViewModel.CanRemoveLyrics
+            || !ConfirmationDialog.Show(
+                this,
+                "Remove local lyrics?",
+                "The selected LRC/TXT sidecar will be deleted. The audio file and embedded tags are not changed.",
+                "Remove")) return;
+        try { await ViewModel.RemoveCurrentLyricsAsync(); }
+        catch (Exception exception) { ErrorDialog.Show(this, exception, "", true, "Lyrics could not be removed"); }
     }
 
     private void InstallChapterMarkers()

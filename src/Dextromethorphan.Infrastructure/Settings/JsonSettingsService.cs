@@ -280,6 +280,13 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
         settings.LibrarySources = sources;
         settings.LibraryFolders = sources.Where(source => source.Enabled).Select(source => source.Path).ToList();
         settings.ScheduledLibraryScanIntervalMinutes = Math.Clamp(settings.ScheduledLibraryScanIntervalMinutes, 15, 1440);
+        if (!Enum.IsDefined(settings.LyricsDisplayMode)) settings.LyricsDisplayMode = LyricsDisplayMode.Automatic;
+        if (!Enum.IsDefined(settings.LyricsAlignment)) settings.LyricsAlignment = LyricsTextAlignment.Left;
+        settings.LyricsFontSize = FiniteClamp(settings.LyricsFontSize, 14, 52, 24);
+        settings.LyricsLineSpacing = FiniteClamp(settings.LyricsLineSpacing, 0.8, 2, 1.15);
+        settings.LyricsBlurStrength = FiniteClamp(settings.LyricsBlurStrength, 0, 20, 5);
+        settings.LyricOffsetsMilliseconds = NormalizeLyricOffsets(settings.LyricOffsetsMilliseconds);
+        settings.SelectedLyricFiles = NormalizeLyricFiles(settings.SelectedLyricFiles);
         settings.OutputProfiles = NormalizeOutputProfiles(settings.OutputProfiles);
         settings.ActiveOutputDeviceId = NormalizeText(
             settings.ActiveOutputDeviceId,
@@ -408,12 +415,56 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
             case SettingsResetScope.Session:
                 target.PlaybackSession = defaults.PlaybackSession;
                 break;
+            case SettingsResetScope.Lyrics:
+                target.LyricsDisplayMode = defaults.LyricsDisplayMode;
+                target.LyricsFontSize = defaults.LyricsFontSize;
+                target.LyricsAlignment = defaults.LyricsAlignment;
+                target.LyricsLineSpacing = defaults.LyricsLineSpacing;
+                target.LyricsBlurStrength = defaults.LyricsBlurStrength;
+                target.KaraokeWordAnimation = defaults.KaraokeWordAnimation;
+                target.LyricOffsetsMilliseconds = defaults.LyricOffsetsMilliseconds;
+                target.SelectedLyricFiles = defaults.SelectedLyricFiles;
+                target.OnlineLyricsEnabled = defaults.OnlineLyricsEnabled;
+                break;
             default:
                 throw new ArgumentOutOfRangeException(
                     nameof(scope),
                     scope,
                     null);
         }
+    }
+
+    private static Dictionary<string, int> NormalizeLyricOffsets(Dictionary<string, int>? values)
+    {
+        var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in (values ?? []).Take(100_000))
+        {
+            string path;
+            try { path = Path.GetFullPath(pair.Key); }
+            catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException) { continue; }
+            result[path] = Math.Clamp(pair.Value, -30_000, 30_000);
+        }
+        return result;
+    }
+
+    private static Dictionary<string, string> NormalizeLyricFiles(Dictionary<string, string>? values)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in (values ?? []).Take(100_000))
+        {
+            try
+            {
+                var track = Path.GetFullPath(pair.Key);
+                var lyric = Path.GetFullPath(pair.Value);
+                if (Path.GetExtension(lyric) is not { } extension
+                    || (!extension.Equals(".lrc", StringComparison.OrdinalIgnoreCase)
+                        && !extension.Equals(".txt", StringComparison.OrdinalIgnoreCase)))
+                    continue;
+                result[track] = lyric;
+            }
+            catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException) { }
+        }
+        return result;
     }
 
     private static List<AudioOutputProfile> NormalizeOutputProfiles(
