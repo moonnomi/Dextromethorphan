@@ -98,6 +98,7 @@ public partial class MainWindow : Window
         AutomationProperties.SetName(QueueList, "Playback queue");
         AutomationProperties.SetName(GalleryList, "Library collections");
         AutomationProperties.SetName(SidebarList, "Folders and playlists");
+        AutomationProperties.SetName(FolderTreeView, "Music folder tree");
         foreach (var button in FindVisualChildren<Button>(this))
         {
             if (!string.IsNullOrWhiteSpace(
@@ -107,6 +108,12 @@ public partial class MainWindow : Window
                 continue;
             AutomationProperties.SetName(button, tooltip);
         }
+    }
+
+    private void FolderTreeView_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
+    {
+        if (e.NewValue is FolderTreeNodeViewModel node)
+            ViewModel.SelectFolderNode(node);
     }
 
     private void InstallChapterMarkers()

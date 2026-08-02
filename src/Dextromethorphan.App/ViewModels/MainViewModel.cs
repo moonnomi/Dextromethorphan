@@ -83,6 +83,7 @@ public sealed class MainViewModel : ObservableObject
     private Track? _selectedTrack;
     private Track? _currentTrack;
     private LibraryCardViewModel? _selectedCard;
+    private FolderTreeNodeViewModel? _selectedFolderNode;
     private string _currentView = "Albums";
     private string _viewSubtitle = "Your music, organized locally";
     private string _selectedGroupTitle = "All albums";
@@ -102,6 +103,7 @@ public sealed class MainViewModel : ObservableObject
     private int _scanUpdated;
     private int _scanFailed;
     private string _scanCurrentPath = "No scan running";
+    private string _scanCurrentSource = "—";
     private bool _queueVisible = true;
     private bool _isCollectionDetailOpen;
     private bool _isUserSeeking;
@@ -264,6 +266,7 @@ public sealed class MainViewModel : ObservableObject
     public ObservableCollection<LibraryCardViewModel> Artists { get; } = new ObservableRangeCollection<LibraryCardViewModel>();
     public ObservableCollection<LibraryCardViewModel> Genres { get; } = new ObservableRangeCollection<LibraryCardViewModel>();
     public ObservableCollection<LibraryCardViewModel> Folders { get; } = new ObservableRangeCollection<LibraryCardViewModel>();
+    public ObservableCollection<FolderTreeNodeViewModel> FolderTree { get; } = new ObservableRangeCollection<FolderTreeNodeViewModel>();
     public ObservableCollection<LibraryCardViewModel> Playlists { get; } = new ObservableRangeCollection<LibraryCardViewModel>();
     public ObservableCollection<QueueEntryViewModel> Queue { get; } = new ObservableRangeCollection<QueueEntryViewModel>();
     public ObservableCollection<LyricLineViewModel> Lyrics { get; } = new ObservableRangeCollection<LyricLineViewModel>();
@@ -415,7 +418,19 @@ public sealed class MainViewModel : ObservableObject
     public bool IsCollectionDetailView => IsCollectionDetailOpen && CurrentView is "Albums" or "Artists" or "Genres";
     public bool IsTrackView => !IsCollectionDetailOpen && CurrentView is "Songs" or "Favorites" or "Missing";
     public bool IsSidebarView => !IsCollectionDetailOpen && CurrentView is "Folders" or "Playlists";
+    public bool IsFolderView => !IsCollectionDetailOpen && CurrentView == "Folders";
+    public bool IsPlaylistView => !IsCollectionDetailOpen && CurrentView == "Playlists";
     public bool IsNowPlayingView => !IsCollectionDetailOpen && CurrentView == "Now Playing";
+    public FolderTreeNodeViewModel? SelectedFolderNode
+    {
+        get => _selectedFolderNode;
+        private set
+        {
+            if (_selectedFolderNode is not null) _selectedFolderNode.IsSelected = false;
+            if (!Set(ref _selectedFolderNode, value)) return;
+            if (value is not null) value.IsSelected = true;
+        }
+    }
     public string CurrentTitle => CurrentTrack?.Title ?? "Nothing playing";
     public string CurrentArtist => CurrentTrack is null ? "Choose something from your library" : $"{CurrentTrack.DisplayArtist} — {CurrentTrack.DisplayAlbum}";
     public string? CurrentArtworkPath => CurrentTrack?.ArtworkPath;
@@ -429,7 +444,7 @@ public sealed class MainViewModel : ObservableObject
         private set
         {
             if (!Set(ref _isCollectionDetailOpen, value)) return;
-            Raise(nameof(IsGroupView)); Raise(nameof(IsCollectionDetailView)); Raise(nameof(IsTrackView)); Raise(nameof(IsSidebarView)); Raise(nameof(IsNowPlayingView));
+            Raise(nameof(IsGroupView)); Raise(nameof(IsCollectionDetailView)); Raise(nameof(IsTrackView)); Raise(nameof(IsSidebarView)); Raise(nameof(IsFolderView)); Raise(nameof(IsPlaylistView)); Raise(nameof(IsNowPlayingView));
             Raise(nameof(ViewTitle)); Raise(nameof(DetailTabTitle));
             Raise(nameof(ContentViewStateKey));
         }
@@ -442,7 +457,7 @@ public sealed class MainViewModel : ObservableObject
         private set
         {
             if (!Set(ref _currentView, value)) return;
-            Raise(nameof(IsGroupView)); Raise(nameof(IsCollectionDetailView)); Raise(nameof(IsTrackView)); Raise(nameof(IsSidebarView)); Raise(nameof(IsNowPlayingView));
+            Raise(nameof(IsGroupView)); Raise(nameof(IsCollectionDetailView)); Raise(nameof(IsTrackView)); Raise(nameof(IsSidebarView)); Raise(nameof(IsFolderView)); Raise(nameof(IsPlaylistView)); Raise(nameof(IsNowPlayingView));
             Raise(nameof(ViewTitle));
             Raise(nameof(PrimaryViewStateKey)); Raise(nameof(ContentViewStateKey));
         }
@@ -479,6 +494,7 @@ public sealed class MainViewModel : ObservableObject
     public double ScanProgressMaximum => Math.Max(1, ScanDiscovered);
     public double ScanProgressValue => Math.Min(ScanProcessed, ScanProgressMaximum);
     public string ScanCurrentPath { get => _scanCurrentPath; private set => Set(ref _scanCurrentPath, value); }
+    public string ScanCurrentSource { get => _scanCurrentSource; private set => Set(ref _scanCurrentSource, value); }
     public bool HasScanFailures => ScanFailures.Count > 0;
     public bool ScheduledScanEnabled
     {
@@ -1269,6 +1285,9 @@ public sealed class MainViewModel : ObservableObject
         {
             _groupingGate.Release();
         }
+        var folderTree = await Task.Run(
+            () => FolderTreeBuilder.Build(tracks, _settings.Current.LibrarySources),
+            cancellationToken);
         IReadOnlyList<LibraryCardViewModel> playlistCards;
         using (_diagnostics.Measure("library", "playlist-card-construction"))
             playlistCards = await BuildPlaylistCardsAsync(query, cancellationToken);
@@ -1292,6 +1311,7 @@ public sealed class MainViewModel : ObservableObject
             _activeSidebarPresentation = null;
             _activeTrackPresentation = null;
             Replace(Albums, groups.Albums); Replace(Artists, groups.Artists); Replace(Genres, groups.Genres); Replace(Folders, groups.Folders); Replace(Playlists, playlistCards);
+            Replace(FolderTree, folderTree);
             StatusText = tracks.Count == 0 ? (_settings.Current.LibraryFolders.Count == 0 ? "Add a music folder to begin" : "No matching tracks") : $"{tracks.Count:N0} tracks · {groups.Albums.Count:N0} albums · {groups.Artists.Count:N0} artists";
             var availableCount = tracks.Count(track => !track.IsMissing);
             StatusText = availableCount == 0
@@ -1486,7 +1506,7 @@ public sealed class MainViewModel : ObservableObject
             case "Albums": ViewSubtitle = $"{Albums.Count:N0} albums in your library"; SetActiveGroups(Albums); RestoreGallerySelection(Albums); break;
             case "Artists": ViewSubtitle = $"{Artists.Count:N0} artists in your library"; SetActiveGroups(Artists); RestoreGallerySelection(Artists); break;
             case "Genres": ViewSubtitle = $"{Genres.Count:N0} genres in your library"; SetActiveGroups(Genres); RestoreGallerySelection(Genres); break;
-            case "Folders": ViewSubtitle = $"{Folders.Count:N0} folders across {_settings.Current.LibraryFolders.Count:N0} sources"; SetSidebarGroups(Folders); SelectDefault(Folders, resetSelection, selectFirst: true); break;
+            case "Folders": ViewSubtitle = $"{Folders.Count:N0} folders across {_settings.Current.LibraryFolders.Count:N0} sources"; SetSidebarGroups(Folders); SelectDefaultFolder(); break;
             case "Playlists": ViewSubtitle = $"{Playlists.Count:N0} saved and smart playlists"; SetSidebarGroups(Playlists); SelectDefault(Playlists, resetSelection, selectFirst: false); break;
             case "Favorites":
                 ViewSubtitle = "Tracks you have marked as loved";
@@ -1541,6 +1561,63 @@ public sealed class MainViewModel : ObservableObject
                 $"No {CurrentView.ToLowerInvariant()}",
                 string.IsNullOrWhiteSpace(SearchText) ? "This view will populate as your library is scanned." : "No results match your search.",
                 PrimaryViewStateKey);
+    }
+
+    private void SelectDefaultFolder()
+    {
+        _cardSelections.TryGetValue("Folders", out var remembered);
+        var selected = remembered is not null
+            ? FindFolderNode(FolderTree, remembered.Key)
+            : null;
+        selected ??= FolderTree.FirstOrDefault();
+        if (selected is not null) SelectFolderNodeCore(selected, rememberSelection: false);
+        else
+        {
+            SelectedFolderNode = null;
+            SetBrowseTracks([], "No folders", "Add or enable a music source to browse its folder tree.", PrimaryViewStateKey);
+        }
+    }
+
+    public void SelectFolderNode(FolderTreeNodeViewModel? node)
+    {
+        if (node is null || CurrentView != "Folders") return;
+        NavigationStarting?.Invoke(this, EventArgs.Empty);
+        var previous = CaptureNavigation();
+        SelectFolderNodeCore(node, rememberSelection: true);
+        RecordNavigation(previous);
+    }
+
+    private void SelectFolderNodeCore(FolderTreeNodeViewModel node, bool rememberSelection)
+    {
+        SelectedFolderNode = node;
+        var representative = node.TrackIndexes.Count > 0 ? _allTracks[node.TrackIndexes[0]] : null;
+        var card = new LibraryCardViewModel
+        {
+            Kind = "Folder",
+            Key = node.FullPath,
+            Title = node.Name,
+            Subtitle = node.FullPath,
+            Detail = node.FullPath,
+            TrackIndexes = node.TrackIndexes,
+            TrackCount = node.TrackCount,
+            RepresentativeTrack = representative,
+            ArtworkPath = node.ArtworkPath
+        };
+        SelectGroupCore(card, false, rememberSelection);
+        node.IsExpanded = true;
+    }
+
+    private static FolderTreeNodeViewModel? FindFolderNode(
+        IEnumerable<FolderTreeNodeViewModel> nodes,
+        string path)
+    {
+        foreach (var node in nodes)
+        {
+            if (node.FullPath.Equals(path, StringComparison.OrdinalIgnoreCase)) return node;
+            var child = FindFolderNode(node.Children, path);
+            if (child is not null) return child;
+        }
+        return null;
     }
 
     private void SelectGroup(LibraryCardViewModel? card)
@@ -2007,6 +2084,11 @@ public sealed class MainViewModel : ObservableObject
         {
             _groupingGate.Release();
         }
+        IReadOnlyList<FolderTreeNodeViewModel>? updatedFolderTree = null;
+        if (update.AffectedKinds.Contains("Folder", StringComparer.OrdinalIgnoreCase))
+            updatedFolderTree = await Task.Run(
+                () => FolderTreeBuilder.Build(update.Tracks, _settings.Current.LibrarySources),
+                cancellationToken);
 
         await Application.Current.Dispatcher.InvokeAsync(() =>
         {
@@ -2020,7 +2102,10 @@ public sealed class MainViewModel : ObservableObject
             if (update.AffectedKinds.Contains(
                     "Folder",
                     StringComparer.OrdinalIgnoreCase))
+            {
                 _sidebarViews.Remove("primary:Folders");
+                Replace(FolderTree, updatedFolderTree ?? []);
+            }
             _trackViews.Clear();
             _activeTrackPresentation = null;
 
@@ -2820,6 +2905,12 @@ public sealed class MainViewModel : ObservableObject
             : string.IsNullOrWhiteSpace(progress.CurrentPath)
                 ? "Discovering files…"
                 : progress.CurrentPath;
+        ScanCurrentSource = progress.IsComplete || string.IsNullOrWhiteSpace(progress.CurrentPath)
+            ? "—"
+            : EnabledSourcePaths()
+                .Where(root => IsWithinSource(progress.CurrentPath, root))
+                .OrderByDescending(root => root.Length)
+                .FirstOrDefault() ?? "—";
         StatusText = progress.IsComplete
             ? $"Scan complete · {progress.Added} added · {progress.Updated} updated · {progress.Failed} skipped"
             : progress.State switch
