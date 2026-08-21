@@ -10,6 +10,10 @@
     <Color x:Key="TextMutedColor">#9299A8</Color>
     <Color x:Key="AccentColor">#8290FF</Color>
     <SolidColorBrush x:Key="BackgroundBrush" Color="{StaticResource BackgroundColor}"/>
+    <!-- Compatibility alias used by secondary dialogs. Keeping this in the
+         shared theme prevents an error dialog from failing while reporting a
+         different XAML error. -->
+    <SolidColorBrush x:Key="AppBackgroundBrush" Color="{StaticResource BackgroundColor}"/>
     <SolidColorBrush x:Key="SurfaceBrush" Color="{StaticResource SurfaceColor}"/>
     <SolidColorBrush x:Key="SurfaceRaisedBrush" Color="{StaticResource SurfaceRaisedColor}"/>
     <SolidColorBrush x:Key="SurfaceHoverBrush" Color="{StaticResource SurfaceHoverColor}"/>

@@ -1,0 +1,31 @@
+<Window x:Class="Dextromethorphan.App.MetadataEditDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:ui="clr-namespace:Dextromethorphan.App.UI"
+        Title="Edit metadata" Width="620" Height="680" MinWidth="560" MinHeight="560"
+        WindowStartupLocation="CenterOwner" WindowStyle="None" ResizeMode="CanResize"
+        ShowInTaskbar="False" Background="Transparent" AllowsTransparency="True">
+    <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="14" Padding="24">
+        <Grid>
+            <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+            <Grid MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+                <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <StackPanel><TextBlock Text="Edit metadata" FontSize="21" FontWeight="SemiBold"/><TextBlock x:Name="TrackSummary" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,4,0,0"/></StackPanel>
+                <Button Grid.Column="1" Style="{StaticResource IconButton}" Content="&#xE711;" Click="Cancel_Click" ToolTip="Close"/>
+            </Grid>
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" ui:SmoothScrollBehavior.Enabled="True" Margin="0,18,0,18">
+                <StackPanel>
+                    <TextBlock Text="Blank fields leave existing values unchanged when editing multiple tracks." Foreground="{StaticResource TextMutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,0,0,14"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="16"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                        <StackPanel><TextBlock Text="Title" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><TextBox x:Name="TitleBox" Margin="0,5,0,12"/><TextBlock Text="Artists (separate with ; or /)" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><TextBox x:Name="ArtistsBox" Margin="0,5,0,12"/><TextBlock Text="Album artist" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><TextBox x:Name="AlbumArtistBox" Margin="0,5,0,12"/><TextBlock Text="Album" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><TextBox x:Name="AlbumBox" Margin="0,5,0,12"/><TextBlock Text="Genre(s)" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><TextBox x:Name="GenresBox" Margin="0,5,0,12"/></StackPanel>
+                        <StackPanel Grid.Column="2"><TextBlock Text="Year" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><TextBox x:Name="YearBox" Margin="0,5,0,12"/><TextBlock Text="Track number" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><TextBox x:Name="TrackNumberBox" Margin="0,5,0,12"/><TextBlock Text="Disc number" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><TextBox x:Name="DiscNumberBox" Margin="0,5,0,12"/><TextBlock Text="Comment" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><TextBox x:Name="CommentBox" Height="80" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Margin="0,5,0,12"/><CheckBox x:Name="ApplyEmptyFieldsCheck" Content="Apply blank fields (clear values)" Margin="0,4,0,0"/></StackPanel>
+                    </Grid>
+                    <Border Style="{StaticResource Card}" Padding="14" Margin="0,4,0,0"><StackPanel><TextBlock Text="Artwork" FontWeight="SemiBold"/><TextBlock x:Name="ArtworkStatus" Text="Keep current artwork" Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,4,0,9"/><StackPanel Orientation="Horizontal"><Button Content="Choose image" Click="ChooseArtwork_Click" Margin="0,0,8,0"/><Button Content="Clear chosen image" Click="ClearArtwork_Click"/></StackPanel><CheckBox x:Name="SquareCropCheck" Content="Crop selected artwork to a centered square" Margin="0,10,0,0"/><CheckBox x:Name="RemoveArtworkCheck" Content="Remove embedded artwork" Margin="0,7,0,0"/></StackPanel></Border>
+                    <Border Style="{StaticResource Card}" Padding="14" Margin="0,12,0,0"><StackPanel><TextBlock Text="Write policy" FontWeight="SemiBold"/><ComboBox x:Name="WriteModeBox" Margin="0,8,0,0"><ComboBoxItem Content="Database only (safe preview)" Tag="DatabaseOnly"/><ComboBoxItem Content="Write tags to audio files" Tag="WriteToFile"/></ComboBox><TextBlock Text="File writes use a same-directory temporary copy and atomic replacement. Unknown/custom tags are retained by editing the copied original." Foreground="{StaticResource TextMutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,7,0,0"/></StackPanel></Border>
+                </StackPanel>
+            </ScrollViewer>
+            <StackPanel Grid.Row="2" Orientation="Horizontal"><Button Content="Look up metadata" Click="Lookup_Click" ToolTip="Opt-in MusicBrainz/Discogs lookup; results are never written until you press Apply"/><StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="40,0,0,0"><Button Content="Cancel" MinWidth="90" Margin="0,0,8,0" Click="Cancel_Click"/><Button Content="Apply" Style="{StaticResource PrimaryButton}" MinWidth="100" Click="Apply_Click"/></StackPanel></StackPanel>
+        </Grid>
+    </Border>
+</Window>

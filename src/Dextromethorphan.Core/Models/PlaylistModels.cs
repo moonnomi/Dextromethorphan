@@ -44,6 +44,8 @@ public sealed record Playlist
     public required string Name { get; init; }
     public PlaylistKind Kind { get; init; }
     public SmartPlaylistDefinition? Rules { get; init; }
+    public string Description { get; init; } = "";
+    public string? CoverPath { get; init; }
     public DateTimeOffset CreatedAt { get; init; }
     public DateTimeOffset UpdatedAt { get; init; }
 }
@@ -55,6 +57,19 @@ public sealed record ImportedPlaylist
     public required string Name { get; init; }
     public IReadOnlyList<string> Locations { get; init; } = [];
 }
+
+public sealed record PlaylistImportReport(
+    int TotalLocations,
+    int ImportedTracks,
+    int MissingLocations,
+    IReadOnlyList<string> MissingPaths);
+
+public sealed record PlaylistEditRequest(
+    string Name,
+    string Description,
+    string? CoverPath,
+    PlaylistKind Kind,
+    SmartPlaylistDefinition? Rules);
 
 public sealed record LibraryFileStamp(
     long Id,

@@ -26,6 +26,15 @@ public sealed class PersistenceTests : IDisposable
             x.PlaybackSession.Shuffle = true;
             x.PlaybackSession.RepeatMode = RepeatMode.All;
             x.PlaybackSession.LastView = "Songs";
+            x.PlaybackSession.ShuffleUpcomingPaths = [@"C:\music\two.flac", @"C:\music\one.flac"];
+            x.PlaybackSession.QueueHistoryPaths = [@"C:\music\one.flac"];
+            x.StopAfterQueue = true;
+            x.TrackPlaybackOverrides[@"C:\music\two.flac"] = new TrackPlaybackOverrideSettings
+            {
+                Speed = 1.25,
+                PitchSemitones = -2,
+                PreservePitch = false
+            };
         }, cancellationToken);
 
         var reloaded = new JsonSettingsService(paths);
@@ -40,6 +49,13 @@ public sealed class PersistenceTests : IDisposable
         Assert.True(reloaded.Current.PlaybackSession.Shuffle);
         Assert.Equal(RepeatMode.All, reloaded.Current.PlaybackSession.RepeatMode);
         Assert.Equal("Songs", reloaded.Current.PlaybackSession.LastView);
+        Assert.Equal(2, reloaded.Current.PlaybackSession.ShuffleUpcomingPaths.Count);
+        Assert.Single(reloaded.Current.PlaybackSession.QueueHistoryPaths);
+        Assert.True(reloaded.Current.StopAfterQueue);
+        var trackOverride = Assert.Single(reloaded.Current.TrackPlaybackOverrides).Value;
+        Assert.Equal(1.25, trackOverride.Speed);
+        Assert.Equal(-2, trackOverride.PitchSemitones);
+        Assert.False(trackOverride.PreservePitch);
     }
 
     [Fact]

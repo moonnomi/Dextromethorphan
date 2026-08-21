@@ -76,6 +76,18 @@ internal sealed class DiagnosticLibraryRepository(ILibraryRepository inner, Deve
     public Task<TimeSpan?> GetBookmarkAsync(long trackId, CancellationToken cancellationToken = default) =>
         diagnostics.MeasureAsync("repository", "library.get-bookmark", () => inner.GetBookmarkAsync(trackId, cancellationToken));
 
+    public Task<IReadOnlyList<PlaybackBookmark>> GetBookmarksAsync(long trackId, CancellationToken cancellationToken = default) =>
+        MeasureCountAsync("library.get-bookmarks", () => inner.GetBookmarksAsync(trackId, cancellationToken));
+
+    public Task<PlaybackBookmark> CreateBookmarkAsync(long trackId, string name, TimeSpan position, CancellationToken cancellationToken = default) =>
+        diagnostics.MeasureAsync("repository", "library.create-bookmark", () => inner.CreateBookmarkAsync(trackId, name, position, cancellationToken));
+
+    public Task RenameBookmarkAsync(long bookmarkId, string name, CancellationToken cancellationToken = default) =>
+        diagnostics.MeasureAsync("repository", "library.rename-bookmark", () => inner.RenameBookmarkAsync(bookmarkId, name, cancellationToken));
+
+    public Task DeleteBookmarkAsync(long bookmarkId, CancellationToken cancellationToken = default) =>
+        diagnostics.MeasureAsync("repository", "library.delete-bookmark", () => inner.DeleteBookmarkAsync(bookmarkId, cancellationToken));
+
     private async Task<T> MeasureCountAsync<T>(string operation, Func<Task<T>> action, Dictionary<string, object?>? data = null)
     {
         if (!diagnostics.Enabled) return await action();
@@ -117,11 +129,17 @@ internal sealed class DiagnosticPlaylistRepository(IPlaylistRepository inner, De
     public Task<long> CreateSmartAsync(string name, SmartPlaylistDefinition rules, CancellationToken cancellationToken = default) =>
         diagnostics.MeasureAsync("repository", "playlist.create-smart", () => inner.CreateSmartAsync(name, rules, cancellationToken));
 
+    public Task<long> DuplicateAsync(long playlistId, string? name = null, CancellationToken cancellationToken = default) =>
+        diagnostics.MeasureAsync("repository", "playlist.duplicate", () => inner.DuplicateAsync(playlistId, name, cancellationToken));
+
     public Task UpdateSmartRulesAsync(long playlistId, SmartPlaylistDefinition rules, CancellationToken cancellationToken = default) =>
         diagnostics.MeasureAsync("repository", "playlist.update-rules", () => inner.UpdateSmartRulesAsync(playlistId, rules, cancellationToken));
 
     public Task RenameAsync(long playlistId, string name, CancellationToken cancellationToken = default) =>
         diagnostics.MeasureAsync("repository", "playlist.rename", () => inner.RenameAsync(playlistId, name, cancellationToken));
+
+    public Task UpdateDetailsAsync(long playlistId, string description, string? coverPath, CancellationToken cancellationToken = default) =>
+        diagnostics.MeasureAsync("repository", "playlist.update-details", () => inner.UpdateDetailsAsync(playlistId, description, coverPath, cancellationToken));
 
     public Task DeleteAsync(long playlistId, CancellationToken cancellationToken = default) =>
         diagnostics.MeasureAsync("repository", "playlist.delete", () => inner.DeleteAsync(playlistId, cancellationToken));
@@ -133,6 +151,10 @@ internal sealed class DiagnosticPlaylistRepository(IPlaylistRepository inner, De
     public Task AddTracksAsync(long playlistId, IReadOnlyList<long> trackIds, CancellationToken cancellationToken = default) =>
         diagnostics.MeasureAsync("repository", "playlist.add-tracks", () => inner.AddTracksAsync(playlistId, trackIds, cancellationToken),
             new Dictionary<string, object?> { ["count"] = trackIds.Count });
+
+    public Task MoveTracksAsync(long playlistId, IReadOnlyList<long> trackIds, int destinationIndex, CancellationToken cancellationToken = default) =>
+        diagnostics.MeasureAsync("repository", "playlist.move-tracks", () => inner.MoveTracksAsync(playlistId, trackIds, destinationIndex, cancellationToken),
+            new Dictionary<string, object?> { ["count"] = trackIds.Count, ["destinationIndex"] = destinationIndex });
 
     public Task<IReadOnlyList<Track>> GetTracksAsync(long playlistId, CancellationToken cancellationToken = default) =>
         MeasureCountAsync("playlist.get-tracks", () => inner.GetTracksAsync(playlistId, cancellationToken));

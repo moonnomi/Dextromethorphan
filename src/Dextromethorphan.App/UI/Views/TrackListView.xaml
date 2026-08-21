@@ -3,6 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:ui="clr-namespace:Dextromethorphan.App.UI"
              mc:Ignorable="d"
              d:DesignHeight="420"
              d:DesignWidth="900">
@@ -10,7 +11,14 @@
              Style="{StaticResource TrackListStyle}"
              ItemsSource="{Binding BrowseTracks}"
              SelectedItem="{Binding SelectedTrack}"
+             SelectionMode="Extended"
+             SelectionChanged="TrackList_SelectionChanged"
              MouseDoubleClick="TrackList_MouseDoubleClick"
+             PreviewKeyDown="TrackList_PreviewKeyDown"
+             AllowDrop="True"
+             PreviewMouseMove="TrackList_PreviewMouseMove"
+             DragOver="TrackList_DragOver"
+             Drop="TrackList_Drop"
              Loaded="TrackList_Loaded"
              ScrollViewer.ScrollChanged="TrackList_ScrollChanged">
         <ListBox.ContextMenu>
@@ -23,6 +31,15 @@
                 <MenuItem Header="Add to queue"
                           Command="{Binding PlacementTarget.DataContext.AddToQueueCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                           CommandParameter="{Binding PlacementTarget.SelectedItem, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                <MenuItem Header="Add selected to queue"
+                          Command="{Binding PlacementTarget.DataContext.AddSelectedToQueueCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                <MenuItem Header="Select all" Click="SelectAll_Click"/>
+                <MenuItem Header="Columns"><MenuItem Header="Track" Command="{Binding PlacementTarget.DataContext.ToggleTrackColumnCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Track"/><MenuItem Header="Album" Command="{Binding PlacementTarget.DataContext.ToggleTrackColumnCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Album"/><MenuItem Header="Quality" Command="{Binding PlacementTarget.DataContext.ToggleTrackColumnCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Quality"/><MenuItem Header="Rating" Command="{Binding PlacementTarget.DataContext.ToggleTrackColumnCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Rating"/><MenuItem Header="Duration" Command="{Binding PlacementTarget.DataContext.ToggleTrackColumnCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Duration"/><Separator/><MenuItem Header="Move Track left" Command="{Binding PlacementTarget.DataContext.MoveTrackColumnCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Track|left"/><MenuItem Header="Move Track right" Command="{Binding PlacementTarget.DataContext.MoveTrackColumnCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Track|right"/><MenuItem Header="Move Album left" Command="{Binding PlacementTarget.DataContext.MoveTrackColumnCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Album|left"/><MenuItem Header="Move Album right" Command="{Binding PlacementTarget.DataContext.MoveTrackColumnCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Album|right"/><MenuItem Header="Move Quality left" Command="{Binding PlacementTarget.DataContext.MoveTrackColumnCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Quality|left"/><MenuItem Header="Move Quality right" Command="{Binding PlacementTarget.DataContext.MoveTrackColumnCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Quality|right"/><Separator/><MenuItem Header="Width presets"><MenuItem Header="Title wide" Command="{Binding PlacementTarget.DataContext.SetTrackColumnWidthCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Title|320"/><MenuItem Header="Album wide" Command="{Binding PlacementTarget.DataContext.SetTrackColumnWidthCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Album|220"/><MenuItem Header="Quality wide" Command="{Binding PlacementTarget.DataContext.SetTrackColumnWidthCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Quality|220"/></MenuItem></MenuItem>
+                <Separator/>
+                <MenuItem Header="Edit metadata"
+                          Command="{Binding PlacementTarget.DataContext.EditMetadataCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                <MenuItem Header="Undo metadata edit"
+                          Command="{Binding PlacementTarget.DataContext.UndoMetadataCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
                 <Separator>
                     <Separator.Style>
                         <Style TargetType="Separator">
@@ -65,16 +82,17 @@
         </ListBox.ContextMenu>
         <ListBox.ItemTemplate>
             <DataTemplate>
-                <Grid Height="58" Margin="6,0">
+                <Grid x:Name="TrackRow" Height="58" Margin="6,0" Loaded="TrackRow_Loaded">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="36"/>
                         <ColumnDefinition Width="1.8*" MinWidth="120"/>
                         <ColumnDefinition Width="1.05*" MinWidth="90"/>
                         <ColumnDefinition Width="146"/>
-                        <ColumnDefinition Width="34"/>
+                        <ColumnDefinition Width="112"/>
                         <ColumnDefinition Width="58"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock Text="{Binding TrackNumber}"
+                    <TextBlock Text="{Binding DiscTrackText}"
+                               Visibility="{Binding DataContext.VisibleTrackColumns, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource ColumnVisible}, ConverterParameter=Track}"
                                Foreground="{StaticResource TextMutedBrush}"
                                FontSize="11"
                                HorizontalAlignment="Center"
@@ -82,16 +100,17 @@
                     <StackPanel Grid.Column="1"
                                 Margin="10,0,12,0"
                                 VerticalAlignment="Center">
-                        <TextBlock Text="{Binding Title}"
+                        <ui:HighlightTextBlock SourceText="{Binding Title}" Query="{Binding DataContext.SearchText, RelativeSource={RelativeSource AncestorType=Window}}"
                                    FontWeight="SemiBold"
                                    TextTrimming="CharacterEllipsis"/>
-                        <TextBlock Text="{Binding Artist}"
+                        <ui:HighlightTextBlock SourceText="{Binding Artist}" Query="{Binding DataContext.SearchText, RelativeSource={RelativeSource AncestorType=Window}}"
                                    Foreground="{StaticResource TextMutedBrush}"
                                    FontSize="11"
                                    Margin="0,3,0,0"
                                    TextTrimming="CharacterEllipsis"/>
                     </StackPanel>
                     <StackPanel Grid.Column="2"
+                                Visibility="{Binding DataContext.VisibleTrackColumns, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource ColumnVisible}, ConverterParameter=Album}"
                                 Margin="8,0,14,0"
                                 VerticalAlignment="Center">
                         <TextBlock Text="{Binding Album}"
@@ -104,30 +123,26 @@
                                    Margin="0,3,0,0"/>
                     </StackPanel>
                     <TextBlock Grid.Column="3"
+                               Visibility="{Binding DataContext.VisibleTrackColumns, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource ColumnVisible}, ConverterParameter=Quality}"
                                Text="{Binding QualityText}"
+                               ToolTip="{Binding ReplayGainText}"
                                Foreground="{StaticResource TextMutedBrush}"
                                FontSize="10"
                                TextTrimming="CharacterEllipsis"
                                VerticalAlignment="Center"/>
-                    <TextBlock Grid.Column="4"
-                               Text="&#x2665;"
-                               FontSize="14"
-                               HorizontalAlignment="Center"
-                               VerticalAlignment="Center">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock">
-                                <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/>
-                                <Setter Property="Opacity" Value="0.18"/>
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsLoved}" Value="True">
-                                        <Setter Property="Foreground" Value="{StaticResource AccentBrush}"/>
-                                        <Setter Property="Opacity" Value="1"/>
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
+                    <StackPanel Grid.Column="4"
+                                Orientation="Horizontal"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Visibility="{Binding DataContext.VisibleTrackColumns, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource ColumnVisible}, ConverterParameter=Rating}">
+                        <Button Tag="1" FontFamily="Segoe UI Symbol" Content="&#x2605;" Click="RatingStar_Click" ToolTip="1 star"><Button.Style><Style TargetType="Button" BasedOn="{StaticResource IconButton}"><Setter Property="Width" Value="21"/><Setter Property="Height" Value="28"/><Setter Property="Padding" Value="0"/><Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/><Style.Triggers><DataTrigger Binding="{Binding Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=1}" Value="True"><Setter Property="Foreground" Value="{StaticResource AccentBrush}"/></DataTrigger></Style.Triggers></Style></Button.Style></Button>
+                        <Button Tag="2" FontFamily="Segoe UI Symbol" Content="&#x2605;" Click="RatingStar_Click" ToolTip="2 stars"><Button.Style><Style TargetType="Button" BasedOn="{StaticResource IconButton}"><Setter Property="Width" Value="21"/><Setter Property="Height" Value="28"/><Setter Property="Padding" Value="0"/><Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/><Style.Triggers><DataTrigger Binding="{Binding Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=2}" Value="True"><Setter Property="Foreground" Value="{StaticResource AccentBrush}"/></DataTrigger></Style.Triggers></Style></Button.Style></Button>
+                        <Button Tag="3" FontFamily="Segoe UI Symbol" Content="&#x2605;" Click="RatingStar_Click" ToolTip="3 stars"><Button.Style><Style TargetType="Button" BasedOn="{StaticResource IconButton}"><Setter Property="Width" Value="21"/><Setter Property="Height" Value="28"/><Setter Property="Padding" Value="0"/><Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/><Style.Triggers><DataTrigger Binding="{Binding Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=3}" Value="True"><Setter Property="Foreground" Value="{StaticResource AccentBrush}"/></DataTrigger></Style.Triggers></Style></Button.Style></Button>
+                        <Button Tag="4" FontFamily="Segoe UI Symbol" Content="&#x2605;" Click="RatingStar_Click" ToolTip="4 stars"><Button.Style><Style TargetType="Button" BasedOn="{StaticResource IconButton}"><Setter Property="Width" Value="21"/><Setter Property="Height" Value="28"/><Setter Property="Padding" Value="0"/><Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/><Style.Triggers><DataTrigger Binding="{Binding Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=4}" Value="True"><Setter Property="Foreground" Value="{StaticResource AccentBrush}"/></DataTrigger></Style.Triggers></Style></Button.Style></Button>
+                        <Button Tag="5" FontFamily="Segoe UI Symbol" Content="&#x2605;" Click="RatingStar_Click" ToolTip="5 stars"><Button.Style><Style TargetType="Button" BasedOn="{StaticResource IconButton}"><Setter Property="Width" Value="21"/><Setter Property="Height" Value="28"/><Setter Property="Padding" Value="0"/><Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/><Style.Triggers><DataTrigger Binding="{Binding Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=5}" Value="True"><Setter Property="Foreground" Value="{StaticResource AccentBrush}"/></DataTrigger></Style.Triggers></Style></Button.Style></Button>
+                    </StackPanel>
                     <TextBlock Grid.Column="5"
+                               Visibility="{Binding DataContext.VisibleTrackColumns, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource ColumnVisible}, ConverterParameter=Duration}"
                                Text="{Binding DurationText}"
                                Foreground="{StaticResource TextMutedBrush}"
                                FontSize="11"

@@ -6,7 +6,10 @@
     <Application.Resources>
         <ResourceDictionary>
             <ui:StringEqualsConverter x:Key="StringEquals"/>
+            <ui:CollectionContainsToVisibilityConverter x:Key="ColumnVisible"/>
+            <ui:CollectionContainsToBoolConverter x:Key="CollectionContainsBool"/>
             <ui:InverseBooleanToVisibilityConverter x:Key="InverseBoolToVisibility"/>
+            <ui:RatingAtLeastConverter x:Key="RatingAtLeast"/>
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="UI/Styles/Theme.xaml"/>
             </ResourceDictionary.MergedDictionaries>

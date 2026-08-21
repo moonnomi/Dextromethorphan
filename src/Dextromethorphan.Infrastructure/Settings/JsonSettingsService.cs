@@ -248,6 +248,40 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
         settings.Volume = FiniteClamp(settings.Volume, 0, 1, 0.82);
         settings.FontSize = FiniteClamp(settings.FontSize, 9, 32, 14);
         settings.AlbumTileSize = Math.Clamp(settings.AlbumTileSize, 80, 400);
+        settings.ViewSettings ??= new Dictionary<string, ViewSettings>(StringComparer.OrdinalIgnoreCase);
+        var normalizedViews = new Dictionary<string, ViewSettings>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in settings.ViewSettings.Take(32))
+        {
+            if (string.IsNullOrWhiteSpace(pair.Key) || pair.Value is null) continue;
+            var view = pair.Value;
+            view.SortBy = NormalizeText(view.SortBy, "Title", 64);
+            view.CoverSize = Math.Clamp(view.CoverSize, 80, 400);
+            view.QuickFilter = NormalizeText(view.QuickFilter, "", 256);
+            if (!Enum.IsDefined(view.Density)) view.Density = LibraryDensity.Comfortable;
+            view.VisibleColumns = NormalizeColumnNames(view.VisibleColumns);
+            view.ColumnOrder = NormalizeColumnNames(view.ColumnOrder);
+            view.ColumnWidths = (view.ColumnWidths ?? new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase))
+                .Where(item => item.Key.Length <= 64 && double.IsFinite(item.Value))
+                .Take(32)
+                .ToDictionary(item => item.Key, item => Math.Clamp(item.Value, 40, 800), StringComparer.OrdinalIgnoreCase);
+            normalizedViews[pair.Key.Trim()] = view;
+        }
+        settings.ViewSettings = normalizedViews;
+        var dashboardOptions = new[] { "Artwork", "Lyrics", "Queue" };
+        settings.DashboardModules = (settings.DashboardModules ?? [])
+            .Where(item => dashboardOptions.Contains(item, StringComparer.OrdinalIgnoreCase))
+            .Select(item => dashboardOptions.First(option => option.Equals(item, StringComparison.OrdinalIgnoreCase)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (settings.DashboardModules.Count == 0)
+            settings.DashboardModules = ["Artwork", "Lyrics", "Queue"];
+        settings.SearchHistory = (settings.SearchHistory ?? [])
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Select(item => item.Trim())
+            .Where(item => item.Length <= 512)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(50)
+            .ToList();
         settings.ArtworkCacheMegabytes = Math.Clamp(settings.ArtworkCacheMegabytes, 64, 4096);
         settings.ReplayGainPreampDb = FiniteClamp(settings.ReplayGainPreampDb, -20, 20, 0);
         settings.CrossfadeSeconds = FiniteClamp(settings.CrossfadeSeconds, 0, 10, 0);
@@ -255,6 +289,22 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
         settings.FadeOutSeconds = FiniteClamp(settings.FadeOutSeconds, 0, 10, 0);
         settings.PlaybackSpeed = FiniteClamp(settings.PlaybackSpeed, 0.5, 1.5, 1);
         settings.PitchSemitones = FiniteClamp(settings.PitchSemitones, -12, 12, 0);
+        if (settings.StopAfterCurrent && settings.StopAfterQueue)
+            settings.StopAfterQueue = false;
+        settings.TrackPlaybackOverrides = (settings.TrackPlaybackOverrides
+                ?? new Dictionary<string, TrackPlaybackOverrideSettings>(StringComparer.OrdinalIgnoreCase))
+            .Where(pair => !string.IsNullOrWhiteSpace(pair.Key) && pair.Value is not null)
+            .Take(10_000)
+            .Select(pair => new KeyValuePair<string, TrackPlaybackOverrideSettings>(
+                pair.Key.Trim(),
+                new TrackPlaybackOverrideSettings
+                {
+                    Speed = FiniteClamp(pair.Value.Speed, 0.5, 1.5, 1),
+                    PitchSemitones = FiniteClamp(pair.Value.PitchSemitones, -12, 12, 0),
+                    PreservePitch = pair.Value.PreservePitch
+                }))
+            .GroupBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Last().Value, StringComparer.OrdinalIgnoreCase);
         settings.SeekStepSeconds = FiniteClamp(settings.SeekStepSeconds, 1, 60, 5);
         settings.VolumeStep = FiniteClamp(settings.VolumeStep, 0.01, 0.25, 0.05);
         if (!Enum.IsDefined(settings.ReplayGainMode))
@@ -280,6 +330,9 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
         settings.LibrarySources = sources;
         settings.LibraryFolders = sources.Where(source => source.Enabled).Select(source => source.Path).ToList();
         settings.ScheduledLibraryScanIntervalMinutes = Math.Clamp(settings.ScheduledLibraryScanIntervalMinutes, 15, 1440);
+        settings.MultiValueSeparators = NormalizeSeparators(settings.MultiValueSeparators);
+        settings.DiscogsUserToken = NormalizeText(settings.DiscogsUserToken, "", 512);
+        settings.MetadataCacheDays = Math.Clamp(settings.MetadataCacheDays, 1, 3650);
         if (!Enum.IsDefined(settings.LyricsDisplayMode)) settings.LyricsDisplayMode = LyricsDisplayMode.Automatic;
         if (!Enum.IsDefined(settings.LyricsAlignment)) settings.LyricsAlignment = LyricsTextAlignment.Left;
         settings.LyricsFontSize = FiniteClamp(settings.LyricsFontSize, 14, 52, 24);
@@ -302,6 +355,14 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
         settings.PlaybackSession.QueuePaths ??= [];
         settings.PlaybackSession.QueuePaths = NormalizePaths(
             settings.PlaybackSession.QueuePaths,
+            distinct: false);
+        settings.PlaybackSession.QueueHistoryPaths = NormalizePaths(
+                settings.PlaybackSession.QueueHistoryPaths ?? [],
+                distinct: false)
+            .Take(100)
+            .ToList();
+        settings.PlaybackSession.ShuffleUpcomingPaths = NormalizePaths(
+            settings.PlaybackSession.ShuffleUpcomingPaths ?? [],
             distinct: false);
         settings.PlaybackSession.CurrentIndex = Math.Clamp(
             settings.PlaybackSession.CurrentIndex,
@@ -374,13 +435,17 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
                 target.FontSize = defaults.FontSize;
                 target.AnimationsEnabled = defaults.AnimationsEnabled;
                 target.AlbumTileSize = defaults.AlbumTileSize;
+                target.ViewSettings = defaults.ViewSettings;
+                target.DashboardModules = defaults.DashboardModules;
                 target.QueuePanelVisible = defaults.QueuePanelVisible;
                 target.ArtworkCacheMegabytes =
                     defaults.ArtworkCacheMegabytes;
                 break;
             case SettingsResetScope.Playback:
                 target.ResumeOnStartup = defaults.ResumeOnStartup;
+                target.ResumeTrackBookmarks = defaults.ResumeTrackBookmarks;
                 target.StopAfterCurrent = defaults.StopAfterCurrent;
+                target.StopAfterQueue = defaults.StopAfterQueue;
                 target.ReplayGainMode = defaults.ReplayGainMode;
                 target.ReplayGainPreampDb = defaults.ReplayGainPreampDb;
                 target.PreventClipping = defaults.PreventClipping;
@@ -391,6 +456,7 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
                 target.PlaybackSpeed = defaults.PlaybackSpeed;
                 target.PitchSemitones = defaults.PitchSemitones;
                 target.PreservePitch = defaults.PreservePitch;
+                target.TrackPlaybackOverrides = defaults.TrackPlaybackOverrides;
                 target.Volume = defaults.Volume;
                 target.OutputProfiles = defaults.OutputProfiles;
                 target.ActiveOutputDeviceId =
@@ -406,6 +472,7 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
                 target.ScheduledLibraryScanIntervalMinutes = defaults.ScheduledLibraryScanIntervalMinutes;
                 target.AllowScheduledScanOnBattery = defaults.AllowScheduledScanOnBattery;
                 target.AllowScheduledScanOnMeteredNetwork = defaults.AllowScheduledScanOnMeteredNetwork;
+                target.MultiValueSeparators = defaults.MultiValueSeparators;
                 target.ArtworkCacheMegabytes =
                     defaults.ArtworkCacheMegabytes;
                 break;
@@ -479,6 +546,27 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
             catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException) { }
         }
         return result;
+    }
+
+    private static string NormalizeSeparators(string? value)
+    {
+        var separators = new string((value ?? ";/")
+            .Where(character => character is ';' or '/' or '|' or ',')
+            .Distinct()
+            .Take(4)
+            .ToArray());
+        return separators.Length == 0 ? ";/" : separators;
+    }
+
+    private static List<string> NormalizeColumnNames(IEnumerable<string>? values)
+    {
+        var allowed = new HashSet<string>(["Track", "Title", "Artist", "Album", "Quality", "Rating", "Duration", "Year", "Codec", "Source"], StringComparer.OrdinalIgnoreCase);
+        return (values ?? ["Track", "Title", "Artist", "Album", "Quality", "Rating", "Duration"])
+            .Where(value => allowed.Contains(value))
+            .Select(value => allowed.First(item => item.Equals(value, StringComparison.OrdinalIgnoreCase)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(16)
+            .ToList();
     }
 
     private static List<AudioOutputProfile> NormalizeOutputProfiles(

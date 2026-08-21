@@ -66,8 +66,34 @@ public sealed record PlaybackSnapshot(
     double Speed = 1.0,
     double Peak = 0);
 
+/// <summary>
+/// A presentation-only view of the decoded audio signal. Values are normalized
+/// to 0..1 and never participate in the playback/output pipeline.
+/// </summary>
+public sealed record AudioVisualizationSnapshot(
+    IReadOnlyList<double> Bands,
+    double Peak,
+    bool IsActive,
+    string? UnavailableReason = null)
+{
+    public static AudioVisualizationSnapshot Empty(
+        int bandCount = 40,
+        string? reason = null) =>
+        new(new double[Math.Clamp(bandCount, 8, 96)], 0, false, reason);
+}
+
 public sealed record TrackTransitionedEventArgs(Track Previous, Track Current, bool Crossfaded);
 public sealed record SleepTimerSnapshot(bool IsActive, TimeSpan? Remaining, bool StopAtEndOfTrack);
+public sealed record PlaybackBookmark(
+    long Id,
+    long TrackId,
+    string Name,
+    TimeSpan Position,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt)
+{
+    public string PositionText => Position.ToString(Position.TotalHours >= 1 ? @"h\:mm\:ss" : @"m\:ss");
+}
 
 public sealed class AudioPlaybackOptions
 {
@@ -90,6 +116,13 @@ public sealed class AudioPlaybackOptions
 }
 
 public sealed record QueueEntry(Guid Id, Track Track, DateTimeOffset AddedAt, bool IsPlaying = false);
+
+public sealed class TrackPlaybackOverrideSettings
+{
+    public double Speed { get; set; } = 1;
+    public double PitchSemitones { get; set; }
+    public bool PreservePitch { get; set; } = true;
+}
 
 public sealed class AudioOutputProfile
 {

@@ -185,6 +185,8 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 
 ## Milestone 4 — library and metadata product features
 
+**Status (2026-08-02): complete.** See the [Milestone 4 status report](MILESTONE-4-STATUS-2026-08-02.md).
+
 ### Sources and scanning UI
 
 - [x] **P1 LIB-001** Add a source manager with Add, Remove, Enable, Rescan, exclusions, watcher toggle, and per-source status.
@@ -196,46 +198,46 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 
 ### Metadata correctness and editing
 
-- [ ] **P1 META-001** Verify ID3v2.2/2.3/2.4, Vorbis, MP4, APE, ASF/WMA, and RIFF/AIFF tag mappings.
-- [ ] **P1 META-002** Define multi-value artist/genre parsing without splitting legitimate names incorrectly; make separators configurable.
-- [ ] **P1 META-003** Correctly group album artist, featured artists, compilations, disc sets, release types, sort tags, and classical metadata.
-- [ ] **P1 META-004** Add single- and multi-track tag editing with preview, validation, undo, and atomic file writes.
-- [ ] **P1 META-005** Let users choose database-only edits or write-back to files per field/action.
-- [ ] **P1 META-006** Add embedded/external artwork view, replace, remove, crop, and preferred-cover selection.
-- [ ] **P1 META-007** Preserve unknown/custom tags during edits.
-- [ ] **P2 META-008** Add opt-in MusicBrainz/Discogs metadata matching with confirmation before writes.
-- [ ] **P2 META-009** Add artist images, biographies, and library statistics with offline caching and source attribution.
+- [x] **P1 META-001** Verify ID3v2.2/2.3/2.4, Vorbis, MP4, APE, ASF/WMA, and RIFF/AIFF tag mappings.
+- [x] **P1 META-002** Define multi-value artist/genre parsing without splitting legitimate names incorrectly; make separators configurable.
+- [x] **P1 META-003** Correctly group album artist, featured artists, compilations, disc sets, release types, sort tags, and classical metadata.
+- [x] **P1 META-004** Add single- and multi-track tag editing with preview, validation, undo, and atomic file writes.
+- [x] **P1 META-005** Let users choose database-only edits or write-back to files per field/action.
+- [x] **P1 META-006** Add embedded/external artwork view, replace, remove, crop, and preferred-cover selection.
+- [x] **P1 META-007** Preserve unknown/custom tags during edits.
+- [x] **P2 META-008** Add opt-in MusicBrainz/Discogs metadata matching with confirmation before writes.
+- [x] **P2 META-009** Add artist images, biographies, and library statistics with offline caching and source attribution.
 
 ### Browsing, sorting, and filtering
 
-- [ ] **P1 BROWSE-001** Add per-view sort choices and persist them independently.
-- [ ] **P1 BROWSE-002** Add compact/list/grid density controls and remember cover size per view.
-- [ ] **P1 BROWSE-003** Add persistent quick filters such as lossless, codec, year, rating, loved, compilation, and source.
-- [ ] **P1 BROWSE-004** Add configurable list columns with show/hide/reorder/width persistence.
-- [ ] **P1 BROWSE-005** Add multi-select with Ctrl/Shift, Select all, and keyboard/context actions.
-- [ ] **P1 BROWSE-006** Add drag-and-drop from tracks/collections to queue and playlists with clear insertion feedback.
-- [ ] **P1 BROWSE-007** Add album disc grouping, headers, totals, and album-level ReplayGain/metadata indicators.
-- [ ] **P1 BROWSE-008** Add richer artist pages with albums, singles/EPs, compilations, appearances, top tracks, and stats.
-- [ ] **P1 BROWSE-009** Add recently added, recently played, most played, never played, and history views.
-- [ ] **P2 BROWSE-010** Add user-configurable home/dashboard modules.
+- [x] **P1 BROWSE-001** Add per-view sort choices and persist them independently.
+- [x] **P1 BROWSE-002** Add compact/list/grid density controls and remember cover size per view.
+- [x] **P1 BROWSE-003** Add persistent quick filters such as lossless, codec, year, rating, loved, compilation, and source.
+- [x] **P1 BROWSE-004** Add configurable list columns with show/hide/reorder/width persistence.
+- [x] **P1 BROWSE-005** Add multi-select with Ctrl/Shift, Select all, and keyboard/context actions.
+- [x] **P1 BROWSE-006** Add drag-and-drop from tracks/collections to queue and playlists with clear insertion feedback.
+- [x] **P1 BROWSE-007** Add album disc grouping, headers, totals, and album-level ReplayGain/metadata indicators.
+- [x] **P1 BROWSE-008** Add richer artist pages with albums, singles/EPs, compilations, appearances, top tracks, and stats.
+- [x] **P1 BROWSE-009** Add recently added, recently played, most played, never played, and history views.
+- [x] **P2 BROWSE-010** Add user-configurable home/dashboard modules.
 
 ### Search
 
-- [ ] **P1 SEARCH-001** Add scoped filters for title, artist, album, genre, filename, comment, playlist, source, codec, and year.
-- [ ] **P1 SEARCH-002** Add search suggestions, recent searches, clear-history, and keyboard navigation.
-- [ ] **P1 SEARCH-003** Highlight matches and show grouped result counts without rebuilding unrelated views.
-- [ ] **P1 SEARCH-004** Add exact phrase, exclusion, and structured filter syntax with safe parsing.
-- [ ] **P1 SEARCH-005** Test diacritics, CJK, RTL text, punctuation, multi-artist values, and very large result sets.
+- [x] **P1 SEARCH-001** Add scoped filters for title, artist, album, genre, filename, comment, playlist, source, codec, and year.
+- [x] **P1 SEARCH-002** Add search suggestions, recent searches, clear-history, and keyboard navigation.
+- [x] **P1 SEARCH-003** Highlight matches and show grouped result counts without rebuilding unrelated views.
+- [x] **P1 SEARCH-004** Add exact phrase, exclusion, and structured filter syntax with safe parsing.
+- [x] **P1 SEARCH-005** Test diacritics, CJK, RTL text, punctuation, multi-artist values, and very large result sets.
 
 ### Playlists
 
-- [ ] **P1 PL-001** Add create, rename, delete, duplicate, and description/cover editing.
-- [ ] **P1 PL-002** Add ordered multi-select editing and drag/drop between playlists and queue.
-- [ ] **P1 PL-003** Add the smart-playlist rule builder for nested AND/OR groups, validation, preview count, sort, and limit.
-- [ ] **P1 PL-004** Expose M3U8, PLS, and XSPF import/export with conflict and missing-file reporting.
-- [ ] **P1 PL-005** Add Save queue as playlist and Add collection/selection to playlist.
-- [ ] **P1 PL-006** Add undo/redo for playlist edits and clear user feedback after each operation.
-- [ ] **P2 PL-007** Add automatic playlist backups and portable relative-path export.
+- [x] **P1 PL-001** Add create, rename, delete, duplicate, and description/cover editing.
+- [x] **P1 PL-002** Add ordered multi-select editing and drag/drop between playlists and queue.
+- [x] **P1 PL-003** Add the smart-playlist rule builder for nested AND/OR groups, validation, preview count, sort, and limit.
+- [x] **P1 PL-004** Expose M3U8, PLS, and XSPF import/export with conflict and missing-file reporting.
+- [x] **P1 PL-005** Add Save queue as playlist and Add collection/selection to playlist.
+- [x] **P1 PL-006** Add undo/redo for playlist edits and clear user feedback after each operation.
+- [x] **P2 PL-007** Add automatic playlist backups and portable relative-path export.
 
 ---
 
@@ -243,18 +245,18 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 
 ### Playback and queue
 
-- [ ] **P1 PLAY-001** Expose bookmark create, rename, seek, remove, and automatic resume controls.
-- [ ] **P1 PLAY-002** Expose sleep timer presets, custom time, end of track, end of queue, fade-out, and visible remaining time.
-- [ ] **P1 PLAY-003** Expose speed, pitch, preserve-pitch, reset, and per-track override controls.
-- [ ] **P1 PLAY-004** Add Stop after current and Stop after queue controls with persistent indicators.
-- [ ] **P1 PLAY-005** Add clickable 0–5 star rating, Love, and clear-rating actions in track rows and Now Playing.
-- [ ] **P1 PLAY-006** Add seek hover tooltip, chapter markers, bookmark markers, and optional waveform.
-- [ ] **P1 PLAY-007** Add queue insertion markers, multi-select, remove selected, move to top/bottom, and keyboard reordering.
-- [ ] **P1 PLAY-008** Add queue history/previously played and a clear distinction between current, next, and later items.
-- [ ] **P1 PLAY-009** Confirm shuffle order is stable, avoids immediate repeats, survives edits, and restores across sessions.
-- [ ] **P1 PLAY-010** Add user-visible undo/redo notifications and redo access for queue changes.
-- [ ] **P1 PLAY-011** Add playback-error rows/toasts that explain unsupported/corrupt/offline files and provide Locate/Remove/Skip.
-- [ ] **P2 PLAY-012** Add an optional compact mini-player and fullscreen Now Playing mode.
+- [x] **P1 PLAY-001** Expose bookmark create, rename, seek, remove, and automatic resume controls.
+- [x] **P1 PLAY-002** Removed from product scope by decision on 2026-08-09; the existing internal sleep-timer service remains unused by the consumer UI.
+- [x] **P1 PLAY-003** Expose speed, pitch, preserve-pitch, reset, and per-track override controls.
+- [x] **P1 PLAY-004** Add Stop after current and Stop after queue controls with persistent indicators.
+- [x] **P1 PLAY-005** Add clickable 0–5 star rating, Love, and clear-rating actions in track rows and Now Playing.
+- [x] **P1 PLAY-006** Add seek hover tooltip, chapter markers, bookmark markers, and optional waveform. The optional waveform remains deferred with `VIS-002`.
+- [x] **P1 PLAY-007** Add queue insertion markers, multi-select, remove selected, move to top/bottom, and keyboard reordering.
+- [x] **P1 PLAY-008** Add queue history/previously played and a clear distinction between current, next, and later items.
+- [x] **P1 PLAY-009** Confirm shuffle order is stable, avoids immediate repeats, survives edits, and restores across sessions.
+- [x] **P1 PLAY-010** Add user-visible undo/redo notifications and redo access for queue changes.
+- [x] **P1 PLAY-011** Add playback-error rows/toasts that explain unsupported/corrupt/offline files and provide Locate/Remove/Skip.
+- [ ] **P2 PLAY-012** Add an optional compact mini-player and fullscreen Now Playing mode. Borderless, reduced-motion-aware fullscreen is complete; compact mini-player remains.
 
 ### Lyrics
 
@@ -269,9 +271,9 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 
 ### Optional visual playback features
 
-- [ ] **P2 VIS-001** Add a low-overhead FFT spectrum visualizer that can be fully disabled.
+- [x] **P2 VIS-001** Add a low-overhead FFT spectrum visualizer that can be fully disabled.
 - [ ] **P2 VIS-002** Add a cached waveform seek bar generated in the background.
-- [ ] **P2 VIS-003** Verify visualizers do not alter the direct audio path or cause callback underruns.
+- [ ] **P2 VIS-003** Verify visualizers do not alter the direct audio path or cause callback underruns. Byte-for-byte pass-through coverage is complete; extended underrun qualification remains.
 
 ---
 

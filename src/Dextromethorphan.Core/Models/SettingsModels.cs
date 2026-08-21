@@ -2,15 +2,18 @@ namespace Dextromethorphan.Core.Models;
 
 public sealed class AppSettings
 {
-    public const int CurrentSchemaVersion = 7;
+    public const int CurrentSchemaVersion = 8;
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public string Theme { get; set; } = "Dark";
     public string AccentColor { get; set; } = "#FF8A3D";
     public string FontFamily { get; set; } = "Segoe UI Variable Text";
     public double FontSize { get; set; } = 14;
     public bool AnimationsEnabled { get; set; } = true;
+    public bool VisualizerEnabled { get; set; }
     public bool ResumeOnStartup { get; set; } = true;
+    public bool ResumeTrackBookmarks { get; set; } = true;
     public bool StopAfterCurrent { get; set; }
+    public bool StopAfterQueue { get; set; }
     public ReplayGainMode ReplayGainMode { get; set; } = ReplayGainMode.Track;
     public double ReplayGainPreampDb { get; set; }
     public bool PreventClipping { get; set; } = true;
@@ -21,8 +24,17 @@ public sealed class AppSettings
     public double PlaybackSpeed { get; set; } = 1;
     public double PitchSemitones { get; set; }
     public bool PreservePitch { get; set; } = true;
+    public Dictionary<string, TrackPlaybackOverrideSettings> TrackPlaybackOverrides { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public double Volume { get; set; } = 0.82;
     public int AlbumTileSize { get; set; } = 172;
+    public Dictionary<string, ViewSettings> ViewSettings { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>
+    /// Modules shown in the focused Now Playing/dashboard surface.  Keeping
+    /// this as a small ordered list makes the layout portable and lets the UI
+    /// add modules without another settings schema migration.
+    /// </summary>
+    public List<string> DashboardModules { get; set; } = ["Artwork", "Lyrics", "Queue"];
+    public List<string> SearchHistory { get; set; } = [];
     public int ArtworkCacheMegabytes { get; set; } = 512;
     public bool QueuePanelVisible { get; set; } = true;
     public List<string> LibraryFolders { get; set; } = [];
@@ -32,6 +44,12 @@ public sealed class AppSettings
     public int ScheduledLibraryScanIntervalMinutes { get; set; } = 60;
     public bool AllowScheduledScanOnBattery { get; set; }
     public bool AllowScheduledScanOnMeteredNetwork { get; set; }
+    public string MultiValueSeparators { get; set; } = ";/";
+    public bool MetadataLookupEnabled { get; set; }
+    public bool MusicBrainzLookupEnabled { get; set; }
+    public bool DiscogsLookupEnabled { get; set; }
+    public string DiscogsUserToken { get; set; } = "";
+    public int MetadataCacheDays { get; set; } = 30;
     public LyricsDisplayMode LyricsDisplayMode { get; set; } = LyricsDisplayMode.Automatic;
     public double LyricsFontSize { get; set; } = 24;
     public LyricsTextAlignment LyricsAlignment { get; set; } = LyricsTextAlignment.Left;
@@ -84,6 +102,25 @@ public sealed class AppSettings
     ];
 }
 
+public enum LibraryDensity
+{
+    Comfortable,
+    Compact,
+    Grid
+}
+
+public sealed class ViewSettings
+{
+    public string SortBy { get; set; } = "Title";
+    public bool SortDescending { get; set; }
+    public LibraryDensity Density { get; set; } = LibraryDensity.Comfortable;
+    public int CoverSize { get; set; } = 172;
+    public string QuickFilter { get; set; } = "";
+    public List<string> VisibleColumns { get; set; } = ["Track", "Title", "Artist", "Album", "Quality", "Rating", "Duration"];
+    public List<string> ColumnOrder { get; set; } = ["Track", "Title", "Artist", "Album", "Quality", "Rating", "Duration"];
+    public Dictionary<string, double> ColumnWidths { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
 public sealed class LibrarySourceSettings
 {
     public string Path { get; set; } = string.Empty;
@@ -119,6 +156,8 @@ public enum LyricsTextAlignment
 public sealed class PlaybackSessionSettings
 {
     public List<string> QueuePaths { get; set; } = [];
+    public List<string> QueueHistoryPaths { get; set; } = [];
+    public List<string> ShuffleUpcomingPaths { get; set; } = [];
     public int CurrentIndex { get; set; }
     public double PositionSeconds { get; set; }
     public bool WasPlaying { get; set; }

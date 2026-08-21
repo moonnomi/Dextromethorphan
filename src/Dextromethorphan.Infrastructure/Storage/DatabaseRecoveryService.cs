@@ -158,23 +158,46 @@ public sealed class DatabaseRecoveryService(
                 LEFT JOIN bookmarks b ON b.track_id=t.id
                 """;
             var result = new List<RecoverableTrackState>();
-            await using var reader =
-                await command.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
-                result.Add(new RecoverableTrackState
+            await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+            {
+                while (await reader.ReadAsync(cancellationToken))
+                    result.Add(new RecoverableTrackState
+                    {
+                        Path = reader.GetString(0),
+                        Rating = reader.GetInt32(1),
+                        IsLoved = reader.GetInt32(2) != 0,
+                        PlayCount = reader.GetInt64(3),
+                        LastPlayedAt = reader.IsDBNull(4)
+                            ? null
+                            : DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(4)),
+                        BookmarkMilliseconds = reader.IsDBNull(5) ? null : reader.GetInt64(5)
+                    });
+            }
+            try
+            {
+                var byPath = result.ToDictionary(item => item.Path, StringComparer.OrdinalIgnoreCase);
+                await using var named = connection.CreateCommand();
+                named.CommandText = """
+                    SELECT t.path,b.name,b.position_ms,b.created_at,b.updated_at
+                    FROM track_bookmarks b
+                    JOIN tracks t ON t.id=b.track_id
+                    ORDER BY t.path,b.position_ms,b.id
+                    """;
+                await using var namedReader = await named.ExecuteReaderAsync(cancellationToken);
+                while (await namedReader.ReadAsync(cancellationToken))
                 {
-                    Path = reader.GetString(0),
-                    Rating = reader.GetInt32(1),
-                    IsLoved = reader.GetInt32(2) != 0,
-                    PlayCount = reader.GetInt64(3),
-                    LastPlayedAt = reader.IsDBNull(4)
-                        ? null
-                        : DateTimeOffset.FromUnixTimeMilliseconds(
-                            reader.GetInt64(4)),
-                    BookmarkMilliseconds = reader.IsDBNull(5)
-                        ? null
-                        : reader.GetInt64(5)
-                });
+                    var path = namedReader.GetString(0);
+                    if (!byPath.TryGetValue(path, out var track)) continue;
+                    track.NamedBookmarks.Add(new RecoverableNamedBookmarkState
+                    {
+                        Name = namedReader.GetString(1),
+                        PositionMilliseconds = namedReader.GetInt64(2),
+                        CreatedAtMilliseconds = namedReader.GetInt64(3),
+                        UpdatedAtMilliseconds = namedReader.GetInt64(4)
+                    });
+                }
+            }
+            catch (SqliteException) { }
             return result;
         }
         catch (SqliteException)
@@ -270,27 +293,39 @@ public sealed class DatabaseRecoveryService(
             if (await update.ExecuteNonQueryAsync(cancellationToken) == 0)
                 continue;
             restoredTracks++;
-            if (track.BookmarkMilliseconds is null) continue;
-            await using var bookmark = connection.CreateCommand();
-            bookmark.Transaction = transaction;
-            bookmark.CommandText = """
-                INSERT INTO bookmarks(track_id,position_ms,updated_at)
-                SELECT id,$position,$now FROM tracks
-                WHERE path=$path COLLATE NOCASE
-                ON CONFLICT(track_id) DO UPDATE SET
-                  position_ms=excluded.position_ms,
-                  updated_at=excluded.updated_at
-                """;
-            bookmark.Parameters.AddWithValue(
-                "$path",
-                CanonicalPath.Normalize(track.Path));
-            bookmark.Parameters.AddWithValue(
-                "$position",
-                track.BookmarkMilliseconds.Value);
-            bookmark.Parameters.AddWithValue(
-                "$now",
-                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-            await bookmark.ExecuteNonQueryAsync(cancellationToken);
+            if (track.BookmarkMilliseconds is not null)
+            {
+                await using var bookmark = connection.CreateCommand();
+                bookmark.Transaction = transaction;
+                bookmark.CommandText = """
+                    INSERT INTO bookmarks(track_id,position_ms,updated_at)
+                    SELECT id,$position,$now FROM tracks
+                    WHERE path=$path COLLATE NOCASE
+                    ON CONFLICT(track_id) DO UPDATE SET
+                      position_ms=excluded.position_ms,
+                      updated_at=excluded.updated_at
+                    """;
+                bookmark.Parameters.AddWithValue("$path", CanonicalPath.Normalize(track.Path));
+                bookmark.Parameters.AddWithValue("$position", track.BookmarkMilliseconds.Value);
+                bookmark.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+                await bookmark.ExecuteNonQueryAsync(cancellationToken);
+            }
+            foreach (var namedBookmark in track.NamedBookmarks)
+            {
+                await using var bookmark = connection.CreateCommand();
+                bookmark.Transaction = transaction;
+                bookmark.CommandText = """
+                    INSERT INTO track_bookmarks(track_id,name,position_ms,created_at,updated_at)
+                    SELECT id,$name,$position,$created,$updated FROM tracks
+                    WHERE path=$path COLLATE NOCASE
+                    """;
+                bookmark.Parameters.AddWithValue("$path", CanonicalPath.Normalize(track.Path));
+                bookmark.Parameters.AddWithValue("$name", namedBookmark.Name);
+                bookmark.Parameters.AddWithValue("$position", namedBookmark.PositionMilliseconds);
+                bookmark.Parameters.AddWithValue("$created", namedBookmark.CreatedAtMilliseconds);
+                bookmark.Parameters.AddWithValue("$updated", namedBookmark.UpdatedAtMilliseconds);
+                await bookmark.ExecuteNonQueryAsync(cancellationToken);
+            }
         }
 
         var restoredPlaylists = 0;
@@ -414,6 +449,15 @@ public sealed record RecoverableTrackState
     public long PlayCount { get; init; }
     public DateTimeOffset? LastPlayedAt { get; init; }
     public long? BookmarkMilliseconds { get; init; }
+    public List<RecoverableNamedBookmarkState> NamedBookmarks { get; init; } = [];
+}
+
+public sealed record RecoverableNamedBookmarkState
+{
+    public required string Name { get; init; }
+    public long PositionMilliseconds { get; init; }
+    public long CreatedAtMilliseconds { get; init; }
+    public long UpdatedAtMilliseconds { get; init; }
 }
 
 public sealed record RecoverablePlaylistState

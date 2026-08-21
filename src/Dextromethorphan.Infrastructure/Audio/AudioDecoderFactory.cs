@@ -18,7 +18,7 @@ internal static class AudioDecoderFactory
             ".wav" or ".wave" => new WaveFileReader(path),
             ".aif" or ".aiff" => new AiffFileReader(path),
             ".mp3" => new Mp3FileReader(path),
-            ".flac" => new FlacReader(path),
+            ".flac" => OpenFlac(path),
             ".ogg" => new VorbisWaveReader(path),
             ".opus" => new OpusWaveStream(path),
             ".dsf" => new DsfDopWaveStream(path),
@@ -58,6 +58,80 @@ internal static class AudioDecoderFactory
             decoder,
             waveSubFormat);
     }
+
+    private static WaveStream OpenFlac(string path)
+    {
+        var file = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete,
+            bufferSize: 64 * 1024,
+            options: FileOptions.SequentialScan);
+        Stream? logical = null;
+        try
+        {
+            var offset = FindFlacOffset(file);
+            logical = offset == 0
+                ? file
+                : new OffsetReadStream(file, offset, file.Length - offset);
+            var reader = new FlacReader(logical);
+            // FlacReader owns the stream after construction. Do not dispose it
+            // here; OffsetReadStream will close the underlying file with it.
+            return reader;
+        }
+        catch
+        {
+            logical?.Dispose();
+            if (!ReferenceEquals(logical, file)) file.Dispose();
+            throw;
+        }
+    }
+
+    private static long FindFlacOffset(Stream stream)
+    {
+        stream.Position = 0;
+        Span<byte> marker = stackalloc byte[4];
+        if (stream.Read(marker) == marker.Length && IsFlacMarker(marker))
+        {
+            stream.Position = 0;
+            return 0;
+        }
+
+        stream.Position = 0;
+        Span<byte> id3 = stackalloc byte[10];
+        if (stream.Read(id3) == id3.Length
+            && id3[0] == (byte)'I'
+            && id3[1] == (byte)'D'
+            && id3[2] == (byte)'3')
+        {
+            var tagSize = ReadSyncSafeInt(id3[6..10]);
+            var footerSize = (id3[5] & 0x10) != 0 ? 10 : 0;
+            var offset = 10L + tagSize + footerSize;
+            if (offset <= stream.Length - marker.Length)
+            {
+                stream.Position = offset;
+                if (stream.Read(marker) == marker.Length && IsFlacMarker(marker))
+                    return offset;
+            }
+        }
+
+        throw new InvalidDataException(
+            "The file has a .flac extension but no FLAC stream marker was found.");
+    }
+
+    private static int ReadSyncSafeInt(ReadOnlySpan<byte> value) =>
+        (value[0] << 21)
+        | (value[1] << 14)
+        | (value[2] << 7)
+        | value[3];
+
+    private static bool IsFlacMarker(ReadOnlySpan<byte> value) =>
+        value.Length >= 4
+        && value[0] == (byte)'f'
+        && value[1] == (byte)'L'
+        && value[2] == (byte)'a'
+        && value[3] == (byte)'C';
 
     public static ISampleProvider Normalize(DecodedAudio decoded, WaveFormat target)
     {
@@ -133,6 +207,77 @@ internal static class AudioDecoderFactory
         {
         }
         return null;
+    }
+}
+
+/// <summary>
+/// Presents a seekable segment of a file as a zero-based stream. This keeps
+/// leading ID3 metadata out of NAudio.Flac without touching the user's file.
+/// </summary>
+internal sealed class OffsetReadStream(
+    Stream inner,
+    long origin,
+    long length) : Stream
+{
+    private long _position;
+
+    public override bool CanRead => inner.CanRead;
+    public override bool CanSeek => inner.CanSeek;
+    public override bool CanWrite => false;
+    public override long Length => length;
+    public override long Position
+    {
+        get => _position;
+        set => Seek(value, SeekOrigin.Begin);
+    }
+
+    public override int Read(byte[] buffer, int offset, int count)
+    {
+        ArgumentNullException.ThrowIfNull(buffer);
+        ArgumentOutOfRangeException.ThrowIfNegative(offset);
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        if (offset > buffer.Length - count)
+            throw new ArgumentException("The buffer range is invalid.", nameof(offset));
+        if (_position >= length || count == 0) return 0;
+        inner.Position = origin + _position;
+        var requested = (int)Math.Min(count, length - _position);
+        var read = inner.Read(buffer, offset, requested);
+        _position += read;
+        return read;
+    }
+
+    public override int Read(Span<byte> buffer)
+    {
+        if (_position >= length || buffer.Length == 0) return 0;
+        inner.Position = origin + _position;
+        var requested = buffer[..(int)Math.Min(buffer.Length, length - _position)];
+        var read = inner.Read(requested);
+        _position += read;
+        return read;
+    }
+
+    public override long Seek(long offset, SeekOrigin originKind)
+    {
+        var target = originKind switch
+        {
+            SeekOrigin.Begin => offset,
+            SeekOrigin.Current => _position + offset,
+            SeekOrigin.End => length + offset,
+            _ => throw new ArgumentOutOfRangeException(nameof(originKind))
+        };
+        if (target < 0) throw new IOException("Cannot seek before the start of the FLAC stream.");
+        _position = target;
+        return _position;
+    }
+
+    public override void Flush() => inner.Flush();
+    public override void SetLength(long value) => throw new NotSupportedException();
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) inner.Dispose();
+        base.Dispose(disposing);
     }
 }
 

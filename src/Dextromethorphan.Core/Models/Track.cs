@@ -10,10 +10,21 @@ public sealed record Track
     public TimeSpan? SegmentEnd { get; init; }
     public required string Title { get; init; }
     public string Artist { get; init; } = "Unknown artist";
+    /// <summary>Optional sort key supplied by the file's artist-sort tag.</summary>
+    public string ArtistSort { get; init; } = "";
     public string AlbumArtist { get; init; } = "";
+    /// <summary>Optional sort key supplied by the file's album-artist-sort tag.</summary>
+    public string AlbumArtistSort { get; init; } = "";
     public string Album { get; init; } = "Unknown album";
+    /// <summary>Optional sort key supplied by the file's album-sort tag.</summary>
+    public string AlbumSort { get; init; } = "";
     public string Genre { get; init; } = "";
     public string Comment { get; init; } = "";
+    public string Grouping { get; init; } = "";
+    public string Composer { get; init; } = "";
+    public string Conductor { get; init; } = "";
+    public string ReleaseType { get; init; } = "";
+    public bool IsCompilation { get; init; }
     public int Year { get; init; }
     public int TrackNumber { get; init; }
     public int DiscNumber { get; init; }
@@ -47,5 +58,15 @@ public sealed record Track
     public string DisplayArtist => string.IsNullOrWhiteSpace(Artist) ? "Unknown artist" : Artist;
     public string DisplayAlbum => string.IsNullOrWhiteSpace(Album) ? "Unknown album" : Album;
     public string DurationText => Duration.ToString(Duration.TotalHours >= 1 ? @"h\:mm\:ss" : @"m\:ss");
-    public string QualityText => SampleRate > 0 ? $"{Codec.ToUpperInvariant()} · {SampleRate / 1000d:0.#} kHz · {BitsPerSample}-bit" : Codec.ToUpperInvariant();
+    public string DiscTrackText => DiscNumber > 1 ? $"{DiscNumber}-{TrackNumber}" : TrackNumber > 0 ? TrackNumber.ToString() : "—";
+    public string ReplayGainText => ReplayGainAlbumDb is { } album ? $"Album {album:+0.0;-0.0;0.0} dB" : ReplayGainTrackDb is { } track ? $"Track {track:+0.0;-0.0;0.0} dB" : "";
+    public string QualityText
+    {
+        get
+        {
+            if (SampleRate <= 0) return Codec.ToUpperInvariant();
+            var quality = $"{Codec.ToUpperInvariant()} · {SampleRate / 1000d:0.#} kHz";
+            return BitsPerSample > 0 ? $"{quality} · {BitsPerSample}-bit" : quality;
+        }
+    }
 }

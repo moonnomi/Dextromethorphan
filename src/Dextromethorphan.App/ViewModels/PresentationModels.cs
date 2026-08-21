@@ -26,16 +26,50 @@ public sealed record GalleryRowViewModel(
     int StartIndex,
     IReadOnlyList<LibraryCardViewModel> Cards);
 
-public sealed class QueueEntryViewModel(QueueEntry entry, string? artworkPath) : ObservableObject
+public sealed class QueueEntryViewModel : ObservableObject
 {
-    private string? _artworkPath = artworkPath;
-    public QueueEntry Entry { get; } = entry;
+    private string? _artworkPath;
+
+    public QueueEntryViewModel(
+        QueueEntry entry,
+        string? artworkPath,
+        int index = 0,
+        int currentIndex = -1,
+        string? playbackError = null)
+    {
+        Entry = entry;
+        _artworkPath = artworkPath;
+        Index = index;
+        IsNext = currentIndex >= 0 && index == currentIndex + 1;
+        PlaybackError = playbackError;
+    }
+
+    public QueueEntry Entry { get; }
     public Track Track => Entry.Track;
     public bool IsPlaying => Entry.IsPlaying;
+    public int Index { get; }
+    public bool IsNext { get; }
+    public bool HasPlaybackError => !string.IsNullOrWhiteSpace(PlaybackError);
+    public string? PlaybackError { get; }
+    public string QueuePosition => IsPlaying
+        ? "CURRENT"
+        : IsNext
+            ? "NEXT"
+            : "LATER";
+    public string SecondaryText => HasPlaybackError
+        ? PlaybackError!
+        : Track.DisplayArtist;
     public string AutomationName =>
         $"{Track.Title} by {Track.DisplayArtist}, {Track.DurationText}";
     public string? ArtworkPath { get => _artworkPath; set => Set(ref _artworkPath, value); }
     public override string ToString() => AutomationName;
+}
+
+public sealed record QueueHistoryEntryViewModel(
+    Track Track,
+    DateTimeOffset PlayedAt)
+{
+    public string PlayedAtText => PlayedAt.ToLocalTime().ToString("t");
 }
 
 public sealed class LyricLineViewModel(LyricLine line, bool isSynced = true) : ObservableObject

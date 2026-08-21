@@ -49,6 +49,25 @@ public sealed class GalleryRowLayoutTests
         Assert.All(rows, row => Assert.Single(row.Cards));
     }
 
+    [Fact]
+    public void EquivalentRepackRecognizesTheSameCardReferences()
+    {
+        var cards = Enumerable.Range(0, 24).Select(Card).ToArray();
+
+        var first = GalleryRowLayout.Pack(cards, 7);
+        var second = GalleryRowLayout.Pack(cards, 7);
+
+        Assert.True(GalleryRowLayout.IsEquivalent(first, second));
+        Assert.False(GalleryRowLayout.IsEquivalent(
+            first,
+            GalleryRowLayout.Pack(cards, 6)));
+        var replacements = cards.ToArray();
+        replacements[3] = Card(3);
+        Assert.False(GalleryRowLayout.IsEquivalent(
+            first,
+            GalleryRowLayout.Pack(replacements, 7)));
+    }
+
     private static LibraryCardViewModel Card(int index) => new()
     {
         Kind = "Album",

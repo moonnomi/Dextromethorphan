@@ -157,6 +157,30 @@ public sealed class LibraryPlaylistTests : IDisposable
         Assert.Equal("ordered", (await repository.GetAsync(importedId, cancellationToken))!.Name);
     }
 
+    [Fact]
+    public async Task PlaylistDetailsDuplicateMoveAndBackupPreserveOrder()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var library = new SqliteLibraryRepository(new AppPaths(_root));
+        await library.InitializeAsync(cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        await library.UpsertBatchAsync([Track("one.flac", "One", "Artist", "Jazz", now), Track("two.flac", "Two", "Artist", "Jazz", now), Track("three.flac", "Three", "Artist", "Jazz", now)], cancellationToken);
+        var all = await library.GetAllAsync(cancellationToken);
+        var repository = new SqlitePlaylistRepository(library);
+        var id = await repository.CreateManualAsync("Ordered", cancellationToken);
+        await repository.UpdateDetailsAsync(id, "Morning set", null, cancellationToken);
+        await repository.ReplaceTracksAsync(id, all.Select(track => track.Id).ToArray(), cancellationToken);
+        await repository.MoveTracksAsync(id, [all[2].Id], 0, cancellationToken);
+        Assert.Equal([all[2].Title, all[0].Title, all[1].Title], (await repository.GetTracksAsync(id, cancellationToken)).Select(track => track.Title));
+        var duplicate = await repository.DuplicateAsync(id, "Ordered copy", cancellationToken);
+        var copy = await repository.GetAsync(duplicate, cancellationToken);
+        Assert.Equal("Morning set", copy?.Description);
+        Assert.Equal([all[2].Title, all[0].Title, all[1].Title], (await repository.GetTracksAsync(duplicate, cancellationToken)).Select(track => track.Title));
+        var backup = new PlaylistBackupService(repository, new AppPaths(_root));
+        await backup.BackupAsync(cancellationToken);
+        Assert.True(File.Exists(Path.Combine(_root, "backups", "playlists.json")));
+    }
+
     [Theory]
     [InlineData(PlaylistFormat.M3U8, "mix.m3u8")]
     [InlineData(PlaylistFormat.PLS, "mix.pls")]
@@ -177,6 +201,27 @@ public sealed class LibraryPlaylistTests : IDisposable
 
         Assert.Equal(tracks.Select(x => Path.GetFullPath(x.Path)), imported.Locations.Select(Path.GetFullPath));
         Assert.Equal(format == PlaylistFormat.XSPF ? "Road Trip" : "mix", imported.Name);
+    }
+
+    [Fact]
+    public async Task NamedBookmarksSupportCreateRenameSeekOrderAndDelete()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var library = new SqliteLibraryRepository(new AppPaths(_root));
+        await library.InitializeAsync(cancellationToken);
+        await library.UpsertAsync(Track("book.flac", "Long Track", "Narrator", "Spoken", DateTimeOffset.UtcNow), cancellationToken);
+        var track = Assert.Single(await library.GetAllAsync(cancellationToken));
+
+        var later = await library.CreateBookmarkAsync(track.Id, "Later", TimeSpan.FromMinutes(8), cancellationToken);
+        var earlier = await library.CreateBookmarkAsync(track.Id, "Intro", TimeSpan.FromSeconds(42), cancellationToken);
+        Assert.Equal(new[] { "Intro", "Later" }, (await library.GetBookmarksAsync(track.Id, cancellationToken)).Select(item => item.Name));
+
+        await library.RenameBookmarkAsync(earlier.Id, "Opening", cancellationToken);
+        Assert.Equal("Opening", (await library.GetBookmarksAsync(track.Id, cancellationToken))[0].Name);
+
+        await library.DeleteBookmarkAsync(later.Id, cancellationToken);
+        var remaining = Assert.Single(await library.GetBookmarksAsync(track.Id, cancellationToken));
+        Assert.Equal(TimeSpan.FromSeconds(42), remaining.Position);
     }
 
     private Track Track(string fileName, string title, string artist, string genre, DateTimeOffset modifiedAt) => new()

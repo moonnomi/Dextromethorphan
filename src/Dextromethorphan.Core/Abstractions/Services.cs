@@ -57,6 +57,10 @@ public interface ILibraryRepository
     Task RecordPlayAsync(long trackId, CancellationToken cancellationToken = default);
     Task SaveBookmarkAsync(long trackId, TimeSpan position, CancellationToken cancellationToken = default);
     Task<TimeSpan?> GetBookmarkAsync(long trackId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<PlaybackBookmark>> GetBookmarksAsync(long trackId, CancellationToken cancellationToken = default);
+    Task<PlaybackBookmark> CreateBookmarkAsync(long trackId, string name, TimeSpan position, CancellationToken cancellationToken = default);
+    Task RenameBookmarkAsync(long bookmarkId, string name, CancellationToken cancellationToken = default);
+    Task DeleteBookmarkAsync(long bookmarkId, CancellationToken cancellationToken = default);
 }
 
 public interface IPlaylistRepository
@@ -66,11 +70,14 @@ public interface IPlaylistRepository
     Task<Playlist?> GetAsync(long playlistId, CancellationToken cancellationToken = default);
     Task<long> CreateManualAsync(string name, CancellationToken cancellationToken = default);
     Task<long> CreateSmartAsync(string name, SmartPlaylistDefinition rules, CancellationToken cancellationToken = default);
+    Task<long> DuplicateAsync(long playlistId, string? name = null, CancellationToken cancellationToken = default);
     Task UpdateSmartRulesAsync(long playlistId, SmartPlaylistDefinition rules, CancellationToken cancellationToken = default);
     Task RenameAsync(long playlistId, string name, CancellationToken cancellationToken = default);
+    Task UpdateDetailsAsync(long playlistId, string description, string? coverPath, CancellationToken cancellationToken = default);
     Task DeleteAsync(long playlistId, CancellationToken cancellationToken = default);
     Task ReplaceTracksAsync(long playlistId, IReadOnlyList<long> trackIds, CancellationToken cancellationToken = default);
     Task AddTracksAsync(long playlistId, IReadOnlyList<long> trackIds, CancellationToken cancellationToken = default);
+    Task MoveTracksAsync(long playlistId, IReadOnlyList<long> trackIds, int destinationIndex, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Track>> GetTracksAsync(long playlistId, CancellationToken cancellationToken = default);
 }
 
@@ -82,13 +89,35 @@ public interface IPlaylistInterchangeService
 
 public interface IPlaylistFileService
 {
+    PlaylistImportReport? LastImportReport { get; }
     Task<long> ImportAsync(string path, CancellationToken cancellationToken = default);
     Task ExportAsync(long playlistId, string path, PlaylistFormat format, CancellationToken cancellationToken = default);
+}
+
+public interface IPlaylistBackupService
+{
+    Task BackupAsync(CancellationToken cancellationToken = default);
 }
 
 public interface ITrackMetadataReader
 {
     Task<Track> ReadAsync(string path, CancellationToken cancellationToken = default);
+}
+
+public interface IMetadataEditService
+{
+    Task<MetadataEditResult> ApplyAsync(
+        Track track,
+        MetadataEditPatch patch,
+        MetadataWriteMode mode,
+        CancellationToken cancellationToken = default);
+    Task RestoreAsync(MetadataEditResult result, CancellationToken cancellationToken = default);
+}
+
+public interface IMetadataMatchService
+{
+    Task<IReadOnlyList<MetadataMatch>> SearchAsync(Track track, MetadataMatchProvider provider, CancellationToken cancellationToken = default);
+    Task<ArtistProfile?> GetArtistProfileAsync(string artist, MetadataMatchProvider provider, CancellationToken cancellationToken = default);
 }
 
 public interface IArtworkCache
@@ -146,6 +175,9 @@ public interface IAudioEngine : IAsyncDisposable
     Task SetVolumeAsync(double volume, CancellationToken cancellationToken = default);
     Task SetPlaybackOptionsAsync(AudioPlaybackOptions options, CancellationToken cancellationToken = default);
     Task ConfigureOutputAsync(AudioOutputProfile profile, CancellationToken cancellationToken = default);
+    void SetVisualizationEnabled(bool enabled) { }
+    AudioVisualizationSnapshot GetVisualizationSnapshot(int bandCount = 40) =>
+        AudioVisualizationSnapshot.Empty(bandCount);
 }
 
 public interface IPlaybackQueue
@@ -154,16 +186,23 @@ public interface IPlaybackQueue
     int CurrentIndex { get; }
     RepeatMode RepeatMode { get; set; }
     bool Shuffle { get; set; }
+    IReadOnlyList<string> ShuffleUpcomingPaths { get; }
     event EventHandler? Changed;
     void Replace(IEnumerable<Track> tracks, int startIndex = 0);
     void Add(IEnumerable<Track> tracks);
     void PlayNext(IEnumerable<Track> tracks);
     void Move(int fromIndex, int toIndex);
+    void MoveMany(IReadOnlyCollection<Guid> ids, int toIndex);
     bool Remove(Guid id);
+    int RemoveMany(IReadOnlyCollection<Guid> ids);
+    void MoveToTop(IReadOnlyCollection<Guid> ids);
+    void MoveToBottom(IReadOnlyCollection<Guid> ids);
+    void ReplaceTrack(string path, Track replacement);
     Track? Current { get; }
     Track? Select(Guid id);
     Track? Advance();
     Track? Previous();
+    void RestoreShuffleUpcoming(IEnumerable<string> paths);
     bool Undo();
     bool Redo();
 }

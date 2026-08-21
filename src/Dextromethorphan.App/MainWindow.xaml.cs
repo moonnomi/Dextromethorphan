@@ -13,6 +13,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using System.Windows.Shell;
 using Dextromethorphan.App.Performance;
 using Dextromethorphan.App.Lyrics;
 using Dextromethorphan.App.Diagnostics;
@@ -35,6 +36,8 @@ public partial class MainWindow : Window
     private Point _queueDragStart;
     private QueueEntryViewModel? _queuePointerEntry;
     private bool _queueDragStarted;
+    private ListBoxItem? _queueInsertionTarget;
+    private Point _groupCardDragStart;
     private DateTime _startupStartedAt;
     private DateTimeOffset? _firstGalleryArtworkRenderedAt;
     private readonly IShortcutService _shortcuts;
@@ -42,6 +45,7 @@ public partial class MainWindow : Window
     private readonly DeveloperDiagnostics _diagnostics;
     private readonly ArtworkImageService _artworkImages;
     private readonly ArtworkPropertyUpdateBatcher _artworkUpdates;
+    private readonly IMetadataMatchService _metadataMatcher;
     private readonly NavigationViewStateStore _viewStates = new();
     private readonly Dictionary<RadioButton, int> _topTabAnimationVersions = [];
     private bool _scrollRestorePending;
@@ -55,6 +59,11 @@ public partial class MainWindow : Window
     private DateTimeOffset _lastIdleCleanup = DateTimeOffset.MinValue;
     private bool _idleCleanupRunning;
     private EventHandler? _pendingGalleryScrollReapplication;
+    private bool _isFullScreen;
+    private bool _fullScreenTransitionRunning;
+    private Rect _fullScreenRestoreBounds;
+    private WindowState _fullScreenRestoreState;
+    private ResizeMode _fullScreenRestoreResizeMode;
 
     public MainWindow(
         MainViewModel viewModel,
@@ -63,7 +72,8 @@ public partial class MainWindow : Window
         DeveloperDiagnostics diagnostics,
         ArtworkImageService artworkImages,
         ArtworkPropertyUpdateBatcher artworkUpdates,
-        PerformanceOverlayViewModel performanceOverlay)
+        PerformanceOverlayViewModel performanceOverlay,
+        IMetadataMatchService metadataMatcher)
     {
         InitializeComponent();
         ViewModel = viewModel;
@@ -72,13 +82,24 @@ public partial class MainWindow : Window
         _diagnostics = diagnostics;
         _artworkImages = artworkImages;
         _artworkUpdates = artworkUpdates;
+        _metadataMatcher = metadataMatcher;
         PerformanceOverlay = performanceOverlay;
         PerformanceOverlay.Attach(this);
         DataContext = viewModel;
+        QueueList.SelectionMode = SelectionMode.Extended;
+        QueueList.SelectionChanged += QueueList_SelectionChanged;
+        QueueList.MouseDoubleClick += QueueList_MouseDoubleClick;
+        QueueList.PreviewKeyDown += QueueList_PreviewKeyDown;
+        QueueList.DragLeave += QueueList_DragLeave;
+        QueueList.ItemContainerGenerator.StatusChanged += (_, _) => ApplyQueueEntryStates();
+        ViewModel.Queue.CollectionChanged += (_, _) => Dispatcher.BeginInvoke(ApplyQueueEntryStates, DispatcherPriority.Loaded);
         Loaded += ApplyAutomationNames;
         InstallChapterMarkers();
         ViewModel.PropertyChanged += ViewModelOnPropertyChanged;
         ViewModel.NavigationStarting += ViewModelOnNavigationStarting;
+        ViewModel.MetadataEditRequested += ViewModel_MetadataEditRequested;
+        ViewModel.PlaylistEditRequested += ViewModel_PlaylistEditRequested;
+        AddHandler(ContextMenuService.ContextMenuOpeningEvent, new ContextMenuEventHandler(ContextMenu_Opening));
         PreviewMouseMove += RecordUserInteraction;
         PreviewMouseWheel += RecordUserInteraction;
         PreviewTouchDown += RecordUserInteraction;
@@ -109,6 +130,169 @@ public partial class MainWindow : Window
                 continue;
             AutomationProperties.SetName(button, tooltip);
         }
+    }
+
+    private async void ViewModel_MetadataEditRequested(object? sender, EventArgs e)
+    {
+        var request = MetadataEditDialog.Show(this, ViewModel.SelectedTracks, _metadataMatcher);
+        if (request is null) return;
+        try { await ViewModel.ApplyMetadataAsync(ViewModel.SelectedTracks, request.Patch, request.Mode); }
+        catch (Exception exception) { ErrorDialog.Show(this, exception, "", true, "Metadata could not be updated"); }
+    }
+
+    private async void ViewModel_PlaylistEditRequested(object? sender, PlaylistEditContext context)
+    {
+        var result = PlaylistEditDialog.Show(this, context.Existing, context.InitialTracks, ViewModel.AllTracks);
+        if (result is null) return;
+        try { await ViewModel.SavePlaylistAsync(context.Existing, result.Value.Request, result.Value.InitialTracks); }
+        catch (Exception exception) { ErrorDialog.Show(this, exception, "", true, "Playlist could not be saved"); }
+    }
+
+    private void SearchBox_ContextMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        var menu = SearchBox.ContextMenu ??= new ContextMenu();
+        menu.Items.Clear();
+        menu.DataContext = ViewModel;
+        menu.Items.Add(new MenuItem { Header = string.IsNullOrWhiteSpace(SearchBox.Text) ? "Recent searches" : "Search suggestions", IsEnabled = false });
+        foreach (var suggestion in ViewModel.SearchSuggestions)
+        {
+            var item = new MenuItem { Header = suggestion, Command = ViewModel.UseSearchHistoryCommand, CommandParameter = suggestion, ToolTip = "Use this search" };
+            menu.Items.Add(item);
+        }
+        if (ViewModel.SearchSuggestions.Count == 0)
+            menu.Items.Add(new MenuItem { Header = "No saved searches", IsEnabled = false });
+        menu.Items.Add(new Separator());
+        menu.Items.Add(new MenuItem { Header = "Clear search history", Command = ViewModel.ClearSearchHistoryCommand });
+    }
+
+    private void ContextMenu_Opening(object sender, ContextMenuEventArgs e)
+    {
+        if (e.OriginalSource is FrameworkElement source && source.ContextMenu is { } menu)
+        {
+            menu.DataContext = source.DataContext;
+            if (source.DataContext is QueueEntryViewModel entry
+                && !menu.Items.OfType<MenuItem>().Any(item => Equals(item.Tag, "locate-playback")))
+            {
+                var locate = new MenuItem { Header = "Locate replacement…", Tag = "locate-playback" };
+                locate.Click += async (_, _) => await LocateQueueTrackAsync(entry);
+                menu.Items.Insert(Math.Min(1, menu.Items.Count), locate);
+            }
+            if (menu.Items.OfType<MenuItem>().Any(item => Equals(item.Header, "Remove selected")))
+            {
+                foreach (var old in menu.Items.OfType<MenuItem>().Where(item => Equals(item.Tag, "queue-history")).ToArray())
+                    menu.Items.Remove(old);
+                var history = new MenuItem { Header = "Recently played", Tag = "queue-history", IsEnabled = ViewModel.QueueHistory.Count > 0 };
+                foreach (var played in ViewModel.QueueHistory.Take(20))
+                {
+                    var item = new MenuItem { Header = $"{played.PlayedAtText}  {played.Track.Title}" };
+                    item.Click += async (_, _) => await ViewModel.PlayHistoryTrackAsync(played.Track);
+                    history.Items.Add(item);
+                }
+                menu.Items.Insert(0, history);
+            }
+        }
+    }
+
+    private async Task LocateQueueTrackAsync(QueueEntryViewModel entry)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = $"Locate replacement for {entry.Track.Title}",
+            CheckFileExists = true,
+            Multiselect = false,
+            Filter = "Audio files|*.flac;*.mp3;*.m4a;*.mp4;*.alac;*.wav;*.wave;*.aif;*.aiff;*.dsf;*.dff;*.ogg;*.opus;*.aac;*.wma|All files|*.*"
+        };
+        var directory = Path.GetDirectoryName(entry.Track.Path);
+        if (!string.IsNullOrWhiteSpace(directory) && Directory.Exists(directory)) dialog.InitialDirectory = directory;
+        if (dialog.ShowDialog(this) != true) return;
+        try { await ViewModel.RelinkPlaybackTrackAsync(entry, dialog.FileName); }
+        catch (Exception exception) { ErrorDialog.Show(this, exception, "", true, "Track could not be relinked"); }
+    }
+
+    private void ApplyQueueEntryStates()
+    {
+        if (QueueList.ItemContainerGenerator.Status != GeneratorStatus.ContainersGenerated) return;
+        foreach (var entry in ViewModel.Queue)
+        {
+            if (QueueList.ItemContainerGenerator.ContainerFromItem(entry) is not ListBoxItem container) continue;
+            container.ToolTip = entry.HasPlaybackError ? $"Playback error: {entry.PlaybackError}" : entry.AutomationName;
+            container.BorderBrush = entry.HasPlaybackError ? new SolidColorBrush(Color.FromRgb(232, 117, 117)) : Brushes.Transparent;
+            container.BorderThickness = entry.HasPlaybackError ? new Thickness(3, 0, 0, 0) : new Thickness(0);
+            var texts = FindVisualChildren<TextBlock>(container).ToArray();
+            var title = texts.FirstOrDefault(text => text.Text == entry.Track.Title);
+            if (title is not null) title.Text = $"{entry.QueuePosition}  {entry.Track.Title}";
+            var secondary = texts.FirstOrDefault(text => text.Text == entry.Track.Artist || text.Text == entry.Track.DisplayArtist);
+            if (secondary is not null)
+            {
+                secondary.Text = entry.SecondaryText;
+                if (entry.HasPlaybackError) secondary.Foreground = new SolidColorBrush(Color.FromRgb(232, 117, 117));
+            }
+        }
+    }
+
+    private void OpenContextMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement element || element.ContextMenu is not { } menu) return;
+        menu.PlacementTarget = element;
+        menu.DataContext = element.DataContext;
+        menu.IsOpen = true;
+        e.Handled = true;
+    }
+
+    private void OpenPlaybackMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (SeekSlider.ContextMenu is not { } menu) return;
+        menu.PlacementTarget = sender as UIElement ?? SeekSlider;
+        menu.IsOpen = true;
+        e.Handled = true;
+    }
+
+    private async void ImportPlaylist_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog { Title = "Import playlist", Filter = "Playlists|*.m3u;*.m3u8;*.pls;*.xspf|All files|*.*", CheckFileExists = true };
+        if (dialog.ShowDialog(this) != true) return;
+        try { await ViewModel.ImportPlaylistFileAsync(dialog.FileName); }
+        catch (Exception exception) { ErrorDialog.Show(this, exception, "", true, "Playlist import failed"); }
+    }
+
+    private void ImportPlaylistMenuItem_Click(object sender, RoutedEventArgs e) => ImportPlaylist_Click(sender, e);
+
+    private async void ExportPlaylist_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.SelectedCard?.PlaylistId is not { } playlistId) return;
+        var dialog = new SaveFileDialog { Title = "Export playlist", Filter = "M3U8 playlist|*.m3u8|PLS playlist|*.pls|XSPF playlist|*.xspf", AddExtension = true, FileName = ViewModel.SelectedCard.Title };
+        if (dialog.ShowDialog(this) != true) return;
+        var format = Path.GetExtension(dialog.FileName).ToLowerInvariant() switch { ".pls" => PlaylistFormat.PLS, ".xspf" => PlaylistFormat.XSPF, _ => PlaylistFormat.M3U8 };
+        try { await ViewModel.ExportPlaylistFileAsync(playlistId, dialog.FileName, format); }
+        catch (Exception exception) { ErrorDialog.Show(this, exception, "", true, "Playlist export failed"); }
+    }
+
+    private void ExportPlaylistMenuItem_Click(object sender, RoutedEventArgs e) => ExportPlaylist_Click(sender, e);
+
+    private void PerformanceOverlayMenuItem_Click(object sender, RoutedEventArgs e) => PerformanceOverlay.ToggleCommand.Execute(null);
+
+    private async void SidebarCard_Drop(object sender, DragEventArgs e)
+    {
+        if (sender is not FrameworkElement element || element.DataContext is not LibraryCardViewModel card || !e.Data.GetDataPresent("Dextromethorphan.TrackPaths")) return;
+        var paths = e.Data.GetData("Dextromethorphan.TrackPaths") as string[] ?? [];
+        try { await ViewModel.AddPathsToPlaylistAsync(card, paths); } catch (Exception exception) { ErrorDialog.Show(this, exception, "", true, "Tracks could not be added to playlist"); }
+        e.Handled = true;
+    }
+
+    private void GroupCard_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (sender is not FrameworkElement element || element.DataContext is not LibraryCardViewModel card)
+            return;
+        if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            _groupCardDragStart = e.GetPosition(element);
+            return;
+        }
+        var point = e.GetPosition(element);
+        if (Math.Abs(point.X - _groupCardDragStart.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(point.Y - _groupCardDragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+        var paths = ViewModel.GetCardPaths(card).ToArray();
+        if (paths.Length == 0) return;
+        DragDrop.DoDragDrop(element, new DataObject("Dextromethorphan.TrackPaths", paths), DragDropEffects.Copy);
     }
 
     private void FolderTreeView_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
@@ -177,33 +361,84 @@ public partial class MainWindow : Window
         markers.SetBinding(
             ChapterMarkerBar.DurationProperty,
             new Binding(nameof(MainViewModel.DurationSeconds)));
+        markers.SetBinding(
+            ChapterMarkerBar.BookmarksProperty,
+            new Binding(nameof(MainViewModel.Bookmarks)));
         Grid.SetColumn(markers, 1);
         Panel.SetZIndex(markers, 2);
         seekGrid.Children.Add(markers);
+        ViewModel.Bookmarks.CollectionChanged += (_, _) => markers.InvalidateVisual();
         var chapterMenu = new ContextMenu();
-        chapterMenu.Opened += (_, _) =>
-        {
-            chapterMenu.Items.Clear();
-            var chapters = ViewModel.CurrentTrack?.Chapters ?? [];
-            if (chapters.Count == 0)
-            {
-                chapterMenu.Items.Add(new MenuItem
-                {
-                    Header = "No chapters in this track",
-                    IsEnabled = false
-                });
-                return;
-            }
-            foreach (var chapter in chapters)
-                chapterMenu.Items.Add(new MenuItem
-                {
-                    Header = $"{chapter.StartText}  {chapter.Title}",
-                    Command = ViewModel.SeekChapterCommand,
-                    CommandParameter = chapter
-                });
-        };
+        chapterMenu.Opened += (_, _) => BuildPlaybackContextMenu(chapterMenu);
         SeekSlider.ContextMenu = chapterMenu;
         SeekSlider.ToolTip = "Seek · right-click to open chapters";
+    }
+
+    private void BuildPlaybackContextMenu(ContextMenu menu)
+    {
+        menu.Items.Clear();
+        menu.DataContext = ViewModel;
+        var addBookmark = new MenuItem { Header = $"Add bookmark at {ViewModel.PositionText}" };
+        addBookmark.Click += (_, _) =>
+        {
+            var name = TextPromptDialog.Show(this, "Add bookmark", "Bookmark name", $"Bookmark {ViewModel.PositionText}");
+            if (name is not null) ViewModel.AddBookmarkCommand.Execute(name);
+        };
+        menu.Items.Add(addBookmark);
+        var bookmarkMenu = new MenuItem { Header = "Bookmarks", IsEnabled = ViewModel.Bookmarks.Count > 0 };
+        foreach (var bookmark in ViewModel.Bookmarks)
+        {
+            var item = new MenuItem { Header = $"{bookmark.PositionText}  {bookmark.Name}" };
+            item.Items.Add(new MenuItem { Header = "Go to", Command = ViewModel.SeekBookmarkCommand, CommandParameter = bookmark });
+            var rename = new MenuItem { Header = "Rename" };
+            rename.Click += (_, _) =>
+            {
+                var name = TextPromptDialog.Show(this, "Rename bookmark", "Bookmark name", bookmark.Name);
+                if (name is not null) ViewModel.RenameBookmarkCommand.Execute(new BookmarkRenameRequest(bookmark, name));
+            };
+            item.Items.Add(rename);
+            item.Items.Add(new MenuItem { Header = "Remove", Command = ViewModel.DeleteBookmarkCommand, CommandParameter = bookmark });
+            bookmarkMenu.Items.Add(item);
+        }
+        menu.Items.Add(bookmarkMenu);
+        menu.Items.Add(new MenuItem { Header = "Resume tracks from last position", IsCheckable = true, IsChecked = ViewModel.ResumeTrackBookmarks, Command = ViewModel.ToggleBookmarkResumeCommand });
+        var historyMenu = new MenuItem { Header = "Recently played", IsEnabled = ViewModel.QueueHistory.Count > 0 };
+        foreach (var history in ViewModel.QueueHistory.Take(20))
+        {
+            var entry = ViewModel.Queue.FirstOrDefault(item => item.Track.Path.Equals(history.Track.Path, StringComparison.OrdinalIgnoreCase));
+            historyMenu.Items.Add(new MenuItem
+            {
+                Header = $"{history.PlayedAtText}  {history.Track.Title}",
+                Command = entry is null ? null : ViewModel.PlayQueueEntryCommand,
+                CommandParameter = entry,
+                IsEnabled = entry is not null
+            });
+        }
+        menu.Items.Add(historyMenu);
+        menu.Items.Add(new Separator());
+        var chaptersMenu = new MenuItem { Header = "Chapters" };
+        var chapters = ViewModel.CurrentTrack?.Chapters ?? [];
+        if (chapters.Count == 0)
+            chaptersMenu.Items.Add(new MenuItem { Header = "No chapters in this track", IsEnabled = false });
+        foreach (var chapter in chapters)
+            chaptersMenu.Items.Add(new MenuItem { Header = $"{chapter.StartText}  {chapter.Title}", Command = ViewModel.SeekChapterCommand, CommandParameter = chapter });
+        menu.Items.Add(chaptersMenu);
+        menu.Items.Add(new Separator());
+        var speed = new MenuItem { Header = $"Speed · {ViewModel.PlaybackSpeed:0.00}×" };
+        foreach (var value in new[] { 0.5, 0.75, 1.0, 1.25, 1.5 })
+            speed.Items.Add(new MenuItem { Header = $"{value:0.00}×", IsCheckable = true, IsChecked = Math.Abs(ViewModel.PlaybackSpeed - value) < 0.001, Command = ViewModel.SetPlaybackSpeedCommand, CommandParameter = value.ToString(System.Globalization.CultureInfo.InvariantCulture) });
+        menu.Items.Add(speed);
+        var pitch = new MenuItem { Header = $"Pitch · {ViewModel.PitchSemitones:+0.#;-0.#;0} st" };
+        foreach (var value in new[] { -2d, 0d, 2d })
+            pitch.Items.Add(new MenuItem { Header = $"{value:+0;-0;0} semitones", IsCheckable = true, IsChecked = Math.Abs(ViewModel.PitchSemitones - value) < 0.001, Command = ViewModel.SetPitchCommand, CommandParameter = value.ToString(System.Globalization.CultureInfo.InvariantCulture) });
+        menu.Items.Add(pitch);
+        menu.Items.Add(new MenuItem { Header = "Preserve pitch while changing speed", IsCheckable = true, IsChecked = ViewModel.PreservePitch, Command = ViewModel.TogglePreservePitchCommand });
+        menu.Items.Add(new MenuItem { Header = "Reset speed and pitch", Command = ViewModel.ResetPlaybackProcessingCommand });
+        menu.Items.Add(new MenuItem { Header = "Save settings for this track", Command = ViewModel.SaveTrackPlaybackOverrideCommand });
+        menu.Items.Add(new MenuItem { Header = "Remove track override", IsEnabled = ViewModel.CurrentTrackHasPlaybackOverride, Command = ViewModel.ClearTrackPlaybackOverrideCommand });
+        menu.Items.Add(new Separator());
+        menu.Items.Add(new MenuItem { Header = "Stop after current track", IsCheckable = true, IsChecked = ViewModel.StopAfterCurrent, Command = ViewModel.ToggleStopAfterCurrentCommand });
+        menu.Items.Add(new MenuItem { Header = "Stop after queue", IsCheckable = true, IsChecked = ViewModel.StopAfterQueue, Command = ViewModel.ToggleStopAfterQueueCommand });
     }
 
     public MainViewModel ViewModel { get; }
@@ -347,6 +582,13 @@ public partial class MainWindow : Window
 
     private void ViewModelOnPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        // The seek thumb is intentionally previewed locally while the user
+        // drags it. Once the drag has ended, force the OneWay binding to
+        // refresh from the authoritative audio snapshot. WPF can otherwise
+        // retain the locally assigned thumb value and make the progress bar
+        // appear frozen while PositionText continues to advance.
+        if (e.PropertyName == nameof(MainViewModel.PositionSeconds) && !_isSeekDragging)
+            SeekSlider.GetBindingExpression(RangeBase.ValueProperty)?.UpdateTarget();
         if (e.PropertyName == nameof(MainViewModel.AlbumTileSize))
             Dispatcher.BeginInvoke(UpdateGalleryColumns, DispatcherPriority.Render);
         if (e.PropertyName == nameof(MainViewModel.HasLyrics))
@@ -552,6 +794,7 @@ public partial class MainWindow : Window
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
+        WindowMaximizeHelper.Install(this);
         var handle = new WindowInteropHelper(this).Handle;
         _shortcuts.Attach(handle);
         _systemMedia.Attach(handle);
@@ -571,30 +814,99 @@ public partial class MainWindow : Window
         if (Math.Abs(position.X - _queueDragStart.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(position.Y - _queueDragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
         _queueDragStarted = true;
         var entry = _queuePointerEntry;
-        DragDrop.DoDragDrop(QueueList, new DataObject(typeof(QueueEntryViewModel), entry), DragDropEffects.Move);
+        var entries = QueueList.SelectedItems.OfType<QueueEntryViewModel>().ToArray();
+        if (!entries.Contains(entry)) entries = [entry];
+        var data = new DataObject();
+        data.SetData(typeof(QueueEntryViewModel), entry);
+        data.SetData("Dextromethorphan.QueueEntryIds", entries.Select(item => item.Entry.Id).ToArray());
+        DragDrop.DoDragDrop(QueueList, data, DragDropEffects.Move);
         _queuePointerEntry = null;
     }
 
     private void QueueList_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        var entry = _queuePointerEntry;
         _queuePointerEntry = null;
-        if (_queueDragStarted || entry is null) return;
+    }
+
+    private void QueueList_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        ViewModel.UpdateQueueSelection(QueueList.SelectedItems.OfType<QueueEntryViewModel>());
+
+    private void QueueList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (FindVisualParent<ListBoxItem>(e.OriginalSource as DependencyObject)?.DataContext is not QueueEntryViewModel entry) return;
         if (ViewModel.PlayQueueEntryCommand.CanExecute(entry)) ViewModel.PlayQueueEntryCommand.Execute(entry);
         e.Handled = true;
     }
 
+    private void QueueList_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.A)
+        {
+            QueueList.SelectAll();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Delete)
+        {
+            ViewModel.RemoveSelectedQueueCommand.Execute(null);
+            e.Handled = true;
+        }
+        else if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.Up)
+        {
+            ViewModel.MoveSelectedQueueBy(-1);
+            e.Handled = true;
+        }
+        else if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.Down)
+        {
+            ViewModel.MoveSelectedQueueBy(1);
+            e.Handled = true;
+        }
+        else if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.Z)
+        {
+            ViewModel.UndoQueueCommand.Execute(null);
+            e.Handled = true;
+        }
+        else if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.Y)
+        {
+            ViewModel.RedoQueueCommand.Execute(null);
+            e.Handled = true;
+        }
+    }
+
     private void QueueList_DragOver(object sender, DragEventArgs e)
     {
-        e.Effects = e.Data.GetDataPresent(typeof(QueueEntryViewModel)) ? DragDropEffects.Move : DragDropEffects.None;
+        e.Effects = e.Data.GetDataPresent(typeof(QueueEntryViewModel)) || e.Data.GetDataPresent("Dextromethorphan.TrackPaths") ? DragDropEffects.Move : DragDropEffects.None;
+        ClearQueueInsertionMarker();
+        var hit = QueueList.InputHitTest(e.GetPosition(QueueList)) as DependencyObject;
+        _queueInsertionTarget = FindVisualParent<ListBoxItem>(hit);
+        if (_queueInsertionTarget is not null) _queueInsertionTarget.BorderThickness = new Thickness(0, 2, 0, 0);
         e.Handled = true;
+    }
+
+    private void QueueList_DragLeave(object sender, DragEventArgs e) => ClearQueueInsertionMarker();
+
+    private void ClearQueueInsertionMarker()
+    {
+        if (_queueInsertionTarget is null) return;
+        _queueInsertionTarget.BorderThickness = new Thickness(0);
+        _queueInsertionTarget = null;
     }
 
     private void QueueList_Drop(object sender, DragEventArgs e)
     {
-        if (e.Data.GetData(typeof(QueueEntryViewModel)) is not QueueEntryViewModel source) return;
+        ClearQueueInsertionMarker();
+        if (e.Data.GetData("Dextromethorphan.TrackPaths") is string[] paths)
+        {
+            ViewModel.AddPathsToQueue(paths);
+            e.Handled = true;
+            return;
+        }
         var hit = QueueList.InputHitTest(e.GetPosition(QueueList)) as DependencyObject;
-        if (FindVisualParent<ListBoxItem>(hit)?.DataContext is QueueEntryViewModel target)
+        var targetContainer = FindVisualParent<ListBoxItem>(hit);
+        var targetIndex = targetContainer is null ? QueueList.Items.Count : QueueList.ItemContainerGenerator.IndexFromContainer(targetContainer);
+        if (e.Data.GetData("Dextromethorphan.QueueEntryIds") is Guid[] ids)
+            ViewModel.MoveQueueEntries(ids, targetIndex);
+        else if (e.Data.GetData(typeof(QueueEntryViewModel)) is QueueEntryViewModel source
+                 && targetContainer?.DataContext is QueueEntryViewModel target)
             ViewModel.MoveQueueEntry(source.Entry.Id, target.Entry.Id);
         e.Handled = true;
     }
@@ -733,11 +1045,16 @@ public partial class MainWindow : Window
                 var stateKey = ViewModel.PrimaryViewStateKey;
                 var state = _viewStates.Get(stateKey);
                 ViewModel.EnsureGalleryGroupsLoaded(state.MaterializedItemCount);
-                GalleryList.UpdateLayout();
                 if (FindVisualChild<ScrollViewer>(GalleryList) is { } viewer)
                 {
-                    RestoreGalleryVerticalOffset(viewer, state);
-                    if (state.VerticalOffset > 0.5)
+                    if (state.RequiresPreciseGalleryRestore)
+                    {
+                        GalleryList.UpdateLayout();
+                        RestoreGalleryVerticalOffset(viewer, state);
+                    }
+                    else if (viewer.VerticalOffset > .5)
+                        viewer.ScrollToTop();
+                    if (state.RequiresVerticalRestore)
                         ReapplyGalleryScrollStateAtRender(
                             stateKey,
                             state,
@@ -749,8 +1066,16 @@ public partial class MainWindow : Window
             {
                 var state = _viewStates.Get(ViewModel.PrimaryViewStateKey);
                 ViewModel.EnsureSidebarCardsLoaded(state.MaterializedItemCount);
-                SidebarList.UpdateLayout();
-                FindVisualChild<ScrollViewer>(SidebarList)?.ScrollToVerticalOffset(state.VerticalOffset);
+                if (FindVisualChild<ScrollViewer>(SidebarList) is { } viewer)
+                {
+                    if (state.RequiresVerticalRestore)
+                    {
+                        SidebarList.UpdateLayout();
+                        viewer.ScrollToVerticalOffset(state.VerticalOffset);
+                    }
+                    else if (viewer.VerticalOffset > .5)
+                        viewer.ScrollToTop();
+                }
             }
 
             foreach (var list in FindVisualChildren<ListBox>(ViewTransitionHost)
@@ -761,8 +1086,16 @@ public partial class MainWindow : Window
             {
                 var state = _viewStates.Get(ViewModel.ContentViewStateKey);
                 ViewModel.EnsureBrowseTracksLoaded(state.MaterializedItemCount);
-                list.UpdateLayout();
-                FindVisualChild<ScrollViewer>(list)?.ScrollToVerticalOffset(state.VerticalOffset);
+                if (FindVisualChild<ScrollViewer>(list) is { } viewer)
+                {
+                    if (state.RequiresVerticalRestore)
+                    {
+                        list.UpdateLayout();
+                        viewer.ScrollToVerticalOffset(state.VerticalOffset);
+                    }
+                    else if (viewer.VerticalOffset > .5)
+                        viewer.ScrollToTop();
+                }
             }
         }
         finally { _restoringScrollState = false; }
@@ -1483,18 +1816,26 @@ public partial class MainWindow : Window
 
     private void Settings_Click(object sender, RoutedEventArgs e)
     {
-        if (_settingsWindow is not null)
+        try
         {
-            if (_settingsWindow.WindowState == WindowState.Minimized)
-                _settingsWindow.WindowState = WindowState.Normal;
+            if (_settingsWindow is not null)
+            {
+                if (_settingsWindow.WindowState == WindowState.Minimized)
+                    _settingsWindow.WindowState = WindowState.Normal;
 
-            _settingsWindow.Activate();
-            return;
+                _settingsWindow.Activate();
+                return;
+            }
+
+            _settingsWindow = new SettingsWindow { Owner = this, DataContext = ViewModel };
+            _settingsWindow.Closed += (_, _) => _settingsWindow = null;
+            _settingsWindow.Show();
         }
-
-        _settingsWindow = new SettingsWindow { Owner = this, DataContext = ViewModel };
-        _settingsWindow.Closed += (_, _) => _settingsWindow = null;
-        _settingsWindow.Show();
+        catch (Exception exception)
+        {
+            _settingsWindow = null;
+            ErrorDialog.Show(this, exception, string.Empty, true, "Settings could not be opened");
+        }
     }
 
     private void Window_PreviewDragEnter(object sender, DragEventArgs e) => UpdateFileDropFeedback(e);
@@ -1540,6 +1881,11 @@ public partial class MainWindow : Window
 
     private void SeekSlider_MouseMove(object sender, MouseEventArgs e)
     {
+        var width = Math.Max(1, SeekSlider.ActualWidth);
+        var ratio = Math.Clamp(e.GetPosition(SeekSlider).X / width, 0, 1);
+        var seconds = SeekSlider.Minimum + (SeekSlider.Maximum - SeekSlider.Minimum) * ratio;
+        var time = TimeSpan.FromSeconds(Math.Max(0, seconds));
+        SeekSlider.ToolTip = $"{time.ToString(time.TotalHours >= 1 ? @"h\:mm\:ss" : @"m\:ss")} · right-click for bookmarks and playback options";
         if (!_isSeekDragging || e.LeftButton != MouseButtonState.Pressed) return;
         UpdateSeekFromPointer(e);
         e.Handled = true;
@@ -1553,6 +1899,7 @@ public partial class MainWindow : Window
         SeekSlider.ReleaseMouseCapture();
         e.Handled = true;
         await ViewModel.CommitSeekAsync(SeekSlider.Value);
+        SeekSlider.GetBindingExpression(RangeBase.ValueProperty)?.UpdateTarget();
     }
 
     private void UpdateSeekFromPointer(MouseEventArgs e)
@@ -1609,6 +1956,140 @@ public partial class MainWindow : Window
     private void Maximize_Click(object sender, RoutedEventArgs e) => ToggleMaximize();
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
     private void ToggleMaximize() => WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+    private async void FullScreen_Click(object sender, RoutedEventArgs e) =>
+        await ToggleFullScreenAsync();
+
+    private async Task ToggleFullScreenAsync()
+    {
+        if (_fullScreenTransitionRunning) return;
+        _fullScreenTransitionRunning = true;
+        try
+        {
+            var animate = MotionPolicy.IsEnabled(ViewModel.AnimationsEnabled);
+            if (animate)
+                await AnimateShellAsync(.72, .985, 90, new QuadraticEase
+                {
+                    EasingMode = EasingMode.EaseIn
+                });
+
+            if (_isFullScreen) ExitFullScreen();
+            else EnterFullScreen();
+
+            ShellRoot.Opacity = animate ? .72 : 1;
+            if (ShellRoot.RenderTransform is ScaleTransform scale)
+            {
+                scale.ScaleX = animate ? .985 : 1;
+                scale.ScaleY = animate ? .985 : 1;
+            }
+            UpdateLayout();
+            await Dispatcher.Yield(DispatcherPriority.Render);
+
+            if (animate)
+                await AnimateShellAsync(1, 1, 150, new CubicEase
+                {
+                    EasingMode = EasingMode.EaseOut
+                });
+        }
+        finally
+        {
+            _fullScreenTransitionRunning = false;
+        }
+    }
+
+    private void EnterFullScreen()
+    {
+        _fullScreenRestoreState = WindowState;
+        _fullScreenRestoreResizeMode = ResizeMode;
+        _fullScreenRestoreBounds = WindowState == WindowState.Normal
+            ? new Rect(Left, Top, Width, Height)
+            : RestoreBounds;
+        var monitorBounds = WindowMaximizeHelper.GetMonitorBounds(this);
+
+        WindowState = WindowState.Normal;
+        ResizeMode = ResizeMode.NoResize;
+        if (WindowChrome.GetWindowChrome(this) is { } chrome)
+            chrome.ResizeBorderThickness = new Thickness(0);
+        RootBorder.BorderThickness = new Thickness(0);
+        TitleBarHost.Visibility = Visibility.Collapsed;
+        TitleBarRow.Height = new GridLength(0);
+        Left = monitorBounds.Left;
+        Top = monitorBounds.Top;
+        Width = monitorBounds.Width;
+        Height = monitorBounds.Height;
+        _isFullScreen = true;
+        FullScreenButton.Content = "\uE73F";
+        FullScreenButton.ToolTip = "Exit full screen (F11 or Esc)";
+        AutomationProperties.SetName(FullScreenButton, "Exit full screen");
+    }
+
+    private void ExitFullScreen()
+    {
+        TitleBarHost.Visibility = Visibility.Visible;
+        TitleBarRow.Height = new GridLength(63);
+        RootBorder.BorderThickness = new Thickness(1);
+        if (WindowChrome.GetWindowChrome(this) is { } chrome)
+            chrome.ResizeBorderThickness = new Thickness(6);
+        ResizeMode = _fullScreenRestoreResizeMode;
+        WindowState = WindowState.Normal;
+        Left = _fullScreenRestoreBounds.Left;
+        Top = _fullScreenRestoreBounds.Top;
+        Width = _fullScreenRestoreBounds.Width;
+        Height = _fullScreenRestoreBounds.Height;
+        if (_fullScreenRestoreState == WindowState.Maximized)
+            WindowState = WindowState.Maximized;
+        _isFullScreen = false;
+        FullScreenButton.Content = "\uE740";
+        FullScreenButton.ToolTip = "Full screen (F11)";
+        AutomationProperties.SetName(FullScreenButton, "Enter full screen");
+    }
+
+    private Task AnimateShellAsync(
+        double opacity,
+        double scale,
+        int milliseconds,
+        IEasingFunction easing)
+    {
+        var completion = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var duration = TimeSpan.FromMilliseconds(milliseconds);
+        var opacityAnimation = new DoubleAnimation(opacity, duration)
+        {
+            EasingFunction = easing,
+            FillBehavior = FillBehavior.HoldEnd
+        };
+        opacityAnimation.Completed += (_, _) =>
+        {
+            ShellRoot.BeginAnimation(OpacityProperty, null);
+            ShellRoot.Opacity = opacity;
+            if (ShellRoot.RenderTransform is ScaleTransform transform)
+            {
+                transform.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+                transform.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+                transform.ScaleX = scale;
+                transform.ScaleY = scale;
+            }
+            completion.TrySetResult(true);
+        };
+        ShellRoot.BeginAnimation(OpacityProperty, opacityAnimation);
+        if (ShellRoot.RenderTransform is ScaleTransform transform)
+        {
+            transform.BeginAnimation(
+                ScaleTransform.ScaleXProperty,
+                new DoubleAnimation(scale, duration)
+                {
+                    EasingFunction = easing,
+                    FillBehavior = FillBehavior.HoldEnd
+                });
+            transform.BeginAnimation(
+                ScaleTransform.ScaleYProperty,
+                new DoubleAnimation(scale, duration)
+                {
+                    EasingFunction = easing,
+                    FillBehavior = FillBehavior.HoldEnd
+                });
+        }
+        return completion.Task;
+    }
 
     private static bool IsInteractiveElement(DependencyObject? element)
     {
@@ -1620,8 +2101,16 @@ public partial class MainWindow : Window
         return false;
     }
 
-    private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
+    private async void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        var pressedKey = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (pressedKey == Key.F11
+            || pressedKey == Key.Escape && _isFullScreen)
+        {
+            await ToggleFullScreenAsync();
+            e.Handled = true;
+            return;
+        }
         if (e.OriginalSource is not DependencyObject source
             || FindVisualParent<ListBox>(source) is not { } list)
             return;

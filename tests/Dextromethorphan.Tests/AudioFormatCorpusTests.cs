@@ -108,6 +108,59 @@ public sealed class AudioFormatCorpusTests
     }
 
     [Fact]
+    public async Task FlacWithLeadingId3TagDecodesAndSeeksWithoutChangingTheFile()
+    {
+        var source = Path.Combine(Corpus, "reference.flac");
+        var temporary = Path.Combine(
+            Path.GetTempPath(),
+            $"dextromethorphan-id3-flac-{Guid.NewGuid():N}.flac");
+        try
+        {
+            var audio = File.ReadAllBytes(source);
+            const int id3PayloadLength = 24;
+            var id3 = new byte[10 + id3PayloadLength];
+            id3[0] = (byte)'I';
+            id3[1] = (byte)'D';
+            id3[2] = (byte)'3';
+            id3[3] = 4;
+            id3[4] = 0;
+            id3[5] = 0;
+            id3[6] = 0;
+            id3[7] = 0;
+            id3[8] = 0;
+            id3[9] = id3PayloadLength;
+            using (var output = File.Create(temporary))
+            {
+                output.Write(id3);
+                output.Write(audio);
+            }
+
+            using var decoded = AudioDecoderFactory.Open(
+                new Track
+                {
+                    Path = temporary,
+                    Title = "ID3-wrapped FLAC"
+                });
+            Assert.Equal("Managed FLAC decoder", decoded.Decoder);
+            Assert.True(decoded.Reader.Read(new byte[4096], 0, 4096) > 0);
+            decoded.Reader.CurrentTime = TimeSpan.FromMilliseconds(800);
+            Assert.InRange(
+                decoded.Reader.CurrentTime,
+                TimeSpan.FromMilliseconds(700),
+                TimeSpan.FromMilliseconds(900));
+
+            var metadata = await new TagLibMetadataReader()
+                .ReadAsync(temporary, TestContext.Current.CancellationToken);
+            Assert.Equal(16, metadata.BitsPerSample);
+        }
+        finally
+        {
+            try { File.Delete(temporary); }
+            catch { }
+        }
+    }
+
+    [Fact]
     public void ManagedOpusRemovesEncoderDelayAndSeeksToTheDecodedFrame()
     {
         var path = Path.Combine(Corpus, "reference.opus");

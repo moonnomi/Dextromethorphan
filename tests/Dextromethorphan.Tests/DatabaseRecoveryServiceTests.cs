@@ -39,6 +39,11 @@ public sealed class DatabaseRecoveryServiceTests : IDisposable
             persisted.Id,
             TimeSpan.FromSeconds(33),
             cancellationToken);
+        await repository.CreateBookmarkAsync(
+            persisted.Id,
+            "Favorite passage",
+            TimeSpan.FromSeconds(41),
+            cancellationToken);
         var playlistId = await playlists.CreateManualAsync(
             "Recovered",
             cancellationToken);
@@ -67,6 +72,9 @@ public sealed class DatabaseRecoveryServiceTests : IDisposable
             await repository.GetBookmarkAsync(
                 restored.Id,
                 cancellationToken));
+        var namedBookmark = Assert.Single(await repository.GetBookmarksAsync(restored.Id, cancellationToken));
+        Assert.Equal("Favorite passage", namedBookmark.Name);
+        Assert.Equal(TimeSpan.FromSeconds(41), namedBookmark.Position);
         Assert.Equal(
             "Recovered",
             Assert.Single(

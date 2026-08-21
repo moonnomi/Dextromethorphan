@@ -57,6 +57,74 @@ public sealed class PlaybackQueueTests
     }
 
     [Fact]
+    public void ShufflePlaysEveryRemainingTrackOnceBeforeStopping()
+    {
+        var queue = new PlaybackQueue { Shuffle = true };
+        var tracks = Enumerable.Range(1, 8).Select(NewTrack).ToArray();
+        queue.Replace(tracks, 0);
+
+        var played = new List<Track> { tracks[0] };
+        Track? next;
+        while ((next = queue.Advance()) is not null) played.Add(next);
+
+        Assert.Equal(tracks.Length, played.Count);
+        Assert.Equal(tracks.Length, played.DistinctBy(track => track.Path).Count());
+    }
+
+    [Fact]
+    public void ShuffleOrderCanBeRestoredAcrossSessions()
+    {
+        var tracks = Enumerable.Range(1, 7).Select(NewTrack).ToArray();
+        var first = new PlaybackQueue { Shuffle = true };
+        first.Replace(tracks, 2);
+        var expected = first.ShuffleUpcomingPaths.ToArray();
+
+        var restored = new PlaybackQueue { Shuffle = true };
+        restored.Replace(tracks, 2);
+        restored.RestoreShuffleUpcoming(expected);
+
+        Assert.Equal(expected, restored.ShuffleUpcomingPaths);
+        Assert.Equal(expected, Enumerable.Range(0, expected.Length).Select(_ => restored.Advance()!.Path));
+    }
+
+    [Fact]
+    public void ShuffleDeckSurvivesAddRemoveAndPrevious()
+    {
+        var queue = new PlaybackQueue { Shuffle = true };
+        var tracks = Enumerable.Range(1, 5).Select(NewTrack).ToArray();
+        queue.Replace(tracks, 0);
+        var added = NewTrack(9);
+        queue.Add([added]);
+        var removed = queue.Items.First(item => !item.IsPlaying && item.Track != added);
+        queue.Remove(removed.Id);
+
+        var firstAdvance = queue.Advance();
+        Assert.NotNull(firstAdvance);
+        Assert.Equal(tracks[0], queue.Previous());
+        Assert.Equal(firstAdvance, queue.Advance());
+        Assert.DoesNotContain(removed.Track.Path, queue.ShuffleUpcomingPaths);
+    }
+
+    [Fact]
+    public void BatchQueueChangesAreAtomicAndUndoable()
+    {
+        var queue = new PlaybackQueue();
+        var tracks = Enumerable.Range(1, 6).Select(NewTrack).ToArray();
+        queue.Replace(tracks, 2);
+        var selected = new[] { queue.Items[1].Id, queue.Items[3].Id };
+
+        queue.MoveToBottom(selected);
+        Assert.Equal(new[] { 1L, 3L, 5L, 6L, 2L, 4L }, queue.Items.Select(item => item.Track.Id));
+        Assert.Equal(tracks[2], queue.Current);
+        Assert.True(queue.Undo());
+        Assert.Equal(tracks, queue.Items.Select(item => item.Track));
+
+        Assert.Equal(2, queue.RemoveMany(selected));
+        Assert.True(queue.Undo());
+        Assert.Equal(tracks, queue.Items.Select(item => item.Track));
+    }
+
+    [Fact]
     public void QueueEntryCanBeSelectedForImmediatePlayback()
     {
         var queue = new PlaybackQueue();

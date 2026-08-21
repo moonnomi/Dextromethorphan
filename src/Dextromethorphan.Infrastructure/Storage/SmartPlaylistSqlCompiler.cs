@@ -14,7 +14,7 @@ internal static class SmartPlaylistSqlCompiler
         var where = CompileGroup(definition.Root, now, parameters, 0);
         var direction = definition.SortDescending ? "DESC" : "ASC";
         var order = $"{Column(definition.SortBy)} {direction}, title COLLATE NOCASE ASC";
-        return new Result(where, order, definition.Limit is null ? null : Math.Clamp(definition.Limit.Value, 1, 5000), parameters);
+        return new Result(where, order, definition.Limit is null ? null : Math.Clamp(definition.Limit.Value, 1, 100_000), parameters);
     }
 
     private static string CompileGroup(SmartRuleGroup group, DateTimeOffset now, List<(string Name, object Value)> parameters, int depth)

@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using Dextromethorphan.App.ViewModels;
+using Dextromethorphan.App.UI;
 using Dextromethorphan.Core.Models;
 using Microsoft.Win32;
 
@@ -12,6 +13,12 @@ public partial class SettingsWindow : Window
     private bool _decoderCheckStarted;
 
     public SettingsWindow() => InitializeComponent();
+
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        WindowMaximizeHelper.Install(this);
+    }
 
     private void SettingsTitleBar_MouseLeftButtonDown(
         object sender,

@@ -25,6 +25,15 @@ public sealed class ChapterMarkerBar : FrameworkElement
                 0d,
                 FrameworkPropertyMetadataOptions.AffectsRender));
 
+    public static readonly DependencyProperty BookmarksProperty =
+        DependencyProperty.Register(
+            nameof(Bookmarks),
+            typeof(IEnumerable),
+            typeof(ChapterMarkerBar),
+            new FrameworkPropertyMetadata(
+                null,
+                FrameworkPropertyMetadataOptions.AffectsRender));
+
     public IEnumerable? Chapters
     {
         get => (IEnumerable?)GetValue(ChaptersProperty);
@@ -37,12 +46,16 @@ public sealed class ChapterMarkerBar : FrameworkElement
         set => SetValue(DurationProperty, value);
     }
 
+    public IEnumerable? Bookmarks
+    {
+        get => (IEnumerable?)GetValue(BookmarksProperty);
+        set => SetValue(BookmarksProperty, value);
+    }
+
     protected override void OnRender(DrawingContext drawingContext)
     {
         base.OnRender(drawingContext);
-        if (Duration <= 0
-            || ActualWidth <= 0
-            || Chapters is null)
+        if (Duration <= 0 || ActualWidth <= 0)
             return;
         var brush = TryFindResource("TextBrush") as Brush
                     ?? Brushes.White;
@@ -51,7 +64,7 @@ public sealed class ChapterMarkerBar : FrameworkElement
             StartLineCap = PenLineCap.Round,
             EndLineCap = PenLineCap.Round
         };
-        foreach (var chapter in Chapters.OfType<AudioChapter>())
+        foreach (var chapter in Chapters?.OfType<AudioChapter>() ?? [])
         {
             if (chapter.Start <= TimeSpan.Zero) continue;
             var fraction = Math.Clamp(
@@ -63,6 +76,21 @@ public sealed class ChapterMarkerBar : FrameworkElement
                 pen,
                 new Point(x, Math.Max(0, ActualHeight / 2 - 5)),
                 new Point(x, Math.Min(ActualHeight, ActualHeight / 2 + 5)));
+        }
+        var accent = TryFindResource("AccentBrush") as Brush ?? Brushes.MediumPurple;
+        foreach (var bookmark in Bookmarks?.OfType<PlaybackBookmark>() ?? [])
+        {
+            var fraction = Math.Clamp(bookmark.Position.TotalSeconds / Duration, 0, 1);
+            var x = Math.Round(fraction * ActualWidth);
+            var y = Math.Max(1, ActualHeight / 2 - 7);
+            var geometry = new StreamGeometry();
+            using (var context = geometry.Open())
+            {
+                context.BeginFigure(new Point(x, y), true, true);
+                context.LineTo(new Point(x - 4, y - 5), true, false);
+                context.LineTo(new Point(x + 4, y - 5), true, false);
+            }
+            drawingContext.DrawGeometry(accent, null, geometry);
         }
     }
 }

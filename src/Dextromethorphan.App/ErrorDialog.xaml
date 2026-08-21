@@ -37,7 +37,7 @@
             <Expander Grid.Row="2" Header="Technical details" Margin="0,18,0,0">
                 <Border Background="{StaticResource SurfaceRaisedBrush}" CornerRadius="8" Padding="12" Margin="0,8,0,0" MaxHeight="320">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <TextBox Text="{Binding DetailsText}" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0" Background="Transparent" FontFamily="Cascadia Mono" FontSize="10"/>
+                        <TextBox Text="{Binding DetailsText, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0" Background="Transparent" FontFamily="Cascadia Mono" FontSize="10"/>
                     </ScrollViewer>
                 </Border>
             </Expander>

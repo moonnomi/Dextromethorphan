@@ -94,6 +94,19 @@ public sealed class SqlitePlaylistRepository(SqliteLibraryRepository library) : 
         return CreateAsync(name, PlaylistKind.Smart, JsonSerializer.Serialize(rules, JsonOptions), cancellationToken);
     }
 
+    public async Task<long> DuplicateAsync(long playlistId, string? name = null, CancellationToken cancellationToken = default)
+    {
+        var source = await GetAsync(playlistId, cancellationToken) ?? throw new KeyNotFoundException("Playlist was not found.");
+        var duplicateName = string.IsNullOrWhiteSpace(name) ? source.Name + " copy" : name;
+        var id = source.Kind == PlaylistKind.Smart
+            ? await CreateSmartAsync(duplicateName, source.Rules ?? new SmartPlaylistDefinition(), cancellationToken)
+            : await CreateManualAsync(duplicateName, cancellationToken);
+        await UpdateDetailsAsync(id, source.Description, source.CoverPath, cancellationToken);
+        if (source.Kind == PlaylistKind.Manual)
+            await AddTracksAsync(id, (await GetTracksAsync(playlistId, cancellationToken)).Select(track => track.Id).ToArray(), cancellationToken);
+        return id;
+    }
+
     public async Task UpdateSmartRulesAsync(long playlistId, SmartPlaylistDefinition rules, CancellationToken cancellationToken = default)
     {
         SmartPlaylistSqlCompiler.Compile(rules, DateTimeOffset.UtcNow);
@@ -117,6 +130,21 @@ public sealed class SqlitePlaylistRepository(SqliteLibraryRepository library) : 
         command.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         command.Parameters.AddWithValue("$id", playlistId);
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task UpdateDetailsAsync(long playlistId, string description, string? coverPath, CancellationToken cancellationToken = default)
+    {
+        description = (description ?? string.Empty).Trim();
+        if (description.Length > 4_096) throw new ArgumentException("Playlist descriptions must be 4096 characters or fewer.", nameof(description));
+        if (!string.IsNullOrWhiteSpace(coverPath)) coverPath = Path.GetFullPath(coverPath);
+        await using var connection = await library.OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE playlists SET description=$description, cover_path=$cover, updated_at=$now WHERE id=$id";
+        command.Parameters.AddWithValue("$description", description);
+        command.Parameters.AddWithValue("$cover", (object?)coverPath ?? DBNull.Value);
+        command.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        command.Parameters.AddWithValue("$id", playlistId);
+        if (await command.ExecuteNonQueryAsync(cancellationToken) == 0) throw new KeyNotFoundException("Playlist was not found.");
     }
 
     public async Task DeleteAsync(long playlistId, CancellationToken cancellationToken = default)
@@ -158,6 +186,19 @@ public sealed class SqlitePlaylistRepository(SqliteLibraryRepository library) : 
         await InsertTracksAsync(connection, (SqliteTransaction)transaction, playlistId, trackIds, start, cancellationToken);
         await TouchAsync(connection, (SqliteTransaction)transaction, playlistId, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task MoveTracksAsync(long playlistId, IReadOnlyList<long> trackIds, int destinationIndex, CancellationToken cancellationToken = default)
+    {
+        var playlist = await GetAsync(playlistId, cancellationToken) ?? throw new KeyNotFoundException("Playlist was not found.");
+        if (playlist.Kind != PlaylistKind.Manual) throw new InvalidOperationException("Smart playlists cannot be manually reordered.");
+        var current = (await GetTracksAsync(playlistId, cancellationToken)).ToList();
+        var selected = current.Where(track => trackIds.Contains(track.Id)).ToList();
+        if (selected.Count == 0) return;
+        current.RemoveAll(track => trackIds.Contains(track.Id));
+        destinationIndex = Math.Clamp(destinationIndex, 0, current.Count);
+        current.InsertRange(destinationIndex, selected);
+        await ReplaceTracksAsync(playlistId, current.Select(track => track.Id).ToArray(), cancellationToken);
     }
 
     public async Task<IReadOnlyList<Track>> GetTracksAsync(long playlistId, CancellationToken cancellationToken = default)
@@ -270,6 +311,8 @@ public sealed class SqlitePlaylistRepository(SqliteLibraryRepository library) : 
             Name = reader.GetString(reader.GetOrdinal("name")),
             Kind = reader.GetString(reader.GetOrdinal("kind")).Equals("smart", StringComparison.OrdinalIgnoreCase) ? PlaylistKind.Smart : PlaylistKind.Manual,
             Rules = rules,
+            Description = reader.GetString(reader.GetOrdinal("description")),
+            CoverPath = reader.IsDBNull(reader.GetOrdinal("cover_path")) ? null : reader.GetString(reader.GetOrdinal("cover_path")),
             CreatedAt = DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(reader.GetOrdinal("created_at"))),
             UpdatedAt = DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(reader.GetOrdinal("updated_at")))
         };

@@ -40,6 +40,19 @@ public sealed class NavigationViewStateStoreTests
     }
 
     [Fact]
+    public void TopOfViewDoesNotRequireASynchronousLayoutRestore()
+    {
+        Assert.False(new NavigationViewState(0, 500, 0, 0)
+            .RequiresPreciseGalleryRestore);
+        Assert.False(new NavigationViewState(0, 500)
+            .RequiresVerticalRestore);
+        Assert.True(new NavigationViewState(20, 500, 0, 20)
+            .RequiresPreciseGalleryRestore);
+        Assert.True(new NavigationViewState(20, 500)
+            .RequiresVerticalRestore);
+    }
+
+    [Fact]
     public void TrimPreservesActiveKeysAndDropsStaleHistory()
     {
         var store = new NavigationViewStateStore();

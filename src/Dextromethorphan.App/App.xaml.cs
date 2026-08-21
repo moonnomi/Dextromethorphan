@@ -60,7 +60,10 @@ public partial class App : Application
                 x.GetRequiredService<DeveloperDiagnostics>()));
             services.AddSingleton<IPlaylistInterchangeService, PlaylistInterchangeService>();
             services.AddSingleton<IPlaylistFileService, PlaylistFileService>();
+            services.AddSingleton<IPlaylistBackupService, PlaylistBackupService>();
             services.AddSingleton<ITrackMetadataReader, TagLibMetadataReader>();
+            services.AddSingleton<IMetadataEditService, TagLibMetadataEditService>();
+            services.AddSingleton<IMetadataMatchService, MetadataMatchService>();
             services.AddSingleton<ArtworkCache>();
             services.AddSingleton<IArtworkCache>(x => new DiagnosticArtworkCache(
                 x.GetRequiredService<ArtworkCache>(),

@@ -27,6 +27,7 @@ public sealed class WasapiAudioEngine : IAudioEngine
     private FadeEnvelopeSampleProvider? _fade;
     private GainLimiterSampleProvider? _gain;
     private TimingWaveProvider? _timedProvider;
+    private AudioVisualizationTapWaveProvider? _visualizationTap;
     private DecodedAudio? _incompatibleNext;
     private Track? _track;
     private Track? _nextTrack;
@@ -41,6 +42,7 @@ public sealed class WasapiAudioEngine : IAudioEngine
     private int _recovering;
     private int _recoveryAttempts;
     private bool _resumePlaybackAfterSuspend;
+    private volatile bool _visualizationEnabled;
 
     public WasapiAudioEngine()
     {
@@ -83,6 +85,22 @@ public sealed class WasapiAudioEngine : IAudioEngine
     public event EventHandler<TrackTransitionedEventArgs>? TrackTransitioned;
     public event EventHandler? PlaybackEnded;
     public event EventHandler<AudioEndpointChangedEventArgs>? OutputDevicesChanged;
+
+    public void SetVisualizationEnabled(bool enabled)
+    {
+        _visualizationEnabled = enabled;
+        if (_visualizationTap is not { } tap) return;
+        tap.Enabled = enabled;
+        if (!enabled) tap.Reset();
+    }
+
+    public AudioVisualizationSnapshot GetVisualizationSnapshot(int bandCount = 40)
+    {
+        var tap = _visualizationTap;
+        return tap is null || _state != PlaybackState.Playing
+            ? AudioVisualizationSnapshot.Empty(bandCount)
+            : tap.Snapshot(bandCount);
+    }
 
     private TimeSpan Position => _direct?.Position
         ?? (_transition is null
@@ -216,6 +234,7 @@ public sealed class WasapiAudioEngine : IAudioEngine
             _pipelineCompleted = false;
             _output?.Stop();
             _direct?.Seek(TimeSpan.Zero);
+            _visualizationTap?.Reset();
             _state = PlaybackState.Stopped;
         }
         finally { _gate.Release(); Publish(); }
@@ -411,6 +430,13 @@ public sealed class WasapiAudioEngine : IAudioEngine
             outputFormat = waveProvider.WaveFormat;
         }
 
+        _visualizationTap = new AudioVisualizationTapWaveProvider(
+            waveProvider,
+            canAnalyze: !isDsd)
+        {
+            Enabled = _visualizationEnabled
+        };
+        waveProvider = _visualizationTap;
         _timedProvider = new TimingWaveProvider(waveProvider);
         waveProvider = _timedProvider;
         var effectiveOutput = ResolveEffectiveOutput(outputFormat);
@@ -838,6 +864,7 @@ public sealed class WasapiAudioEngine : IAudioEngine
         if (_transition is not null) { _transition.SourceChanged -= OnPipelineSourceChanged; _transition.Completed -= OnPipelineCompleted; _transition.Dispose(); _transition = null; }
         _incompatibleNext?.Dispose(); _incompatibleNext = null;
         _tempo = null; _nextTempo = null; _fade = null; _gain = null;
+        _visualizationTap = null;
         _timedProvider = null;
     }
 

@@ -10,6 +10,7 @@ namespace Dextromethorphan.App.ViewModels;
 /// </summary>
 internal sealed class LibraryGroupingIndex
 {
+    private char[] _separators = [';', '/'];
     private readonly List<Track> _tracks = [];
     private readonly Dictionary<long, int> _indexById = [];
     private readonly Dictionary<string, int> _indexByPath =
@@ -21,6 +22,15 @@ internal sealed class LibraryGroupingIndex
 
     public IReadOnlyList<Track> Tracks => _tracks;
 
+    public void ConfigureSeparators(string? separators)
+    {
+        var configured = (separators ?? ";/")
+            .Where(character => character is ';' or '/' or '|' or ',')
+            .Distinct()
+            .ToArray();
+        _separators = configured.Length == 0 ? [';', '/'] : configured;
+    }
+
     public LibraryGroupSnapshot Reset(IReadOnlyList<Track> tracks)
     {
         _tracks.Clear();
@@ -30,7 +40,7 @@ internal sealed class LibraryGroupingIndex
         _memberIndexes.Clear();
         for (var index = 0; index < _tracks.Count; index++)
         {
-            foreach (var identity in Memberships(_tracks[index]))
+            foreach (var identity in Memberships(_tracks[index], _separators))
                 AddMembership(identity, index);
         }
 
@@ -56,7 +66,7 @@ internal sealed class LibraryGroupingIndex
             if (index >= 0)
             {
                 var oldTrack = _tracks[index];
-                foreach (var identity in Memberships(oldTrack))
+                foreach (var identity in Memberships(oldTrack, _separators))
                 {
                     affected.Add(identity);
                     RemoveMembership(identity, index);
@@ -71,7 +81,7 @@ internal sealed class LibraryGroupingIndex
                 _tracks.Add(update.Track);
             }
 
-            foreach (var identity in Memberships(update.Track))
+            foreach (var identity in Memberships(update.Track, _separators))
             {
                 affected.Add(identity);
                 AddMembership(identity, index);
@@ -187,7 +197,9 @@ internal sealed class LibraryGroupingIndex
         IReadOnlyList<IndexedTrack> members)
     {
         var first = members[0].Track;
-        var artist = string.IsNullOrWhiteSpace(first.AlbumArtist)
+        var artist = first.IsCompilation
+            ? "Various Artists"
+            : string.IsNullOrWhiteSpace(first.AlbumArtist)
             ? first.DisplayArtist
             : first.AlbumArtist;
         var indexes = members
@@ -200,7 +212,9 @@ internal sealed class LibraryGroupingIndex
         return Card(
             identity,
             first.DisplayAlbum,
-            year > 0 ? $"{artist} · {year}" : artist,
+            string.IsNullOrWhiteSpace(first.ReleaseType)
+                ? year > 0 ? $"{artist} · {year}" : artist
+                : year > 0 ? $"{artist} · {year} · {first.ReleaseType}" : $"{artist} · {first.ReleaseType}",
             indexes);
     }
 
@@ -282,20 +296,22 @@ internal sealed class LibraryGroupingIndex
         };
     }
 
-    private static IEnumerable<GroupIdentity> Memberships(Track track)
+    private static IEnumerable<GroupIdentity> Memberships(Track track, IReadOnlyList<char> separators)
     {
         if (track.IsMissing) yield break;
 
-        var albumArtist = string.IsNullOrWhiteSpace(track.AlbumArtist)
+        var albumArtist = track.IsCompilation
+            ? "Various Artists"
+            : string.IsNullOrWhiteSpace(track.AlbumArtist)
             ? track.DisplayArtist
             : track.AlbumArtist;
         yield return new GroupIdentity(
             "Album",
-            $"{albumArtist}\0{track.DisplayAlbum}");
+            $"{albumArtist}\0{track.DisplayAlbum}\0{track.ReleaseType}");
 
-        foreach (var artist in SplitValues(track.DisplayArtist))
+        foreach (var artist in SplitValues(track.DisplayArtist, separators))
             yield return new GroupIdentity("Artist", artist);
-        foreach (var genre in SplitValues(track.Genre, "Uncategorized"))
+        foreach (var genre in SplitValues(track.Genre, separators, "Uncategorized"))
             yield return new GroupIdentity("Genre", genre);
         yield return new GroupIdentity(
             "Folder",
@@ -304,12 +320,13 @@ internal sealed class LibraryGroupingIndex
 
     private static IEnumerable<string> SplitValues(
         string? value,
+        IReadOnlyList<char> separators,
         string fallback = "Unknown artist")
     {
         if (string.IsNullOrWhiteSpace(value)) return [fallback];
         var values = value
             .Split(
-                [';', '/'],
+                separators.ToArray(),
                 StringSplitOptions.RemoveEmptyEntries
                 | StringSplitOptions.TrimEntries)
             .Distinct(StringComparer.CurrentCultureIgnoreCase)

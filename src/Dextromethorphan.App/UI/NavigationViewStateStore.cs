@@ -63,4 +63,9 @@ internal readonly record struct NavigationViewState(
     double GalleryAnchorOffset = 0)
 {
     public static NavigationViewState Empty { get; } = new(0, 0, -1, 0);
+    public bool RequiresPreciseGalleryRestore =>
+        VerticalOffset > .5
+        || GalleryAnchorIndex > 0
+        || GalleryAnchorOffset > .5;
+    public bool RequiresVerticalRestore => VerticalOffset > .5;
 }

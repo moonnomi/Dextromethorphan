@@ -19,7 +19,7 @@ namespace Dextromethorphan.App.ViewModels;
 
 public sealed class MainViewModel : ObservableObject
 {
-    private static readonly string[] Views = ["Albums", "Artists", "Genres", "Songs", "Folders", "Playlists", "Favorites", "Missing", "Now Playing"];
+    private static readonly string[] Views = ["Albums", "Artists", "Genres", "Songs", "Folders", "Playlists", "Favorites", "Missing", "Recently Added", "Recently Played", "Most Played", "Never Played", "History", "Now Playing"];
     private readonly ISettingsService _settings;
     private readonly ILibraryRepository _repository;
     private readonly IPlaylistRepository _playlists;
@@ -42,8 +42,13 @@ public sealed class MainViewModel : ObservableObject
     private readonly ReplayGainAnalysisService _replayGainAnalysis;
     private readonly LyricsDocumentService _lyricsDocuments;
     private readonly LrclibLyricsProvider _onlineLyrics;
+    private readonly IMetadataEditService _metadataEditor;
+    private readonly IMetadataMatchService _metadataMatcher;
+    private readonly IPlaylistFileService _playlistFiles;
+    private readonly IPlaylistBackupService _playlistBackups;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly ConcurrentDictionary<string, string?> _resolvedArtwork = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, string> _playbackFailures = new(StringComparer.OrdinalIgnoreCase);
     private readonly Stack<NavigationEntry> _backHistory = new();
     private readonly Stack<NavigationEntry> _forwardHistory = new();
     private readonly Dictionary<string, CardSelection> _cardSelections = new(StringComparer.OrdinalIgnoreCase);
@@ -57,6 +62,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly List<LibraryFileChange> _pendingLibraryChanges = [];
     private readonly ConcurrentDictionary<long, Lazy<Task<IReadOnlyList<Track>>>> _playlistTrackLoads = new();
     private CancellationTokenSource? _searchCancellation;
+    private CancellationTokenSource? _quickFilterCancellation;
     private CancellationTokenSource? _artworkCancellation;
     private CancellationTokenSource? _queueArtworkCancellation;
     private CancellationTokenSource? _sessionSaveCancellation;
@@ -84,13 +90,18 @@ public sealed class MainViewModel : ObservableObject
     private PresentationCollection<LibraryCardViewModel>? _activeSidebarPresentation;
     private PresentationCollection<Track>? _activeTrackPresentation;
     private Track? _selectedTrack;
+    private IReadOnlyList<Track> _selectedTracks = [];
     private Track? _currentTrack;
+    private IReadOnlyList<QueueEntryViewModel> _selectedQueueEntries = [];
     private LibraryCardViewModel? _selectedCard;
     private FolderTreeNodeViewModel? _selectedFolderNode;
     private string _currentView = "Albums";
     private string _viewSubtitle = "Your music, organized locally";
     private string _selectedGroupTitle = "All albums";
     private string _selectedGroupSubtitle = "Select a collection to see its tracks";
+    private string _artistProfileText = "";
+    private string _artistProfileAttribution = "";
+    private string _artistDiscographyText = "";
     private string _searchText = "";
     private string _statusText = "Starting…";
     private string _playGlyph = "▶";
@@ -111,9 +122,20 @@ public sealed class MainViewModel : ObservableObject
     private bool _isCollectionDetailOpen;
     private bool _isUserSeeking;
     private bool _animationsEnabled = true;
+    private bool _visualizerEnabled;
     private bool _diagnosticsVisible;
     private bool _restoringSession;
+    private bool _stopAfterCurrent;
+    private bool _stopAfterQueue;
+    private string _userNotice = "";
+    private bool _isUserNoticeVisible;
+    private readonly DispatcherTimer _noticeTimer;
     private int _albumTileSize = 172;
+    private string _sortBy = "Title";
+    private bool _sortDescending;
+    private LibraryDensity _density = LibraryDensity.Comfortable;
+    private string _quickFilter = "";
+    private IReadOnlyList<string> _dashboardModules = ["Artwork", "Lyrics", "Queue"];
     private int _galleryColumnCount = 1;
     private readonly ObservableRangeCollection<GalleryRowViewModel> _galleryRows = [];
     private string _activeLyric = "Lyrics will appear here when available.";
@@ -128,10 +150,17 @@ public sealed class MainViewModel : ObservableObject
     private double _lyricsBlurStrength = 5;
     private bool _karaokeWordAnimation = true;
     private bool _onlineLyricsEnabled;
+    private bool _metadataLookupEnabled;
+    private bool _musicBrainzLookupEnabled;
+    private bool _discogsLookupEnabled;
+    private string _discogsUserToken = "";
     private bool _isOnlineLyricsBusy;
     private bool _lyricsEditorVisible;
     private string _lyricsEditorText = string.Empty;
     private string _lyricsStatus = "Local lyrics only";
+    private IReadOnlyList<MetadataEditResult> _metadataUndo = [];
+    private readonly Stack<PlaylistHistoryEntry> _playlistUndo = new();
+    private readonly Stack<PlaylistHistoryEntry> _playlistRedo = new();
     private bool _isArtworkCacheBusy;
     private int _artworkCacheMegabytes = 512;
     private string _contentViewStateKey = "primary:Albums";
@@ -186,7 +215,11 @@ public sealed class MainViewModel : ObservableObject
         AudioDecoderCapabilityService decoderCapabilities,
         ReplayGainAnalysisService replayGainAnalysis,
         LyricsDocumentService lyricsDocuments,
-        LrclibLyricsProvider onlineLyrics)
+        LrclibLyricsProvider onlineLyrics,
+        IMetadataEditService metadataEditor,
+        IMetadataMatchService metadataMatcher,
+        IPlaylistFileService playlistFiles,
+        IPlaylistBackupService playlistBackups)
     {
         _settings = settings; _repository = repository; _playlists = playlists; _scanner = scanner; _artwork = artwork; _metadataReader = metadataReader;
         _audio = audio; _queue = queue; _sleepTimer = sleepTimer; _shortcuts = shortcuts; _systemMedia = systemMedia;
@@ -199,10 +232,19 @@ public sealed class MainViewModel : ObservableObject
         _replayGainAnalysis = replayGainAnalysis;
         _lyricsDocuments = lyricsDocuments;
         _onlineLyrics = onlineLyrics;
+        _metadataEditor = metadataEditor;
+        _metadataMatcher = metadataMatcher;
+        _playlistFiles = playlistFiles;
+        _playlistBackups = playlistBackups;
         _scheduledScanTimer = new DispatcherTimer(
             TimeSpan.FromMinutes(1),
             DispatcherPriority.Background,
             ScheduledScanTimerOnTick,
+            Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher);
+        _noticeTimer = new DispatcherTimer(
+            TimeSpan.FromSeconds(3.2),
+            DispatcherPriority.Background,
+            NoticeTimerOnTick,
             Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher);
         NavigateCommand = new RelayCommand(p => Navigate(p?.ToString()));
         SelectGroupCommand = new RelayCommand(p => SelectGroup(p as LibraryCardViewModel));
@@ -213,8 +255,11 @@ public sealed class MainViewModel : ObservableObject
         NextCommand = new AsyncRelayCommand(_ => ChangeTrackAsync(_queue.Advance()));
         PreviousCommand = new AsyncRelayCommand(_ => HandlePreviousAsync());
         AddToQueueCommand = new RelayCommand(p => { if (p is Track track) _queue.Add([track]); });
+        AddSelectedToQueueCommand = new RelayCommand(_ => { if (SelectedTracks.Count > 0) _queue.Add(SelectedTracks); });
         PlayNextCommand = new RelayCommand(p => { if (p is Track track) _queue.PlayNext([track]); });
         ToggleQueueCommand = new RelayCommand(_ => QueueVisible = !QueueVisible);
+        ToggleVisualizerCommand = new RelayCommand(
+            _ => VisualizerEnabled = !VisualizerEnabled);
         ToggleShuffleCommand = new RelayCommand(_ => { _queue.Shuffle = !_queue.Shuffle; Raise(nameof(IsShuffleEnabled)); Raise(nameof(ShuffleText)); ScheduleSessionSave(); });
         CycleRepeatCommand = new RelayCommand(_ =>
         {
@@ -246,12 +291,51 @@ public sealed class MainViewModel : ObservableObject
         RefreshArtworkCacheCommand = new AsyncRelayCommand(_ => RefreshArtworkCacheStatsAsync(), _ => !IsArtworkCacheBusy);
         ClearArtworkCacheCommand = new AsyncRelayCommand(_ => ClearArtworkCacheAsync(), _ => !IsArtworkCacheBusy);
         RebuildArtworkCacheCommand = new AsyncRelayCommand(_ => RebuildArtworkCacheAsync(), _ => !IsArtworkCacheBusy && _allTracks.Count > 0);
-        UndoQueueCommand = new RelayCommand(_ => _queue.Undo());
-        ClearQueueCommand = new RelayCommand(_ => _queue.Replace([]));
+        UndoQueueCommand = new RelayCommand(_ =>
+        {
+            ShowNotice(_queue.Undo() ? "Queue change undone" : "Nothing to undo");
+        });
+        RedoQueueCommand = new RelayCommand(_ =>
+        {
+            ShowNotice(_queue.Redo() ? "Queue change restored" : "Nothing to redo");
+        });
+        ClearQueueCommand = new RelayCommand(_ =>
+        {
+            if (_queue.Items.Count == 0) return;
+            _queue.Replace([]);
+            ShowNotice("Queue cleared");
+        });
+        RemoveSelectedQueueCommand = new AsyncRelayCommand(_ => RemoveSelectedQueueAsync(), _ => SelectedQueueEntries.Count > 0);
+        MoveSelectedQueueTopCommand = new RelayCommand(_ => MoveSelectedQueue(toTop: true), _ => SelectedQueueEntries.Count > 0);
+        MoveSelectedQueueBottomCommand = new RelayCommand(_ => MoveSelectedQueue(toTop: false), _ => SelectedQueueEntries.Count > 0);
+        ToggleStopAfterCurrentCommand = new RelayCommand(_ => ToggleStopMode(stopAfterCurrent: true));
+        ToggleStopAfterQueueCommand = new RelayCommand(_ => ToggleStopMode(stopAfterCurrent: false));
+        SetPlaybackSpeedCommand = new AsyncRelayCommand(p => SetPlaybackSpeedAsync(p));
+        SetPitchCommand = new AsyncRelayCommand(p => SetPitchAsync(p));
+        TogglePreservePitchCommand = new AsyncRelayCommand(_ => TogglePreservePitchAsync());
+        ResetPlaybackProcessingCommand = new AsyncRelayCommand(_ => ResetPlaybackProcessingAsync());
+        SaveTrackPlaybackOverrideCommand = new AsyncRelayCommand(_ => SaveTrackPlaybackOverrideAsync(), _ => CurrentTrack is not null);
+        ClearTrackPlaybackOverrideCommand = new AsyncRelayCommand(_ => ClearTrackPlaybackOverrideAsync(), _ => CurrentTrackHasPlaybackOverride);
+        SetCurrentRatingCommand = new AsyncRelayCommand(p => SetCurrentRatingAsync(p), _ => CurrentTrack is not null);
+        AddBookmarkCommand = new AsyncRelayCommand(p => AddBookmarkAsync(p?.ToString()), _ => CurrentTrack is not null);
+        ToggleBookmarkResumeCommand = new AsyncRelayCommand(_ => ToggleBookmarkResumeAsync());
+        SeekBookmarkCommand = new AsyncRelayCommand(p => SeekBookmarkAsync(p as PlaybackBookmark), p => p is PlaybackBookmark);
+        RenameBookmarkCommand = new AsyncRelayCommand(p => RenameBookmarkAsync(p), p => p is BookmarkRenameRequest);
+        DeleteBookmarkCommand = new AsyncRelayCommand(p => DeleteBookmarkAsync(p as PlaybackBookmark), p => p is PlaybackBookmark);
         RemoveMissingTrackCommand = new AsyncRelayCommand(
             parameter => RemoveMissingTrackAsync(parameter as Track),
             parameter => parameter is Track { IsMissing: true });
         LoveCommand = new AsyncRelayCommand(_ => ToggleLoveAsync(), _ => CurrentTrack is not null);
+        EditMetadataCommand = new AsyncRelayCommand(_ => EditMetadataAsync(), _ => SelectedTracks.Count > 0);
+        UndoMetadataCommand = new AsyncRelayCommand(_ => UndoMetadataAsync(), _ => _metadataUndo.Count > 0);
+        NewPlaylistCommand = new RelayCommand(_ => RequestPlaylistEdit((Playlist?)null));
+        EditPlaylistCommand = new AsyncRelayCommand(p => EditPlaylistAsync(p as LibraryCardViewModel), p => p is LibraryCardViewModel { PlaylistId: not null });
+        DuplicatePlaylistCommand = new AsyncRelayCommand(p => DuplicatePlaylistAsync(p as LibraryCardViewModel), p => p is LibraryCardViewModel { PlaylistId: not null });
+        DeletePlaylistCommand = new AsyncRelayCommand(p => DeletePlaylistAsync(p as LibraryCardViewModel), p => p is LibraryCardViewModel { PlaylistId: not null });
+        UndoPlaylistCommand = new AsyncRelayCommand(_ => UndoPlaylistAsync(), _ => _playlistUndo.Count > 0);
+        RedoPlaylistCommand = new AsyncRelayCommand(_ => RedoPlaylistAsync(), _ => _playlistRedo.Count > 0);
+        AddSelectedToPlaylistCommand = new AsyncRelayCommand(p => AddSelectedToPlaylistAsync(p as LibraryCardViewModel), p => p is LibraryCardViewModel { PlaylistId: not null } && SelectedTracks.Count > 0);
+        SaveQueueAsPlaylistCommand = new RelayCommand(_ => RequestPlaylistEdit(new PlaylistEditContext(null, Queue.Select(entry => entry.Track).ToArray())));
         SeekLyricCommand = new AsyncRelayCommand(p => SeekLyricAsync(p as LyricLineViewModel));
         ReloadLyricsCommand = new AsyncRelayCommand(_ => ReloadLyricsAsync(), _ => CurrentTrack is not null);
         FetchOnlineLyricsCommand = new AsyncRelayCommand(_ => FetchOnlineLyricsAsync(), _ => CurrentTrack is not null && OnlineLyricsEnabled && !IsOnlineLyricsBusy);
@@ -268,6 +352,14 @@ public sealed class MainViewModel : ObservableObject
         RemoveQueueEntryCommand = new AsyncRelayCommand(p => RemoveQueueEntryAsync(p as QueueEntryViewModel));
         PlayQueueEntryNextCommand = new RelayCommand(p => MoveQueueEntryNext(p as QueueEntryViewModel));
         ToggleDiagnosticsCommand = new RelayCommand(_ => DiagnosticsVisible = !DiagnosticsVisible);
+        ClearSearchHistoryCommand = new AsyncRelayCommand(_ => ClearSearchHistoryAsync());
+        UseSearchHistoryCommand = new RelayCommand(parameter => { if (parameter is string value) SearchText = value; });
+        ToggleTrackColumnCommand = new RelayCommand(parameter => ToggleTrackColumn(parameter?.ToString()));
+        MoveTrackColumnCommand = new RelayCommand(parameter => MoveTrackColumn(parameter?.ToString()));
+        SetTrackColumnWidthCommand = new RelayCommand(parameter => SetTrackColumnWidth(parameter?.ToString()));
+        SetDensityCommand = new RelayCommand(parameter => SetDensity(parameter?.ToString()));
+        SetAlbumTileSizeCommand = new RelayCommand(parameter => SetAlbumTileSize(parameter?.ToString()));
+        ToggleDashboardModuleCommand = new RelayCommand(parameter => ToggleDashboardModule(parameter?.ToString()));
         _audio.StateChanged += AudioOnStateChanged;
         _audio.TrackTransitioned += AudioOnTrackTransitioned;
         _audio.PlaybackEnded += AudioOnPlaybackEnded;
@@ -295,6 +387,8 @@ public sealed class MainViewModel : ObservableObject
     public ObservableCollection<FolderTreeNodeViewModel> FolderTree { get; } = new ObservableRangeCollection<FolderTreeNodeViewModel>();
     public ObservableCollection<LibraryCardViewModel> Playlists { get; } = new ObservableRangeCollection<LibraryCardViewModel>();
     public ObservableCollection<QueueEntryViewModel> Queue { get; } = new ObservableRangeCollection<QueueEntryViewModel>();
+    public ObservableCollection<QueueHistoryEntryViewModel> QueueHistory { get; } = new ObservableRangeCollection<QueueHistoryEntryViewModel>();
+    public ObservableCollection<PlaybackBookmark> Bookmarks { get; } = new ObservableRangeCollection<PlaybackBookmark>();
     public ObservableCollection<LyricLineViewModel> Lyrics { get; } = new ObservableRangeCollection<LyricLineViewModel>();
     public ObservableCollection<LyricsDocument> LyricsSources { get; } = new ObservableRangeCollection<LyricsDocument>();
     public ObservableCollection<AudioDeviceInfo> OutputDevices { get; } = new ObservableRangeCollection<AudioDeviceInfo>();
@@ -367,12 +461,12 @@ public sealed class MainViewModel : ObservableObject
     public double PlaybackSpeed
     {
         get => _playbackSpeed;
-        set => Set(ref _playbackSpeed, Math.Clamp(value, 0.5, 1.5));
+        set { if (Set(ref _playbackSpeed, Math.Clamp(value, 0.5, 1.5))) Raise(nameof(PlaybackProcessingText)); }
     }
     public double PitchSemitones
     {
         get => _pitchSemitones;
-        set => Set(ref _pitchSemitones, Math.Clamp(value, -12, 12));
+        set { if (Set(ref _pitchSemitones, Math.Clamp(value, -12, 12))) Raise(nameof(PlaybackProcessingText)); }
     }
     public bool PreservePitch
     {
@@ -423,7 +517,27 @@ public sealed class MainViewModel : ObservableObject
             (PlaySelectedCommand as AsyncRelayCommand)?.CanExecute(value);
         }
     }
-    public Track? CurrentTrack { get => _currentTrack; private set { if (Set(ref _currentTrack, value)) { Raise(nameof(HasCurrentTrack)); Raise(nameof(CurrentTitle)); Raise(nameof(CurrentArtist)); Raise(nameof(CurrentArtworkPath)); Raise(nameof(LoveGlyph)); Raise(nameof(LoveText)); Raise(nameof(CanEditLyrics)); ReloadLyricsCommand.RaiseCanExecuteChanged(); FetchOnlineLyricsCommand.RaiseCanExecuteChanged(); ToggleLyricsEditorCommand.RaiseCanExecuteChanged(); SaveLyricsCommand.RaiseCanExecuteChanged(); } } }
+    public IReadOnlyList<Track> SelectedTracks
+    {
+        get => _selectedTracks;
+        private set
+        {
+            if (!Set(ref _selectedTracks, value)) return;
+            EditMetadataCommand.RaiseCanExecuteChanged();
+        }
+    }
+    public Track? CurrentTrack { get => _currentTrack; private set { if (Set(ref _currentTrack, value)) { Raise(nameof(HasCurrentTrack)); Raise(nameof(CurrentTitle)); Raise(nameof(CurrentArtist)); Raise(nameof(CurrentArtworkPath)); Raise(nameof(LoveGlyph)); Raise(nameof(LoveText)); Raise(nameof(CurrentRating)); Raise(nameof(CanEditLyrics)); Raise(nameof(CurrentTrackHasPlaybackOverride)); Raise(nameof(PlaybackProcessingText)); ReloadLyricsCommand.RaiseCanExecuteChanged(); FetchOnlineLyricsCommand.RaiseCanExecuteChanged(); ToggleLyricsEditorCommand.RaiseCanExecuteChanged(); SaveLyricsCommand.RaiseCanExecuteChanged(); SetCurrentRatingCommand.RaiseCanExecuteChanged(); SaveTrackPlaybackOverrideCommand.RaiseCanExecuteChanged(); ClearTrackPlaybackOverrideCommand.RaiseCanExecuteChanged(); AddBookmarkCommand.RaiseCanExecuteChanged(); } } }
+    public IReadOnlyList<QueueEntryViewModel> SelectedQueueEntries
+    {
+        get => _selectedQueueEntries;
+        private set
+        {
+            if (!Set(ref _selectedQueueEntries, value)) return;
+            RemoveSelectedQueueCommand.RaiseCanExecuteChanged();
+            MoveSelectedQueueTopCommand.RaiseCanExecuteChanged();
+            MoveSelectedQueueBottomCommand.RaiseCanExecuteChanged();
+        }
+    }
     public LibraryCardViewModel? SelectedCard
     {
         get => _selectedCard;
@@ -436,14 +550,18 @@ public sealed class MainViewModel : ObservableObject
         }
     }
     public bool HasCurrentTrack => CurrentTrack is not null;
+    public IReadOnlyList<Track> AllTracks => _allTracks;
     public bool HasLibrary => _allTracks.Any(track => !track.IsMissing);
     public bool HasMissingTracks => _allTracks.Any(track => track.IsMissing);
     public bool HasBrowseTracks => BrowseTracks.Count > 0;
     public int BrowseTrackSourceCount => _activeTrackPresentation?.Source.Count ?? BrowseTracks.Count;
     public bool HasQueue => Queue.Count > 0;
+    public bool HasQueueHistory => QueueHistory.Count > 0;
+    public bool HasBookmarks => Bookmarks.Count > 0;
+    public bool ResumeTrackBookmarks => _settings.Current.ResumeTrackBookmarks;
     public bool IsGroupView => !IsCollectionDetailOpen && CurrentView is "Albums" or "Artists" or "Genres";
     public bool IsCollectionDetailView => IsCollectionDetailOpen && CurrentView is "Albums" or "Artists" or "Genres";
-    public bool IsTrackView => !IsCollectionDetailOpen && CurrentView is "Songs" or "Favorites" or "Missing";
+    public bool IsTrackView => !IsCollectionDetailOpen && CurrentView is "Songs" or "Favorites" or "Missing" or "Recently Added" or "Recently Played" or "Most Played" or "Never Played" or "History";
     public bool IsSidebarView => !IsCollectionDetailOpen && CurrentView is "Folders" or "Playlists";
     public bool IsFolderView => !IsCollectionDetailOpen && CurrentView == "Folders";
     public bool IsPlaylistView => !IsCollectionDetailOpen && CurrentView == "Playlists";
@@ -465,6 +583,40 @@ public sealed class MainViewModel : ObservableObject
     public string LoveText => CurrentTrack?.IsLoved == true
         ? "Remove love from current track"
         : "Love current track";
+    public int CurrentRating => CurrentTrack?.Rating ?? 0;
+    public string UserNotice { get => _userNotice; private set => Set(ref _userNotice, value); }
+    public bool IsUserNoticeVisible { get => _isUserNoticeVisible; private set => Set(ref _isUserNoticeVisible, value); }
+    public bool StopAfterCurrent
+    {
+        get => _stopAfterCurrent;
+        private set
+        {
+            if (!Set(ref _stopAfterCurrent, value)) return;
+            Raise(nameof(HasStopMode));
+            Raise(nameof(StopModeText));
+        }
+    }
+    public bool StopAfterQueue
+    {
+        get => _stopAfterQueue;
+        private set
+        {
+            if (!Set(ref _stopAfterQueue, value)) return;
+            Raise(nameof(HasStopMode));
+            Raise(nameof(StopModeText));
+        }
+    }
+    public bool HasStopMode => StopAfterCurrent || StopAfterQueue;
+    public string StopModeText => StopAfterCurrent
+        ? "Stop after current track"
+        : StopAfterQueue
+            ? "Stop after queue"
+            : "Continuous playback";
+    public bool CurrentTrackHasPlaybackOverride => CurrentTrack is not null
+        && _settings.Current.TrackPlaybackOverrides.ContainsKey(CurrentTrack.Path);
+    public string PlaybackProcessingText =>
+        $"{PlaybackSpeed:0.00}× · {PitchSemitones:+0.#;-0.#;0} st" +
+        (CurrentTrackHasPlaybackOverride ? " · track override" : "");
     public bool IsCollectionDetailOpen
     {
         get => _isCollectionDetailOpen;
@@ -487,6 +639,7 @@ public sealed class MainViewModel : ObservableObject
             Raise(nameof(IsGroupView)); Raise(nameof(IsCollectionDetailView)); Raise(nameof(IsTrackView)); Raise(nameof(IsSidebarView)); Raise(nameof(IsFolderView)); Raise(nameof(IsPlaylistView)); Raise(nameof(IsNowPlayingView));
             Raise(nameof(ViewTitle));
             Raise(nameof(PrimaryViewStateKey)); Raise(nameof(ContentViewStateKey));
+            LoadViewSettings();
         }
     }
     public string PrimaryViewStateKey => $"primary:{CurrentView}";
@@ -495,7 +648,37 @@ public sealed class MainViewModel : ObservableObject
     public string ViewSubtitle { get => _viewSubtitle; private set => Set(ref _viewSubtitle, value); }
     public string SelectedGroupTitle { get => _selectedGroupTitle; private set => Set(ref _selectedGroupTitle, value); }
     public string SelectedGroupSubtitle { get => _selectedGroupSubtitle; private set => Set(ref _selectedGroupSubtitle, value); }
-    public string SearchText { get => _searchText; set { if (Set(ref _searchText, value)) DebounceSearch(); } }
+    public string ArtistProfileText { get => _artistProfileText; private set => Set(ref _artistProfileText, value); }
+    public string ArtistProfileAttribution { get => _artistProfileAttribution; private set => Set(ref _artistProfileAttribution, value); }
+    public string ArtistDiscographyText { get => _artistDiscographyText; private set => Set(ref _artistDiscographyText, value); }
+    public string SearchText { get => _searchText; set { if (Set(ref _searchText, value)) { Raise(nameof(SearchSuggestions)); DebounceSearch(); } } }
+    public IReadOnlyList<string> SortOptions { get; } = ["Title", "Artist", "Album", "Year", "Added", "Played", "Rating", "Duration", "Codec"];
+    public IReadOnlyList<LibraryDensity> DensityOptions { get; } = Enum.GetValues<LibraryDensity>();
+    public string SortBy
+    {
+        get => _sortBy;
+        set { var normalized = SortOptions.Contains(value, StringComparer.OrdinalIgnoreCase) ? value : "Title"; if (Set(ref _sortBy, normalized)) { PersistViewSettings(); ApplyCurrentView(false); } }
+    }
+    public bool SortDescending { get => _sortDescending; set { if (Set(ref _sortDescending, value)) { PersistViewSettings(); ApplyCurrentView(false); } } }
+    public LibraryDensity Density
+    {
+        get => _density;
+        set { if (Set(ref _density, value)) { PersistViewSettings(); Raise(nameof(IsGridDensity)); Raise(nameof(IsCompactDensity)); } }
+    }
+    public bool IsGridDensity => Density == LibraryDensity.Grid;
+    public bool IsCompactDensity => Density == LibraryDensity.Compact;
+    public string QuickFilter { get => _quickFilter; set { if (Set(ref _quickFilter, value ?? "")) { PersistViewSettings(); DebounceQuickFilter(); } } }
+    public IReadOnlyList<string> SearchHistory => _settings.Current.SearchHistory;
+    public IReadOnlyList<string> SearchSuggestions => string.IsNullOrWhiteSpace(SearchText)
+        ? SearchHistory.Take(8).ToArray()
+        : SearchHistory.Where(item => item.StartsWith(SearchText.Trim(), StringComparison.CurrentCultureIgnoreCase)).Take(8).ToArray();
+    public IReadOnlyList<string> DashboardModuleNames { get; } = ["Artwork", "Lyrics", "Queue"];
+    public IReadOnlyList<string> DashboardModules => _dashboardModules;
+    public bool IsDashboardModuleVisible(string module) => _dashboardModules.Contains(module, StringComparer.OrdinalIgnoreCase);
+    public IReadOnlyList<string> TrackColumnNames { get; } = ["Track", "Title", "Artist", "Album", "Quality", "Rating", "Duration", "Year", "Codec", "Source"];
+    public IReadOnlyList<string> VisibleTrackColumns => GetViewSettings().VisibleColumns;
+    public IReadOnlyList<string> TrackColumnOrder => GetViewSettings().ColumnOrder;
+    public IReadOnlyDictionary<string, double> TrackColumnWidths => GetViewSettings().ColumnWidths;
     public string StatusText { get => _statusText; private set => Set(ref _statusText, value); }
     public string PlayGlyph
     {
@@ -556,7 +739,52 @@ public sealed class MainViewModel : ObservableObject
     public string ScanPauseText => IsScanPaused ? "Resume library scan" : "Pause library scan";
     public bool QueueVisible { get => _queueVisible; set { if (Set(ref _queueVisible, value)) _ = _settings.UpdateAsync(x => x.QueuePanelVisible = value); } }
     public bool AnimationsEnabled { get => _animationsEnabled; set { if (Set(ref _animationsEnabled, value)) _ = _settings.UpdateAsync(x => x.AnimationsEnabled = value); } }
+    public bool VisualizerEnabled
+    {
+        get => _visualizerEnabled;
+        set
+        {
+            if (!Set(ref _visualizerEnabled, value)) return;
+            _audio.SetVisualizationEnabled(value);
+            Raise(nameof(VisualizerText));
+            _ = _settings.UpdateAsync(x => x.VisualizerEnabled = value);
+        }
+    }
+    public string VisualizerText => VisualizerEnabled
+        ? "Hide audio spectrum"
+        : "Show audio spectrum";
+    public AudioVisualizationSnapshot GetVisualizationSnapshot(int bandCount = 40) =>
+        _audio.GetVisualizationSnapshot(bandCount);
     public bool DiagnosticsVisible { get => _diagnosticsVisible; set => Set(ref _diagnosticsVisible, value); }
+
+    private ViewSettings GetViewSettings()
+    {
+        if (_settings.Current.ViewSettings.TryGetValue(CurrentView, out var existing)) return existing;
+        var created = new ViewSettings { CoverSize = _albumTileSize };
+        _settings.Current.ViewSettings[CurrentView] = created;
+        return created;
+    }
+
+    private void LoadViewSettings()
+    {
+        var view = GetViewSettings();
+        _sortBy = SortOptions.Contains(view.SortBy, StringComparer.OrdinalIgnoreCase) ? view.SortBy : "Title";
+        _sortDescending = view.SortDescending;
+        _density = view.Density;
+        _quickFilter = view.QuickFilter;
+        _albumTileSize = Math.Clamp(view.CoverSize, 80, 400);
+        Raise(nameof(SortBy)); Raise(nameof(SortDescending)); Raise(nameof(Density)); Raise(nameof(IsGridDensity)); Raise(nameof(IsCompactDensity)); Raise(nameof(QuickFilter)); Raise(nameof(AlbumTileSize)); Raise(nameof(GalleryItemWidth)); Raise(nameof(GalleryItemHeight)); Raise(nameof(VisibleTrackColumns)); Raise(nameof(TrackColumnOrder)); Raise(nameof(TrackColumnWidths));
+    }
+
+    private void PersistViewSettings()
+    {
+        var viewName = CurrentView;
+        _ = _settings.UpdateAsync(settings =>
+        {
+            if (!settings.ViewSettings.TryGetValue(viewName, out var view)) settings.ViewSettings[viewName] = view = new ViewSettings();
+            view.SortBy = _sortBy; view.SortDescending = _sortDescending; view.Density = _density; view.QuickFilter = _quickFilter; view.CoverSize = _albumTileSize;
+        });
+    }
     public bool IsArtworkCacheBusy
     {
         get => _isArtworkCacheBusy;
@@ -613,7 +841,7 @@ public sealed class MainViewModel : ObservableObject
             if (!Set(ref _albumTileSize, value)) return;
             Raise(nameof(GalleryItemWidth));
             Raise(nameof(GalleryItemHeight));
-            _ = _settings.UpdateAsync(x => x.AlbumTileSize = value);
+            _ = _settings.UpdateAsync(x => { x.AlbumTileSize = value; var view = GetViewSettings(); view.CoverSize = value; x.ViewSettings[CurrentView] = view; });
         }
     }
     public double GalleryItemWidth => AlbumTileSize + 14;
@@ -685,6 +913,10 @@ public sealed class MainViewModel : ObservableObject
                 _ = ReloadLyricsAsync();
         }
     }
+    public bool MetadataLookupEnabled { get => _metadataLookupEnabled; set { if (Set(ref _metadataLookupEnabled, value)) _ = _settings.UpdateAsync(settings => settings.MetadataLookupEnabled = value); } }
+    public bool MusicBrainzLookupEnabled { get => _musicBrainzLookupEnabled; set { if (Set(ref _musicBrainzLookupEnabled, value)) _ = _settings.UpdateAsync(settings => settings.MusicBrainzLookupEnabled = value); } }
+    public bool DiscogsLookupEnabled { get => _discogsLookupEnabled; set { if (Set(ref _discogsLookupEnabled, value)) _ = _settings.UpdateAsync(settings => settings.DiscogsLookupEnabled = value); } }
+    public string DiscogsUserToken { get => _discogsUserToken; set { if (Set(ref _discogsUserToken, value ?? "")) _ = _settings.UpdateAsync(settings => settings.DiscogsUserToken = value ?? ""); } }
     public bool IsOnlineLyricsBusy
     {
         get => _isOnlineLyricsBusy;
@@ -707,8 +939,10 @@ public sealed class MainViewModel : ObservableObject
     public AsyncRelayCommand NextCommand { get; }
     public AsyncRelayCommand PreviousCommand { get; }
     public RelayCommand AddToQueueCommand { get; }
+    public RelayCommand AddSelectedToQueueCommand { get; }
     public RelayCommand PlayNextCommand { get; }
     public RelayCommand ToggleQueueCommand { get; }
+    public RelayCommand ToggleVisualizerCommand { get; }
     public RelayCommand ToggleShuffleCommand { get; }
     public RelayCommand CycleRepeatCommand { get; }
     public AsyncRelayCommand ScanCommand { get; }
@@ -723,8 +957,28 @@ public sealed class MainViewModel : ObservableObject
     public AsyncRelayCommand ClearArtworkCacheCommand { get; }
     public AsyncRelayCommand RebuildArtworkCacheCommand { get; }
     public RelayCommand UndoQueueCommand { get; }
+    public RelayCommand RedoQueueCommand { get; }
     public RelayCommand ClearQueueCommand { get; }
+    public AsyncRelayCommand RemoveSelectedQueueCommand { get; }
+    public RelayCommand MoveSelectedQueueTopCommand { get; }
+    public RelayCommand MoveSelectedQueueBottomCommand { get; }
+    public RelayCommand ToggleStopAfterCurrentCommand { get; }
+    public RelayCommand ToggleStopAfterQueueCommand { get; }
+    public AsyncRelayCommand SetPlaybackSpeedCommand { get; }
+    public AsyncRelayCommand SetPitchCommand { get; }
+    public AsyncRelayCommand TogglePreservePitchCommand { get; }
+    public AsyncRelayCommand ResetPlaybackProcessingCommand { get; }
+    public AsyncRelayCommand SaveTrackPlaybackOverrideCommand { get; }
+    public AsyncRelayCommand ClearTrackPlaybackOverrideCommand { get; }
+    public AsyncRelayCommand SetCurrentRatingCommand { get; }
+    public AsyncRelayCommand AddBookmarkCommand { get; }
+    public AsyncRelayCommand ToggleBookmarkResumeCommand { get; }
+    public AsyncRelayCommand SeekBookmarkCommand { get; }
+    public AsyncRelayCommand RenameBookmarkCommand { get; }
+    public AsyncRelayCommand DeleteBookmarkCommand { get; }
     public AsyncRelayCommand LoveCommand { get; }
+    public AsyncRelayCommand EditMetadataCommand { get; }
+    public AsyncRelayCommand UndoMetadataCommand { get; }
     public AsyncRelayCommand SeekLyricCommand { get; }
     public AsyncRelayCommand ReloadLyricsCommand { get; }
     public AsyncRelayCommand FetchOnlineLyricsCommand { get; }
@@ -738,7 +992,518 @@ public sealed class MainViewModel : ObservableObject
     public AsyncRelayCommand RemoveMissingTrackCommand { get; }
     public RelayCommand PlayQueueEntryNextCommand { get; }
     public RelayCommand ToggleDiagnosticsCommand { get; }
+    public RelayCommand NewPlaylistCommand { get; }
+    public AsyncRelayCommand EditPlaylistCommand { get; }
+    public AsyncRelayCommand DuplicatePlaylistCommand { get; }
+    public AsyncRelayCommand DeletePlaylistCommand { get; }
+    public AsyncRelayCommand UndoPlaylistCommand { get; }
+    public AsyncRelayCommand RedoPlaylistCommand { get; }
+    public AsyncRelayCommand AddSelectedToPlaylistCommand { get; }
+    public RelayCommand SaveQueueAsPlaylistCommand { get; }
+    public AsyncRelayCommand ClearSearchHistoryCommand { get; }
+    public RelayCommand UseSearchHistoryCommand { get; }
+    public RelayCommand ToggleTrackColumnCommand { get; }
+    public RelayCommand MoveTrackColumnCommand { get; }
+    public RelayCommand SetTrackColumnWidthCommand { get; }
+    public RelayCommand SetDensityCommand { get; }
+    public RelayCommand SetAlbumTileSizeCommand { get; }
+    public RelayCommand ToggleDashboardModuleCommand { get; }
+
+    public void UpdateQueueSelection(IEnumerable<QueueEntryViewModel> entries) =>
+        SelectedQueueEntries = entries.Distinct().ToArray();
+
+    public void ShowNotice(string message)
+    {
+        UserNotice = message;
+        IsUserNoticeVisible = true;
+        _noticeTimer.Stop();
+        _noticeTimer.Start();
+    }
+
+    private void NoticeTimerOnTick(object? sender, EventArgs e)
+    {
+        _noticeTimer.Stop();
+        IsUserNoticeVisible = false;
+    }
+
+    private async Task RemoveSelectedQueueAsync()
+    {
+        var selected = SelectedQueueEntries;
+        if (selected.Count == 0) return;
+        var playingWasRemoved = selected.Any(entry => entry.IsPlaying);
+        var removed = _queue.RemoveMany(selected.Select(entry => entry.Entry.Id).ToArray());
+        if (removed == 0) return;
+        SelectedQueueEntries = [];
+        ShowNotice(removed == 1 ? "Removed 1 track from queue" : $"Removed {removed} tracks from queue");
+        if (!playingWasRemoved) return;
+        if (_queue.Current is { } replacement) await ChangeTrackAsync(replacement);
+        else await _audio.StopAsync(_lifetime.Token);
+    }
+
+    private void MoveSelectedQueue(bool toTop)
+    {
+        var ids = SelectedQueueEntries.Select(entry => entry.Entry.Id).ToArray();
+        if (ids.Length == 0) return;
+        if (toTop) _queue.MoveToTop(ids);
+        else _queue.MoveToBottom(ids);
+        ShowNotice(toTop ? "Moved selection to top" : "Moved selection to bottom");
+    }
+
+    private void ToggleStopMode(bool stopAfterCurrent)
+    {
+        if (stopAfterCurrent)
+        {
+            StopAfterCurrent = !StopAfterCurrent;
+            if (StopAfterCurrent) StopAfterQueue = false;
+        }
+        else
+        {
+            StopAfterQueue = !StopAfterQueue;
+            if (StopAfterQueue) StopAfterCurrent = false;
+        }
+        _ = _settings.UpdateAsync(settings =>
+        {
+            settings.StopAfterCurrent = StopAfterCurrent;
+            settings.StopAfterQueue = StopAfterQueue;
+        });
+        _ = RefreshQueuedTransitionAsync();
+        ShowNotice(StopModeText);
+    }
+
+    private async Task RefreshQueuedTransitionAsync()
+    {
+        try { await _audio.QueueNextAsync(PeekUpcomingTrack(), _lifetime.Token); }
+        catch (Exception exception) when (TrackFailurePolicy.IsRecoverable(exception))
+        {
+            _applicationLog.Write(ApplicationLogLevel.Warning, "audio", "predecode-next-failed", exception: exception);
+        }
+    }
+
+    private async Task SetPlaybackSpeedAsync(object? parameter)
+    {
+        if (!TryDouble(parameter, out var value)) return;
+        PlaybackSpeed = value;
+        await SavePlaybackProcessingAsync();
+    }
+
+    private async Task SetPitchAsync(object? parameter)
+    {
+        if (!TryDouble(parameter, out var value)) return;
+        PitchSemitones = value;
+        await SavePlaybackProcessingAsync();
+    }
+
+    private async Task TogglePreservePitchAsync()
+    {
+        PreservePitch = !PreservePitch;
+        await SavePlaybackProcessingAsync();
+        ShowNotice(PreservePitch ? "Pitch preservation enabled" : "Pitch preservation disabled");
+    }
+
+    private async Task ResetPlaybackProcessingAsync()
+    {
+        PlaybackSpeed = 1;
+        PitchSemitones = 0;
+        PreservePitch = true;
+        await SavePlaybackProcessingAsync();
+        ShowNotice("Playback speed and pitch reset");
+    }
+
+    private async Task SavePlaybackProcessingAsync()
+    {
+        await _settings.UpdateAsync(settings =>
+        {
+            settings.PlaybackSpeed = PlaybackSpeed;
+            settings.PitchSemitones = PitchSemitones;
+            settings.PreservePitch = PreservePitch;
+        }, _lifetime.Token);
+        await _audio.SetPlaybackOptionsAsync(CurrentPlaybackOptions(CurrentTrack), _lifetime.Token);
+        Raise(nameof(PlaybackProcessingText));
+    }
+
+    private async Task SaveTrackPlaybackOverrideAsync()
+    {
+        if (CurrentTrack is not { } track) return;
+        await _settings.UpdateAsync(settings => settings.TrackPlaybackOverrides[track.Path] = new TrackPlaybackOverrideSettings
+        {
+            Speed = PlaybackSpeed,
+            PitchSemitones = PitchSemitones,
+            PreservePitch = PreservePitch
+        }, _lifetime.Token);
+        Raise(nameof(CurrentTrackHasPlaybackOverride));
+        Raise(nameof(PlaybackProcessingText));
+        ClearTrackPlaybackOverrideCommand.RaiseCanExecuteChanged();
+        ShowNotice("Playback settings saved for this track");
+    }
+
+    private async Task ClearTrackPlaybackOverrideAsync()
+    {
+        if (CurrentTrack is not { } track) return;
+        await _settings.UpdateAsync(settings => settings.TrackPlaybackOverrides.Remove(track.Path), _lifetime.Token);
+        PlaybackSpeed = _settings.Current.PlaybackSpeed;
+        PitchSemitones = _settings.Current.PitchSemitones;
+        PreservePitch = _settings.Current.PreservePitch;
+        await _audio.SetPlaybackOptionsAsync(CurrentPlaybackOptions(track), _lifetime.Token);
+        Raise(nameof(CurrentTrackHasPlaybackOverride));
+        Raise(nameof(PlaybackProcessingText));
+        ClearTrackPlaybackOverrideCommand.RaiseCanExecuteChanged();
+        ShowNotice("Track playback override removed");
+    }
+
+    private async Task SetCurrentRatingAsync(object? parameter)
+    {
+        if (!int.TryParse(parameter?.ToString(), out var rating)) return;
+        await SetRatingAsync(rating == CurrentRating ? 0 : rating);
+        ShowNotice(CurrentRating == 0 ? "Rating cleared" : $"Rated {CurrentRating} stars");
+    }
+
+    public async Task SetTrackRatingAsync(Track track, int rating)
+    {
+        rating = Math.Clamp(rating, 0, 5);
+        await _repository.SetRatingAsync(track.Id, rating, track.IsLoved, _lifetime.Token);
+        ReplaceTrackState(track with { Rating = rating });
+        ShowNotice(rating == 0 ? "Rating cleared" : $"Rated {rating} stars");
+    }
+
+    private async Task AddBookmarkAsync(string? name)
+    {
+        if (CurrentTrack is not { Id: > 0 } track) return;
+        name = string.IsNullOrWhiteSpace(name) ? $"Bookmark {FormatTime(_audio.Snapshot.Position)}" : name.Trim();
+        await _repository.CreateBookmarkAsync(track.Id, name, _audio.Snapshot.Position, _lifetime.Token);
+        await LoadBookmarksAsync(track);
+        ShowNotice($"Bookmark added at {FormatTime(_audio.Snapshot.Position)}");
+    }
+
+    private async Task ToggleBookmarkResumeAsync()
+    {
+        await _settings.UpdateAsync(settings => settings.ResumeTrackBookmarks = !settings.ResumeTrackBookmarks, _lifetime.Token);
+        Raise(nameof(ResumeTrackBookmarks));
+        ShowNotice(ResumeTrackBookmarks ? "Automatic track resume enabled" : "Automatic track resume disabled");
+    }
+
+    private async Task SeekBookmarkAsync(PlaybackBookmark? bookmark)
+    {
+        if (bookmark is null) return;
+        await CommitSeekAsync(bookmark.Position.TotalSeconds);
+    }
+
+    private async Task RenameBookmarkAsync(object? parameter)
+    {
+        if (parameter is not BookmarkRenameRequest request || string.IsNullOrWhiteSpace(request.Name)) return;
+        await _repository.RenameBookmarkAsync(request.Bookmark.Id, request.Name.Trim(), _lifetime.Token);
+        if (CurrentTrack is { } track) await LoadBookmarksAsync(track);
+        ShowNotice("Bookmark renamed");
+    }
+
+    private async Task DeleteBookmarkAsync(PlaybackBookmark? bookmark)
+    {
+        if (bookmark is null) return;
+        await _repository.DeleteBookmarkAsync(bookmark.Id, _lifetime.Token);
+        if (CurrentTrack is { } track) await LoadBookmarksAsync(track);
+        ShowNotice("Bookmark removed");
+    }
+
+    private async Task LoadBookmarksAsync(Track track)
+    {
+        var bookmarks = track.Id > 0
+            ? await _repository.GetBookmarksAsync(track.Id, _lifetime.Token)
+            : [];
+        RunOnUi(() =>
+        {
+            Replace(Bookmarks, bookmarks);
+            Raise(nameof(HasBookmarks));
+        });
+    }
+
+    private static bool TryDouble(object? parameter, out double value) =>
+        double.TryParse(parameter?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out value)
+        || double.TryParse(parameter?.ToString(), out value);
+
+    private async Task ClearSearchHistoryAsync()
+    {
+        await _settings.UpdateAsync(settings => settings.SearchHistory.Clear(), _lifetime.Token);
+        Raise(nameof(SearchHistory));
+        Raise(nameof(SearchSuggestions));
+    }
+
+    private void ToggleTrackColumn(string? column)
+    {
+        if (string.IsNullOrWhiteSpace(column) || !TrackColumnNames.Contains(column, StringComparer.OrdinalIgnoreCase)) return;
+        var view = GetViewSettings();
+        if (view.VisibleColumns.Contains(column, StringComparer.OrdinalIgnoreCase)) view.VisibleColumns.RemoveAll(item => item.Equals(column, StringComparison.OrdinalIgnoreCase));
+        else view.VisibleColumns.Add(column);
+        _ = _settings.UpdateAsync(settings => settings.ViewSettings[CurrentView] = view);
+        Raise(nameof(VisibleTrackColumns));
+    }
+
+    private void SetDensity(string? value)
+    {
+        if (!Enum.TryParse<LibraryDensity>(value, ignoreCase: true, out var density)) return;
+        Density = density;
+    }
+
+    private void SetAlbumTileSize(string? value)
+    {
+        if (!int.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var size)) return;
+        AlbumTileSize = Math.Clamp(size, 80, 400);
+    }
+
+    private void MoveTrackColumn(string? parameter)
+    {
+        if (string.IsNullOrWhiteSpace(parameter)) return;
+        var parts = parameter.Split('|', 2, StringSplitOptions.TrimEntries);
+        if (parts.Length != 2 || !TrackColumnNames.Contains(parts[0], StringComparer.OrdinalIgnoreCase)) return;
+        var order = GetViewSettings().ColumnOrder;
+        if (order.Count == 0)
+            order.AddRange(TrackColumnNames);
+        var index = order.FindIndex(item => item.Equals(parts[0], StringComparison.OrdinalIgnoreCase));
+        if (index < 0) return;
+        var target = parts[1].Equals("left", StringComparison.OrdinalIgnoreCase) ? index - 1 : index + 1;
+        if (target < 0 || target >= order.Count) return;
+        (order[index], order[target]) = (order[target], order[index]);
+        _ = _settings.UpdateAsync(settings => settings.ViewSettings[CurrentView] = GetViewSettings());
+        Raise(nameof(TrackColumnOrder));
+    }
+
+    private void SetTrackColumnWidth(string? parameter)
+    {
+        if (string.IsNullOrWhiteSpace(parameter)) return;
+        var parts = parameter.Split('|', 2, StringSplitOptions.TrimEntries);
+        if (parts.Length != 2 || !TrackColumnNames.Contains(parts[0], StringComparer.OrdinalIgnoreCase) || !double.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var width)) return;
+        var view = GetViewSettings();
+        view.ColumnWidths[parts[0]] = Math.Clamp(width, 40, 800);
+        _ = _settings.UpdateAsync(settings => settings.ViewSettings[CurrentView] = view);
+        Raise(nameof(TrackColumnWidths));
+    }
+
+    private void ToggleDashboardModule(string? module)
+    {
+        if (string.IsNullOrWhiteSpace(module) || !DashboardModuleNames.Contains(module, StringComparer.OrdinalIgnoreCase)) return;
+        var modules = _dashboardModules.ToList();
+        var existing = modules.FirstOrDefault(item => item.Equals(module, StringComparison.OrdinalIgnoreCase));
+        if (existing is null) modules.Add(DashboardModuleNames.First(item => item.Equals(module, StringComparison.OrdinalIgnoreCase)));
+        else modules.Remove(existing);
+        if (modules.Count == 0) modules.Add("Artwork");
+        _dashboardModules = modules;
+        _ = _settings.UpdateAsync(settings => settings.DashboardModules = modules.ToList());
+        Raise(nameof(DashboardModules));
+        Raise(nameof(IsDashboardModuleVisible));
+    }
+
+    private void RequestPlaylistEdit(Playlist? playlist) => PlaylistEditRequested?.Invoke(this, new PlaylistEditContext(playlist));
+    private void RequestPlaylistEdit(PlaylistEditContext context) => PlaylistEditRequested?.Invoke(this, context);
+
+    private async Task EditPlaylistAsync(LibraryCardViewModel? card)
+    {
+        if (card?.PlaylistId is not { } id) return;
+        var playlist = await _playlists.GetAsync(id, _lifetime.Token);
+        if (playlist is not null) RequestPlaylistEdit(playlist);
+    }
+
+    public async Task SavePlaylistAsync(Playlist? existing, PlaylistEditRequest request, IReadOnlyList<Track>? initialTracks = null)
+    {
+        if (existing is null)
+        {
+            var id = request.Kind == PlaylistKind.Smart
+                ? await _playlists.CreateSmartAsync(request.Name, request.Rules ?? new SmartPlaylistDefinition(), _lifetime.Token)
+                : await _playlists.CreateManualAsync(request.Name, _lifetime.Token);
+            await _playlists.UpdateDetailsAsync(id, request.Description, request.CoverPath, _lifetime.Token);
+            if (initialTracks is { Count: > 0 }) await _playlists.AddTracksAsync(id, initialTracks.Select(track => track.Id).ToArray(), _lifetime.Token);
+            PushPlaylistHistory(
+                async () => await _playlists.DeleteAsync(id, _lifetime.Token),
+                async () =>
+                {
+                    var recreated = request.Kind == PlaylistKind.Smart
+                        ? await _playlists.CreateSmartAsync(request.Name, request.Rules ?? new SmartPlaylistDefinition(), _lifetime.Token)
+                        : await _playlists.CreateManualAsync(request.Name, _lifetime.Token);
+                    await _playlists.UpdateDetailsAsync(recreated, request.Description, request.CoverPath, _lifetime.Token);
+                    if (initialTracks is { Count: > 0 }) await _playlists.AddTracksAsync(recreated, initialTracks.Select(track => track.Id).ToArray(), _lifetime.Token);
+                });
+            StatusText = $"Playlist '{request.Name}' created";
+        }
+        else
+        {
+            var before = existing;
+            await _playlists.RenameAsync(existing.Id, request.Name, _lifetime.Token);
+            await _playlists.UpdateDetailsAsync(existing.Id, request.Description, request.CoverPath, _lifetime.Token);
+            if (existing.Kind == PlaylistKind.Smart && request.Rules is not null) await _playlists.UpdateSmartRulesAsync(existing.Id, request.Rules, _lifetime.Token);
+            PushPlaylistHistory(
+                async () =>
+                {
+                    await _playlists.RenameAsync(before.Id, before.Name, _lifetime.Token);
+                    await _playlists.UpdateDetailsAsync(before.Id, before.Description, before.CoverPath, _lifetime.Token);
+                    if (before.Kind == PlaylistKind.Smart && before.Rules is not null) await _playlists.UpdateSmartRulesAsync(before.Id, before.Rules, _lifetime.Token);
+                },
+                async () =>
+                {
+                    await _playlists.RenameAsync(before.Id, request.Name, _lifetime.Token);
+                    await _playlists.UpdateDetailsAsync(before.Id, request.Description, request.CoverPath, _lifetime.Token);
+                    if (before.Kind == PlaylistKind.Smart && request.Rules is not null) await _playlists.UpdateSmartRulesAsync(before.Id, request.Rules, _lifetime.Token);
+                });
+            StatusText = $"Playlist '{request.Name}' updated";
+        }
+        _ = BackupPlaylistsAsync();
+        await RefreshLibraryAsync(SearchText, _lifetime.Token);
+        RefreshPlaylistHistoryCommands();
+    }
+
+    private async Task DuplicatePlaylistAsync(LibraryCardViewModel? card)
+    {
+        if (card?.PlaylistId is not { } id) return;
+        var duplicate = await _playlists.DuplicateAsync(id, null, _lifetime.Token);
+        PushPlaylistHistory(async () => await _playlists.DeleteAsync(duplicate, _lifetime.Token), async () => await _playlists.DuplicateAsync(id, null, _lifetime.Token));
+        await RefreshLibraryAsync(SearchText, _lifetime.Token);
+        _ = BackupPlaylistsAsync();
+        StatusText = "Playlist duplicated";
+    }
+
+    private async Task DeletePlaylistAsync(LibraryCardViewModel? card)
+    {
+        if (card?.PlaylistId is not { } id) return;
+        var playlist = await _playlists.GetAsync(id, _lifetime.Token);
+        if (playlist is null) return;
+        var tracks = playlist.Kind == PlaylistKind.Manual ? await _playlists.GetTracksAsync(id, _lifetime.Token) : [];
+        await _playlists.DeleteAsync(id, _lifetime.Token);
+        long? restoredId = null;
+        PushPlaylistHistory(
+            async () =>
+            {
+                restoredId = playlist.Kind == PlaylistKind.Smart
+                    ? await _playlists.CreateSmartAsync(playlist.Name, playlist.Rules ?? new SmartPlaylistDefinition(), _lifetime.Token)
+                    : await _playlists.CreateManualAsync(playlist.Name, _lifetime.Token);
+                await _playlists.UpdateDetailsAsync(restoredId.Value, playlist.Description, playlist.CoverPath, _lifetime.Token);
+                if (tracks.Count > 0) await _playlists.AddTracksAsync(restoredId.Value, tracks.Select(track => track.Id).ToArray(), _lifetime.Token);
+            },
+            async () => { if (restoredId is { } idToDelete) await _playlists.DeleteAsync(idToDelete, _lifetime.Token); });
+        await RefreshLibraryAsync(SearchText, _lifetime.Token);
+        _ = BackupPlaylistsAsync();
+        StatusText = $"Playlist '{playlist.Name}' deleted";
+    }
+
+    private async Task AddSelectedToPlaylistAsync(LibraryCardViewModel? card)
+    {
+        if (card?.PlaylistId is not { } id || SelectedTracks.Count == 0) return;
+        var before = await _playlists.GetTracksAsync(id, _lifetime.Token);
+        var selected = SelectedTracks.ToArray();
+        await _playlists.AddTracksAsync(id, selected.Select(track => track.Id).ToArray(), _lifetime.Token);
+        PushPlaylistHistory(
+            async () => await _playlists.ReplaceTracksAsync(id, before.Select(track => track.Id).ToArray(), _lifetime.Token),
+            async () => await _playlists.AddTracksAsync(id, selected.Select(track => track.Id).ToArray(), _lifetime.Token));
+        await RefreshLibraryAsync(SearchText, _lifetime.Token);
+        _ = BackupPlaylistsAsync();
+        StatusText = $"Added {SelectedTracks.Count:N0} tracks to playlist";
+    }
+
+    public async Task AddPathsToPlaylistAsync(LibraryCardViewModel? card, IEnumerable<string> paths)
+    {
+        if (card?.PlaylistId is not { } id) return;
+        var pathSet = paths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var tracks = _allTracks.Where(track => pathSet.Contains(track.Path)).ToArray();
+        if (tracks.Length == 0) return;
+        var before = await _playlists.GetTracksAsync(id, _lifetime.Token);
+        await _playlists.AddTracksAsync(id, tracks.Select(track => track.Id).ToArray(), _lifetime.Token);
+        PushPlaylistHistory(
+            async () => await _playlists.ReplaceTracksAsync(id, before.Select(track => track.Id).ToArray(), _lifetime.Token),
+            async () => await _playlists.AddTracksAsync(id, tracks.Select(track => track.Id).ToArray(), _lifetime.Token));
+        _ = BackupPlaylistsAsync();
+        await RefreshLibraryAsync(SearchText, _lifetime.Token);
+        StatusText = $"Added {tracks.Length:N0} tracks to playlist";
+    }
+
+    public async Task MoveTracksInPlaylistAsync(LibraryCardViewModel? card, IEnumerable<string> paths, int destinationIndex)
+    {
+        if (card?.PlaylistId is not { } id) return;
+        var playlist = await _playlists.GetAsync(id, _lifetime.Token);
+        if (playlist?.Kind != PlaylistKind.Manual) return;
+        var pathSet = paths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var before = await _playlists.GetTracksAsync(id, _lifetime.Token);
+        var selectedIds = before.Where(track => pathSet.Contains(track.Path)).Select(track => track.Id).ToArray();
+        if (selectedIds.Length == 0) return;
+        var after = before.Where(track => !selectedIds.Contains(track.Id)).ToList();
+        destinationIndex = Math.Clamp(destinationIndex, 0, after.Count);
+        after.InsertRange(destinationIndex, before.Where(track => selectedIds.Contains(track.Id)));
+        await _playlists.MoveTracksAsync(id, selectedIds, destinationIndex, _lifetime.Token);
+        PushPlaylistHistory(
+            async () => await _playlists.ReplaceTracksAsync(id, before.Select(track => track.Id).ToArray(), _lifetime.Token),
+            async () => await _playlists.ReplaceTracksAsync(id, after.Select(track => track.Id).ToArray(), _lifetime.Token));
+        await RefreshLibraryAsync(SearchText, _lifetime.Token);
+        _ = BackupPlaylistsAsync();
+        StatusText = $"Moved {selectedIds.Length:N0} playlist track{(selectedIds.Length == 1 ? "" : "s")}";
+    }
+
+    public void AddPathsToQueue(IEnumerable<string> paths)
+    {
+        var set = paths.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var tracks = _allTracks.Where(track => set.Contains(track.Path) && !track.IsMissing).ToArray();
+        if (tracks.Length > 0) _queue.Add(tracks);
+    }
+
+    public IReadOnlyList<string> GetCardPaths(LibraryCardViewModel? card) => card is null ? [] : card.PlaylistId is null ? card.TrackIndexes.Where(index => index >= 0 && index < _allTracks.Count).Select(index => _allTracks[index].Path).ToArray() : [];
+
+    public async Task<long> ImportPlaylistFileAsync(string path)
+    {
+        var id = await _playlistFiles.ImportAsync(path, _lifetime.Token);
+        _ = BackupPlaylistsAsync();
+        await RefreshLibraryAsync(SearchText, _lifetime.Token);
+        var report = _playlistFiles.LastImportReport;
+        var importedCount = report?.ImportedTracks ?? 0;
+        StatusText = report is { MissingLocations: > 0 }
+            ? $"Playlist imported · {importedCount:N0} tracks · {report.MissingLocations:N0} missing locations"
+            : $"Playlist imported · {importedCount:N0} tracks";
+        return id;
+    }
+
+    public async Task ExportPlaylistFileAsync(long playlistId, string path, PlaylistFormat format)
+    {
+        await _playlistFiles.ExportAsync(playlistId, path, format, _lifetime.Token);
+        StatusText = "Playlist exported";
+    }
+
+    private void PushPlaylistHistory(Func<Task> undo, Func<Task> redo)
+    {
+        _playlistUndo.Push(new PlaylistHistoryEntry(undo, redo));
+        _playlistRedo.Clear();
+        RefreshPlaylistHistoryCommands();
+    }
+
+    private void RefreshPlaylistHistoryCommands()
+    {
+        UndoPlaylistCommand.RaiseCanExecuteChanged();
+        RedoPlaylistCommand.RaiseCanExecuteChanged();
+    }
+
+    private async Task BackupPlaylistsAsync()
+    {
+        try { await _playlistBackups.BackupAsync(_lifetime.Token); }
+        catch (OperationCanceledException) { }
+        catch (IOException) { }
+    }
+
+    private async Task UndoPlaylistAsync()
+    {
+        if (_playlistUndo.Count == 0) return;
+        var entry = _playlistUndo.Pop();
+        await entry.Undo();
+        _playlistRedo.Push(entry);
+        _ = BackupPlaylistsAsync();
+        await RefreshLibraryAsync(SearchText, _lifetime.Token);
+        StatusText = "Playlist change undone";
+        RefreshPlaylistHistoryCommands();
+    }
+
+    private async Task RedoPlaylistAsync()
+    {
+        if (_playlistRedo.Count == 0) return;
+        var entry = _playlistRedo.Pop();
+        await entry.Redo();
+        _playlistUndo.Push(entry);
+        _ = BackupPlaylistsAsync();
+        await RefreshLibraryAsync(SearchText, _lifetime.Token);
+        StatusText = "Playlist change redone";
+        RefreshPlaylistHistoryCommands();
+    }
     public event EventHandler? NavigationStarting;
+    public event EventHandler<PlaylistEditContext>? PlaylistEditRequested;
 
     public async Task InitializeAsync()
     {
@@ -750,6 +1515,8 @@ public sealed class MainViewModel : ObservableObject
     {
         IsSafeMode = true;
         _animationsEnabled = false;
+        _visualizerEnabled = false;
+        _audio.SetVisualizationEnabled(false);
         _queueVisible = false;
         Raise(nameof(AnimationsEnabled));
         Raise(nameof(QueueVisible));
@@ -770,10 +1537,16 @@ public sealed class MainViewModel : ObservableObject
     private async Task InitializeShellCoreAsync()
     {
         await _settings.InitializeAsync(_lifetime.Token);
+        LoadViewSettings();
         _volume = _settings.Current.Volume; Raise(nameof(Volume));
         _queueVisible = !IsSafeMode && _settings.Current.QueuePanelVisible; Raise(nameof(QueueVisible));
         _albumTileSize = _settings.Current.AlbumTileSize; Raise(nameof(AlbumTileSize)); Raise(nameof(GalleryItemWidth)); Raise(nameof(GalleryItemHeight));
+        _dashboardModules = NormalizeDashboardModules(_settings.Current.DashboardModules); Raise(nameof(DashboardModules));
         _animationsEnabled = !IsSafeMode && _settings.Current.AnimationsEnabled; Raise(nameof(AnimationsEnabled));
+        _visualizerEnabled = !IsSafeMode && _settings.Current.VisualizerEnabled;
+        _audio.SetVisualizationEnabled(_visualizerEnabled);
+        Raise(nameof(VisualizerEnabled));
+        Raise(nameof(VisualizerText));
         _artworkCacheMegabytes = _settings.Current.ArtworkCacheMegabytes;
         _scheduledScanEnabled = _settings.Current.ScheduledLibraryScanEnabled;
         _scheduledScanIntervalMinutes = _settings.Current.ScheduledLibraryScanIntervalMinutes;
@@ -790,6 +1563,8 @@ public sealed class MainViewModel : ObservableObject
         _playbackSpeed = _settings.Current.PlaybackSpeed;
         _pitchSemitones = _settings.Current.PitchSemitones;
         _preservePitch = _settings.Current.PreservePitch;
+        _stopAfterCurrent = _settings.Current.StopAfterCurrent;
+        _stopAfterQueue = _settings.Current.StopAfterQueue;
         ApplyLyricsSettings();
         Raise(nameof(ReplayGainMode));
         Raise(nameof(ReplayGainPreampDb));
@@ -797,6 +1572,10 @@ public sealed class MainViewModel : ObservableObject
         Raise(nameof(PlaybackSpeed));
         Raise(nameof(PitchSemitones));
         Raise(nameof(PreservePitch));
+        Raise(nameof(StopAfterCurrent));
+        Raise(nameof(StopAfterQueue));
+        Raise(nameof(HasStopMode));
+        Raise(nameof(StopModeText));
         _shortcuts.Refresh(_settings.Current.Shortcuts);
         StatusText = IsSafeMode
             ? "Safe mode · session restore and visual effects are disabled"
@@ -958,7 +1737,7 @@ public sealed class MainViewModel : ObservableObject
     public void CancelReplayGainAnalysis() =>
         _replayGainAnalysisCancellation?.Cancel();
 
-    private AudioPlaybackOptions CurrentPlaybackOptions()
+    private AudioPlaybackOptions CurrentPlaybackOptions(Track? track = null)
     {
         var profile = _settings.Current.OutputProfiles.FirstOrDefault(
                           output => output.DeviceId ==
@@ -981,6 +1760,24 @@ public sealed class MainViewModel : ObservableObject
             PitchSemitones = PitchSemitones,
             PreservePitch = PreservePitch
         };
+    }
+
+    private void ApplyTrackPlaybackSettings(Track track)
+    {
+        if (_settings.Current.TrackPlaybackOverrides.TryGetValue(track.Path, out var trackOverride))
+        {
+            PlaybackSpeed = trackOverride.Speed;
+            PitchSemitones = trackOverride.PitchSemitones;
+            PreservePitch = trackOverride.PreservePitch;
+        }
+        else
+        {
+            PlaybackSpeed = _settings.Current.PlaybackSpeed;
+            PitchSemitones = _settings.Current.PitchSemitones;
+            PreservePitch = _settings.Current.PreservePitch;
+        }
+        Raise(nameof(CurrentTrackHasPlaybackOverride));
+        Raise(nameof(PlaybackProcessingText));
     }
 
     public async Task RefreshOutputDevicesAsync()
@@ -1194,12 +1991,18 @@ public sealed class MainViewModel : ObservableObject
             .Where(source => source.Enabled && source.WatchEnabled)
             .Select(source => source.Path));
 
-    private static bool IsWithinSource(string path, string root)
+    internal static bool IsWithinSource(string path, string root)
     {
         var normalizedPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         var normalizedRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         return normalizedPath.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase);
     }
+
+    internal static bool IsWithinEnabledSources(
+        string path,
+        IReadOnlyList<string> activeRoots) =>
+        activeRoots.Count == 0
+        || activeRoots.Any(root => IsWithinSource(path, root));
 
     public async Task OpenLaunchTargetsAsync(IEnumerable<string> targets)
     {
@@ -1275,8 +2078,30 @@ public sealed class MainViewModel : ObservableObject
     }
     public async Task CommitSeekAsync(double seconds)
     {
+        var previousPosition = _audio.Snapshot.Position;
         PreviewSeek(seconds);
         try { await SeekAsync(PositionSeconds); }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            PositionSeconds = Math.Clamp(
+                previousPosition.TotalSeconds,
+                0,
+                DurationSeconds);
+            PositionText = FormatTime(previousPosition);
+            StatusText = "Could not seek · " + exception.GetBaseException().Message;
+            _applicationLog.Write(
+                ApplicationLogLevel.Warning,
+                "audio",
+                "seek-failed",
+                new Dictionary<string, object?>
+                {
+                    ["track"] = CurrentTrack?.Path,
+                    ["requestedSeconds"] = seconds,
+                    ["positionSeconds"] = previousPosition.TotalSeconds
+                },
+                exception);
+        }
         finally { _isUserSeeking = false; }
     }
     public void StartSleepTimer(TimeSpan duration) => _sleepTimer.Start(duration);
@@ -1365,11 +2190,36 @@ public sealed class MainViewModel : ObservableObject
     {
         using var refreshScope = _diagnostics.Measure("library", "refresh",
             _diagnostics.Enabled ? new Dictionary<string, object?> { ["queryLength"] = query.Length } : null);
+        var parsedSearch = LibrarySearchQuery.Parse(query);
         var indexedTracks = string.IsNullOrWhiteSpace(query)
             ? await _repository.GetAllAsync(cancellationToken)
-            : await _repository.SearchAsync(query, 5000, cancellationToken);
+            : parsedSearch.IsStructured
+                ? await _repository.GetAllAsync(cancellationToken)
+                : await _repository.SearchAsync(parsedSearch.RepositoryText, 5000, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(query)) indexedTracks = indexedTracks.Where(parsedSearch.Matches).ToArray();
+        var playlistClauses = parsedSearch.Clauses.Where(clause => clause.Field == "playlist").ToArray();
+        if (playlistClauses.Length > 0)
+        {
+            var playlistMembership = new Dictionary<long, HashSet<long>>();
+            var playlistNames = new Dictionary<long, string>();
+            foreach (var summary in await _playlists.GetSummariesAsync(cancellationToken))
+            {
+                playlistNames[summary.Playlist.Id] = summary.Playlist.Name;
+                playlistMembership[summary.Playlist.Id] = (await _playlists.GetTracksAsync(summary.Playlist.Id, cancellationToken)).Select(track => track.Id).ToHashSet();
+            }
+            indexedTracks = indexedTracks.Where(track => playlistClauses.All(clause =>
+            {
+                var matchingPlaylists = playlistNames.Where(pair => pair.Value.Contains(clause.Value, StringComparison.CurrentCultureIgnoreCase)).Select(pair => pair.Key);
+                var belongs = matchingPlaylists.Any(id => playlistMembership.TryGetValue(id, out var membership) && membership.Contains(track.Id));
+                return clause.IsNegative ? !belongs : belongs;
+            })).ToArray();
+        }
+        RememberSearch(query);
         var activeRoots = EnabledSourcePaths();
-        IReadOnlyList<Track> tracks = indexedTracks.Where(track => activeRoots.Any(root => IsWithinSource(track.Path, root))).ToArray();
+        IReadOnlyList<Track> tracks = indexedTracks
+            .Where(track => IsWithinEnabledSources(track.Path, activeRoots))
+            .ToArray();
+        if (!string.IsNullOrWhiteSpace(QuickFilter)) tracks = LibraryFilter.Apply(tracks, QuickFilter);
         LibraryGroupSnapshot groups;
         await _groupingGate.WaitAsync(cancellationToken);
         try
@@ -1385,6 +2235,7 @@ public sealed class MainViewModel : ObservableObject
                             ["tracks"] = tracks.Count
                         }
                         : null);
+                _groupingIndex.ConfigureSeparators(_settings.Current.MultiValueSeparators);
                 return _groupingIndex.Reset(tracks);
             }, cancellationToken);
         }
@@ -1486,11 +2337,11 @@ public sealed class MainViewModel : ObservableObject
             result.Add(new LibraryCardViewModel
             {
                 Kind = "Playlist", Key = playlist.Id.ToString(), PlaylistId = playlist.Id, Title = playlist.Name,
-                Subtitle = playlist.Kind == PlaylistKind.Smart ? "Smart playlist" : "Playlist",
+                Subtitle = string.IsNullOrWhiteSpace(playlist.Description) ? (playlist.Kind == PlaylistKind.Smart ? "Smart playlist" : "Playlist") : playlist.Description,
                 Detail = summary.TrackCount == 1 ? "1 track" : $"{summary.TrackCount:N0} tracks",
                 TrackCount = summary.TrackCount,
                 RepresentativeTrack = summary.RepresentativeTrack,
-                ArtworkPath = ExistingArtwork(summary.RepresentativeTrack)
+                ArtworkPath = !string.IsNullOrWhiteSpace(playlist.CoverPath) && File.Exists(playlist.CoverPath) ? playlist.CoverPath : ExistingArtwork(summary.RepresentativeTrack)
             });
         }
         return result.OrderBy(x => x.Title, StringComparer.CurrentCultureIgnoreCase).ToArray();
@@ -1637,6 +2488,26 @@ public sealed class MainViewModel : ObservableObject
                     PrimaryViewStateKey);
                 break;
             }
+            case "Recently Added":
+                SetBrowseTracks(_allTracks.Where(track => !track.IsMissing).OrderByDescending(track => track.AddedAt), "Recently added", "Tracks added to your library most recently", PrimaryViewStateKey);
+                ViewSubtitle = "Tracks added to your library most recently";
+                break;
+            case "Recently Played":
+                SetBrowseTracks(_allTracks.Where(track => !track.IsMissing && track.LastPlayedAt is not null).OrderByDescending(track => track.LastPlayedAt), "Recently played", "Your latest listening activity", PrimaryViewStateKey);
+                ViewSubtitle = "Your latest listening activity";
+                break;
+            case "Most Played":
+                SetBrowseTracks(_allTracks.Where(track => !track.IsMissing && track.PlayCount > 0).OrderByDescending(track => track.PlayCount).ThenByDescending(track => track.LastPlayedAt), "Most played", "Your most played tracks", PrimaryViewStateKey);
+                ViewSubtitle = "Your most played tracks";
+                break;
+            case "Never Played":
+                SetBrowseTracks(_allTracks.Where(track => !track.IsMissing && track.PlayCount == 0).OrderBy(track => track.AddedAt), "Never played", "Tracks waiting for their first play", PrimaryViewStateKey);
+                ViewSubtitle = "Tracks waiting for their first play";
+                break;
+            case "History":
+                SetBrowseTracks(_allTracks.Where(track => track.LastPlayedAt is not null).OrderByDescending(track => track.LastPlayedAt), "History", "Playback history from this device", PrimaryViewStateKey);
+                ViewSubtitle = "Playback history from this device";
+                break;
             case "Now Playing":
                 SetContentViewStateKey(PrimaryViewStateKey);
                 ViewSubtitle = CurrentTrack is null ? "Choose a track to begin" : CurrentArtist;
@@ -1745,8 +2616,23 @@ public sealed class MainViewModel : ObservableObject
         card.IsSelected = true;
         if (rememberSelection)
             _cardSelections[CurrentView] = new CardSelection(card.Kind, card.Key);
-        var subtitle = string.IsNullOrWhiteSpace(card.Detail) ? $"{card.Subtitle} · {card.CountText}" : $"{card.Detail} · {card.CountText}";
+        var subtitle = FormatCollectionSubtitle(card, TryGetCardTracks(card));
         var tracks = TryGetCardTracks(card);
+        if (card.Kind.Equals("Artist", StringComparison.OrdinalIgnoreCase) && tracks is { Count: > 0 })
+        {
+            var albums = tracks.GroupBy(track => track.DisplayAlbum, StringComparer.CurrentCultureIgnoreCase)
+                .Select(group => new { Name = group.Key, Year = group.Max(track => track.Year), Count = group.Count() })
+                .OrderByDescending(album => album.Year)
+                .ThenBy(album => album.Name, StringComparer.CurrentCultureIgnoreCase)
+                .ToArray();
+            var topTracks = tracks.OrderByDescending(track => track.PlayCount).ThenByDescending(track => track.Rating).ThenBy(track => track.Title, StringComparer.CurrentCultureIgnoreCase).Take(3).Select(track => track.Title).ToArray();
+            ArtistProfileText = $"{tracks.Count:N0} tracks · {albums.Length:N0} albums · {tracks.Sum(track => track.PlayCount):N0} plays";
+            ArtistDiscographyText = $"Discography: {string.Join(" · ", albums.Take(6).Select(album => $"{album.Name}{(album.Year > 0 ? $" ({album.Year})" : string.Empty)} · {album.Count} tracks"))}";
+            ArtistProfileAttribution = topTracks.Length == 0 ? "Top tracks are calculated locally" : $"Top tracks: {string.Join(" · ", topTracks)} · calculated locally";
+            if (MetadataLookupEnabled && MusicBrainzLookupEnabled)
+                _ = LoadRemoteArtistProfileAsync(card.Title, card.Key);
+        }
+        else { ArtistProfileText = string.Empty; ArtistProfileAttribution = string.Empty; ArtistDiscographyText = string.Empty; }
         if (tracks is null)
         {
             SetContentViewStateKey(CollectionViewStateKey(CurrentView, card));
@@ -1768,6 +2654,38 @@ public sealed class MainViewModel : ObservableObject
             ViewSubtitle = string.IsNullOrWhiteSpace(card.Detail) ? $"{card.Subtitle} · {card.CountText}" : $"{card.Detail} · {card.CountText}";
             Raise(nameof(ViewTitle));
         }
+    }
+
+    private async Task LoadRemoteArtistProfileAsync(string artist, string cardKey)
+    {
+        try
+        {
+            var profile = await _metadataMatcher.GetArtistProfileAsync(artist, MetadataMatchProvider.MusicBrainz, _lifetime.Token);
+            if (profile is null || SelectedCard?.Key is not { } selectedKey || !selectedKey.Equals(cardKey, StringComparison.OrdinalIgnoreCase)) return;
+            RunOnUi(() =>
+            {
+                if (SelectedCard?.Key is { } currentKey && currentKey.Equals(cardKey, StringComparison.OrdinalIgnoreCase))
+                    ArtistProfileAttribution = $"{profile.Attribution} · matched as {profile.Name}";
+            });
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception)
+        {
+            _applicationLog.Write(ApplicationLogLevel.Debug, "metadata", "artist-profile-lookup-failed", exception: exception);
+        }
+    }
+
+    private static string FormatCollectionSubtitle(LibraryCardViewModel card, IReadOnlyList<Track>? tracks)
+    {
+        var baseText = string.IsNullOrWhiteSpace(card.Detail) ? card.Subtitle : card.Detail;
+        if (tracks is null || tracks.Count == 0) return $"{baseText} · {card.CountText}";
+        var discs = tracks.Select(track => track.DiscNumber).Where(number => number > 0).Distinct().Count();
+        var gain = tracks.Select(track => track.ReplayGainAlbumDb).FirstOrDefault(value => value.HasValue);
+        var suffix = discs > 1 ? $" · {discs} discs" : string.Empty;
+        if (card.Kind.Equals("Artist", StringComparison.OrdinalIgnoreCase))
+            suffix += $" · {tracks.Select(track => track.DisplayAlbum).Distinct(StringComparer.CurrentCultureIgnoreCase).Count():N0} albums · {tracks.Aggregate(TimeSpan.Zero, (total, track) => total + track.Duration).ToString(@"h\:mm\:ss")}";
+        if (gain.HasValue) suffix += $" · album gain {gain.Value:+0.0;-0.0;0.0} dB";
+        return $"{baseText} · {tracks.Count:N0} tracks{suffix}";
     }
 
     private void CloseCollectionDetail()
@@ -1833,6 +2751,7 @@ public sealed class MainViewModel : ObservableObject
 
     private void SetActiveGroups(IReadOnlyList<LibraryCardViewModel> groups)
     {
+        groups = SortCards(groups);
         var presentation = _galleryViews.GetOrCreate(
             PrimaryViewStateKey,
             () => groups,
@@ -1867,6 +2786,7 @@ public sealed class MainViewModel : ObservableObject
     private void RebuildGalleryRows()
     {
         var rows = GalleryRowLayout.Pack(GalleryGroups, _galleryColumnCount);
+        if (GalleryRowLayout.IsEquivalent(_galleryRows, rows)) return;
         _galleryRows.ReplaceRange(rows);
     }
 
@@ -1962,6 +2882,7 @@ public sealed class MainViewModel : ObservableObject
         string contentStateKey,
         int initialCount = int.MaxValue)
     {
+        tracks = SortTracks(tracks);
         var presentation = _trackViews.GetOrCreate(
             contentStateKey,
             () => tracks as IReadOnlyList<Track> ?? tracks.ToArray(),
@@ -1983,6 +2904,50 @@ public sealed class MainViewModel : ObservableObject
                 ? BrowseTracks.FirstOrDefault()
                 : BrowseTracks.FirstOrDefault(x => x.Path.Equals(selectedPath, StringComparison.OrdinalIgnoreCase)) ?? BrowseTracks.FirstOrDefault());
         Raise(nameof(HasBrowseTracks));
+    }
+
+    private IReadOnlyList<LibraryCardViewModel> SortCards(IReadOnlyList<LibraryCardViewModel> cards)
+    {
+        Func<LibraryCardViewModel, object?> key = SortBy switch
+        {
+            "Artist" => card => card.Subtitle,
+            "Album" => card => card.Title,
+            "Year" => card => card.RepresentativeTrack?.Year ?? 0,
+            "Added" => card => card.RepresentativeTrack?.AddedAt ?? DateTimeOffset.MinValue,
+            "Played" => card => card.RepresentativeTrack?.LastPlayedAt ?? DateTimeOffset.MinValue,
+            "Rating" => card => card.RepresentativeTrack?.Rating ?? 0,
+            "Duration" => card => card.RepresentativeTrack?.Duration ?? TimeSpan.Zero,
+            _ => card => card.Title
+        };
+        var ordered = SortDescending ? cards.OrderByDescending(key, Comparer<object?>.Create(CompareSortValues)) : cards.OrderBy(key, Comparer<object?>.Create(CompareSortValues));
+        return ordered.ThenBy(card => card.Title, StringComparer.CurrentCultureIgnoreCase).ToArray();
+    }
+
+    private IReadOnlyList<Track> SortTracks(IEnumerable<Track> tracks)
+    {
+        Func<Track, object?> key = SortBy switch
+        {
+            "Artist" => track => track.Artist,
+            "Album" => track => track.Album,
+            "Year" => track => track.Year,
+            "Added" => track => track.AddedAt,
+            "Played" => track => track.LastPlayedAt ?? DateTimeOffset.MinValue,
+            "Rating" => track => track.Rating,
+            "Duration" => track => track.Duration,
+            "Codec" => track => track.Codec,
+            _ => track => track.Title
+        };
+        var ordered = SortDescending ? tracks.OrderByDescending(key, Comparer<object?>.Create(CompareSortValues)) : tracks.OrderBy(key, Comparer<object?>.Create(CompareSortValues));
+        return ordered.ThenBy(track => track.TrackNumber).ThenBy(track => track.Title, StringComparer.CurrentCultureIgnoreCase).ToArray();
+    }
+
+    private static int CompareSortValues(object? left, object? right)
+    {
+        if (left is null && right is null) return 0;
+        if (left is null) return -1;
+        if (right is null) return 1;
+        if (left is IComparable comparable) return comparable.CompareTo(right);
+        return StringComparer.CurrentCultureIgnoreCase.Compare(left.ToString(), right.ToString());
     }
 
     public void LoadMoreBrowseTracks()
@@ -2183,6 +3148,7 @@ public sealed class MainViewModel : ObservableObject
         await _groupingGate.WaitAsync(cancellationToken);
         try
         {
+            _groupingIndex.ConfigureSeparators(_settings.Current.MultiValueSeparators);
             update = await Task.Run(
                 () => _groupingIndex.Apply(trackUpdates),
                 cancellationToken);
@@ -2326,6 +3292,21 @@ public sealed class MainViewModel : ObservableObject
         StatusText = $"Relinked {track.Title}";
     }
 
+    public async Task RelinkPlaybackTrackAsync(
+        QueueEntryViewModel entry,
+        string replacementPath)
+    {
+        var replacement = await _metadataReader.ReadAsync(replacementPath, _lifetime.Token);
+        var artwork = await _artwork.GetOrCreateAsync(replacementPath, _lifetime.Token);
+        if (artwork is not null) replacement = replacement with { ArtworkPath = artwork };
+        await _repository.RelinkAsync(entry.Track.Path, replacement, _lifetime.Token);
+        _queue.ReplaceTrack(entry.Track.Path, replacement);
+        _playbackFailures.TryRemove(entry.Track.Path, out _);
+        await RefreshLibraryAsync(SearchText, _lifetime.Token);
+        ShowNotice($"Located replacement for {entry.Track.Title}");
+        await ChangeTrackAsync(_queue.Select(entry.Entry.Id));
+    }
+
     public async Task ExportDiagnosticsAsync(string destination)
     {
         await _diagnosticsBundles.ExportAsync(
@@ -2395,8 +3376,13 @@ public sealed class MainViewModel : ObservableObject
         _queueVisible =
             !IsSafeMode && _settings.Current.QueuePanelVisible;
         _albumTileSize = _settings.Current.AlbumTileSize;
+        _dashboardModules = NormalizeDashboardModules(_settings.Current.DashboardModules);
+        LoadViewSettings();
         _animationsEnabled =
             !IsSafeMode && _settings.Current.AnimationsEnabled;
+        _visualizerEnabled =
+            !IsSafeMode && _settings.Current.VisualizerEnabled;
+        _audio.SetVisualizationEnabled(_visualizerEnabled);
         _artworkCacheMegabytes =
             _settings.Current.ArtworkCacheMegabytes;
         _replayGainMode = _settings.Current.ReplayGainMode;
@@ -2405,13 +3391,18 @@ public sealed class MainViewModel : ObservableObject
         _playbackSpeed = _settings.Current.PlaybackSpeed;
         _pitchSemitones = _settings.Current.PitchSemitones;
         _preservePitch = _settings.Current.PreservePitch;
+        _stopAfterCurrent = _settings.Current.StopAfterCurrent;
+        _stopAfterQueue = _settings.Current.StopAfterQueue;
         ApplyLyricsSettings();
         Raise(nameof(Volume));
         Raise(nameof(QueueVisible));
         Raise(nameof(AlbumTileSize));
+        Raise(nameof(DashboardModules));
         Raise(nameof(GalleryItemWidth));
         Raise(nameof(GalleryItemHeight));
         Raise(nameof(AnimationsEnabled));
+        Raise(nameof(VisualizerEnabled));
+        Raise(nameof(VisualizerText));
         Raise(nameof(ArtworkCacheMegabytes));
         Raise(nameof(ArtworkCacheLimitText));
         Raise(nameof(ReplayGainMode));
@@ -2420,6 +3411,10 @@ public sealed class MainViewModel : ObservableObject
         Raise(nameof(PlaybackSpeed));
         Raise(nameof(PitchSemitones));
         Raise(nameof(PreservePitch));
+        Raise(nameof(StopAfterCurrent));
+        Raise(nameof(StopAfterQueue));
+        Raise(nameof(HasStopMode));
+        Raise(nameof(StopModeText));
         _shortcuts.Refresh(_settings.Current.Shortcuts);
         _scanner.StopWatching();
         RestartSourceWatchers();
@@ -2448,6 +3443,11 @@ public sealed class MainViewModel : ObservableObject
         _lyricsBlurStrength = _settings.Current.LyricsBlurStrength;
         _karaokeWordAnimation = _settings.Current.KaraokeWordAnimation;
         _onlineLyricsEnabled = _settings.Current.OnlineLyricsEnabled;
+        _metadataLookupEnabled = _settings.Current.MetadataLookupEnabled;
+        _musicBrainzLookupEnabled = _settings.Current.MusicBrainzLookupEnabled;
+        _discogsLookupEnabled = _settings.Current.DiscogsLookupEnabled;
+        _discogsUserToken = _settings.Current.DiscogsUserToken;
+        Raise(nameof(MetadataLookupEnabled)); Raise(nameof(MusicBrainzLookupEnabled)); Raise(nameof(DiscogsLookupEnabled)); Raise(nameof(DiscogsUserToken));
         Raise(nameof(LyricsDisplayMode));
         Raise(nameof(LyricsFontSize));
         Raise(nameof(LyricsAlignment));
@@ -2568,8 +3568,12 @@ public sealed class MainViewModel : ObservableObject
                 await _repository.SaveBookmarkAsync(previous.Id, _audio.Snapshot.Position, _lifetime.Token);
             var artwork = await ResolveArtworkAsync(track, _lifetime.Token);
             if (artwork is not null) track = track with { ArtworkPath = artwork };
+            ApplyTrackPlaybackSettings(track);
+            await _audio.SetPlaybackOptionsAsync(CurrentPlaybackOptions(track), _lifetime.Token);
             await _audio.LoadAsync(track, _lifetime.Token);
-            var bookmark = track.Id > 0 ? await _repository.GetBookmarkAsync(track.Id, _lifetime.Token) : null;
+            var bookmark = track.Id > 0 && ResumeTrackBookmarks
+                ? await _repository.GetBookmarkAsync(track.Id, _lifetime.Token)
+                : null;
             if (bookmark.HasValue && bookmark.Value > TimeSpan.Zero && bookmark.Value < track.Duration - TimeSpan.FromSeconds(10)) await _audio.SeekAsync(bookmark.Value, _lifetime.Token);
             try
             {
@@ -2586,7 +3590,11 @@ public sealed class MainViewModel : ObservableObject
                     exception: exception);
             }
             await _audio.PlayAsync(_lifetime.Token);
+            _playbackFailures.TryRemove(track.Path, out _);
+            _queue.ReplaceTrack(track.Path, track);
+            RecordQueueHistory(track);
             if (track.Id > 0) await _repository.RecordPlayAsync(track.Id, _lifetime.Token);
+            await LoadBookmarksAsync(track);
             await LoadLyricsAsync(track);
         }
         catch (Exception exception) when (TrackFailurePolicy.IsRecoverable(exception))
@@ -2594,6 +3602,9 @@ public sealed class MainViewModel : ObservableObject
             failedPaths ??= new HashSet<string>(
                 StringComparer.OrdinalIgnoreCase);
             failedPaths.Add(track.Path);
+            _playbackFailures[track.Path] = TrackFailurePolicy.FriendlyMessage(exception);
+            ShowNotice($"Could not play {track.Title}: {TrackFailurePolicy.FriendlyMessage(exception)}");
+            QueueOnChanged(this, EventArgs.Empty);
             StatusText =
                 $"Skipped {track.Title} · {TrackFailurePolicy.FriendlyMessage(exception)}";
             _applicationLog.Write(
@@ -2617,6 +3628,9 @@ public sealed class MainViewModel : ObservableObject
         }
         catch (Exception exception)
         {
+            _playbackFailures[track.Path] = exception.GetBaseException().Message;
+            ShowNotice($"Playback failed: {exception.GetBaseException().Message}");
+            QueueOnChanged(this, EventArgs.Empty);
             StatusText = exception.Message;
             _applicationLog.Write(
                 ApplicationLogLevel.Error,
@@ -2684,6 +3698,30 @@ public sealed class MainViewModel : ObservableObject
         if (from >= 0 && to >= 0) _queue.Move(from, to);
     }
 
+    public void MoveQueueEntries(IReadOnlyCollection<Guid> sourceIds, int targetIndex)
+    {
+        _queue.MoveMany(sourceIds, targetIndex);
+        ShowNotice(sourceIds.Count == 1 ? "Queue item moved" : $"Moved {sourceIds.Count} queue items");
+    }
+
+    public async Task PlayHistoryTrackAsync(Track track)
+    {
+        _queue.PlayNext([track]);
+        var entry = _queue.Items.Last(item => item.Track.Path.Equals(track.Path, StringComparison.OrdinalIgnoreCase));
+        await ChangeTrackAsync(_queue.Select(entry.Id));
+    }
+
+    public void MoveSelectedQueueBy(int delta)
+    {
+        if (SelectedQueueEntries.Count == 0 || delta == 0) return;
+        var ordered = SelectedQueueEntries.OrderBy(entry => entry.Index).ToArray();
+        var target = delta < 0
+            ? Math.Max(0, ordered[0].Index - 1)
+            : Math.Min(_queue.Items.Count, ordered[^1].Index + 2);
+        _queue.MoveMany(ordered.Select(entry => entry.Entry.Id).ToArray(), target);
+        ShowNotice(delta < 0 ? "Moved selection up" : "Moved selection down");
+    }
+
     private async Task ToggleLoveAsync()
     {
         if (CurrentTrack is null) return;
@@ -2702,6 +3740,7 @@ public sealed class MainViewModel : ObservableObject
     private void ReplaceTrackState(Track updated)
     {
         CurrentTrack = updated;
+        _queue.ReplaceTrack(updated.Path, updated);
         var all = _allTracks.ToArray();
         var index = Array.FindIndex(all, x => x.Id == updated.Id && updated.Id > 0 || x.Path.Equals(updated.Path, StringComparison.OrdinalIgnoreCase));
         if (index >= 0) { all[index] = updated; _allTracks = all; }
@@ -2761,6 +3800,83 @@ public sealed class MainViewModel : ObservableObject
                 ApplyLyricsDocument(null, track);
             });
         }
+    }
+
+    public void SetSelectedTracks(IEnumerable<Track> tracks)
+    {
+        SelectedTracks = tracks
+            .Where(track => track is not null)
+            .GroupBy(track => track.Path, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToArray();
+        if (SelectedTracks.Count > 0 && SelectedTrack?.Path != SelectedTracks[0].Path)
+            SelectedTrack = SelectedTracks[0];
+    }
+
+    public async Task ApplyMetadataAsync(
+        IReadOnlyList<Track> tracks,
+        MetadataEditPatch patch,
+        MetadataWriteMode mode)
+    {
+        if (tracks.Count == 0) return;
+        var results = new List<MetadataEditResult>(tracks.Count);
+        try
+        {
+            foreach (var track in tracks)
+            {
+                var result = await _metadataEditor.ApplyAsync(track, patch, mode, _lifetime.Token);
+                results.Add(result);
+                await _repository.UpsertAsync(result.After, _lifetime.Token);
+            }
+        }
+        catch
+        {
+            foreach (var result in results.AsEnumerable().Reverse())
+            {
+                try
+                {
+                    await _metadataEditor.RestoreAsync(result, _lifetime.Token);
+                    await _repository.UpsertAsync(result.Before, _lifetime.Token);
+                }
+                catch { }
+            }
+            throw;
+        }
+        _metadataUndo = results;
+        UndoMetadataCommand.RaiseCanExecuteChanged();
+        await RefreshLibraryAsync(SearchText, _lifetime.Token);
+        if (CurrentTrack is { } current)
+        {
+            var updated = results.FirstOrDefault(result => result.After.Path.Equals(current.Path, StringComparison.OrdinalIgnoreCase));
+            if (updated is not null) CurrentTrack = updated.After;
+        }
+        StatusText = mode == MetadataWriteMode.WriteToFile
+            ? $"Updated tags for {results.Count:N0} track{(results.Count == 1 ? string.Empty : "s")}"
+            : $"Updated database metadata for {results.Count:N0} track{(results.Count == 1 ? string.Empty : "s")}";
+    }
+
+    private async Task EditMetadataAsync()
+    {
+        // MainWindow owns the dialog because it is the shell's visual owner.
+        MetadataEditRequested?.Invoke(this, EventArgs.Empty);
+        await Task.CompletedTask;
+    }
+
+    public event EventHandler? MetadataEditRequested;
+
+    private async Task UndoMetadataAsync()
+    {
+        if (_metadataUndo.Count == 0) return;
+        var undo = _metadataUndo;
+        _metadataUndo = [];
+        foreach (var result in undo.AsEnumerable().Reverse())
+        {
+            await _metadataEditor.RestoreAsync(result, _lifetime.Token);
+            await _repository.UpsertAsync(result.Before, _lifetime.Token);
+        }
+        UndoMetadataCommand.RaiseCanExecuteChanged();
+        await RefreshLibraryAsync(SearchText, _lifetime.Token);
+        StatusText = "Metadata edit undone";
     }
 
     private void ApplyLyricsDocument(LyricsDocument? document, Track track)
@@ -2972,6 +4088,26 @@ public sealed class MainViewModel : ObservableObject
         RunOnUi(() =>
         {
             var track = snapshot.Track;
+            if (track is not null
+                && snapshot.Diagnostics?.SourceFormat is { } sourceFormat)
+            {
+                // Existing database rows may predate a decoder metadata fix.
+                // Enrich only this in-memory presentation from the decoder's
+                // authoritative source format; never rewrite the user's files
+                // or library record during playback.
+                track = track with
+                {
+                    SampleRate = track.SampleRate > 0
+                        ? track.SampleRate
+                        : sourceFormat.SampleRate,
+                    BitsPerSample = track.BitsPerSample > 0
+                        ? track.BitsPerSample
+                        : sourceFormat.BitsPerSample,
+                    Channels = track.Channels > 0
+                        ? track.Channels
+                        : sourceFormat.Channels
+                };
+            }
             if (track is not null && _resolvedArtwork.TryGetValue(track.Path, out var artwork) && artwork is not null) track = track with { ArtworkPath = artwork };
             CurrentTrack = track;
             PlayGlyph = snapshot.State == PlaybackState.Playing ? "Ⅱ" : "▶";
@@ -2994,15 +4130,39 @@ public sealed class MainViewModel : ObservableObject
     private async Task HandleTrackTransitionedAsync(TrackTransitionedEventArgs e)
     {
         _sleepTimer.NotifyTrackEnded(); _queue.Advance();
+        _playbackFailures.TryRemove(e.Current.Path, out _);
+        RecordQueueHistory(e.Current);
+        ApplyTrackPlaybackSettings(e.Current);
+        await _audio.SetPlaybackOptionsAsync(CurrentPlaybackOptions(e.Current), _lifetime.Token);
         if (e.Current.Id > 0) await _repository.RecordPlayAsync(e.Current.Id, _lifetime.Token);
         var artwork = await ResolveArtworkAsync(e.Current, _lifetime.Token);
+        await LoadBookmarksAsync(e.Current);
         await LoadLyricsAsync(e.Current);
         RunOnUi(() => { if (CurrentTrack?.Path.Equals(e.Current.Path, StringComparison.OrdinalIgnoreCase) == true && artwork is not null) CurrentTrack = e.Current with { ArtworkPath = artwork }; });
         await _audio.QueueNextAsync(PeekUpcomingTrack(), _lifetime.Token);
     }
 
     private void AudioOnPlaybackEnded(object? sender, EventArgs e) => _ = HandlePlaybackEndedAsync();
-    private async Task HandlePlaybackEndedAsync() { _sleepTimer.NotifyTrackEnded(); var next = _queue.Advance(); if (next is not null) await ChangeTrackAsync(next); }
+    private async Task HandlePlaybackEndedAsync()
+    {
+        _sleepTimer.NotifyTrackEnded();
+        if (StopAfterCurrent || StopAfterQueue && !HasAutomaticQueueSuccessor())
+        {
+            var completedMode = StopModeText;
+            StopAfterCurrent = false;
+            StopAfterQueue = false;
+            await _settings.UpdateAsync(settings =>
+            {
+                settings.StopAfterCurrent = false;
+                settings.StopAfterQueue = false;
+            }, _lifetime.Token);
+            await _audio.StopAsync(_lifetime.Token);
+            ShowNotice($"{completedMode} completed");
+            return;
+        }
+        var next = _queue.Advance();
+        if (next is not null) await ChangeTrackAsync(next);
+    }
 
     private void AudioOnOutputDevicesChanged(
         object? sender,
@@ -3022,19 +4182,28 @@ public sealed class MainViewModel : ObservableObject
 
     private Track? PeekUpcomingTrack()
     {
+        if (StopAfterCurrent || StopAfterQueue && !HasAutomaticQueueSuccessor()) return null;
         if (_queue.Shuffle || _queue.Items.Count == 0) return null;
         var index = _queue.CurrentIndex + 1;
         if (index < _queue.Items.Count) return _queue.Items[index].Track;
         return _queue.RepeatMode == RepeatMode.All ? _queue.Items[0].Track : null;
     }
 
+    private bool HasAutomaticQueueSuccessor()
+    {
+        if (_queue.Items.Count == 0) return false;
+        if (_queue.Shuffle) return _queue.ShuffleUpcomingPaths.Count > 0;
+        return _queue.CurrentIndex + 1 < _queue.Items.Count;
+    }
+
     private void QueueOnChanged(object? sender, EventArgs e) => RunOnUi(() =>
     {
-        Replace(Queue, _queue.Items.Select(item =>
+        Replace(Queue, _queue.Items.Select((item, index) =>
         {
             var artwork = ExistingArtwork(item.Track);
             if (artwork is null && _resolvedArtwork.TryGetValue(item.Track.Path, out var cached)) artwork = cached;
-            return new QueueEntryViewModel(item, artwork);
+            _playbackFailures.TryGetValue(item.Track.Path, out var failure);
+            return new QueueEntryViewModel(item, artwork, index, _queue.CurrentIndex, failure);
         }));
         Raise(nameof(HasQueue));
         Raise(nameof(IsShuffleEnabled)); Raise(nameof(ShuffleText)); Raise(nameof(IsRepeatEnabled)); Raise(nameof(IsRepeatOne)); Raise(nameof(RepeatText));
@@ -3061,13 +4230,22 @@ public sealed class MainViewModel : ObservableObject
             _queue.Shuffle = session.Shuffle;
             _queue.RepeatMode = session.RepeatMode;
             _queue.Replace(restored, Math.Clamp(session.CurrentIndex, 0, restored.Length - 1));
+            _queue.RestoreShuffleUpcoming(session.ShuffleUpcomingPaths);
+            Replace(QueueHistory, session.QueueHistoryPaths
+                .Where(byPath.ContainsKey)
+                .Select(path => new QueueHistoryEntryViewModel(byPath[path], DateTimeOffset.UtcNow))
+                .Take(50));
+            Raise(nameof(HasQueueHistory));
             if (!_settings.Current.ResumeOnStartup || _queue.Current is not { } track) return;
             var artwork = await ResolveArtworkAsync(track, _lifetime.Token);
             if (artwork is not null) track = track with { ArtworkPath = artwork };
+            ApplyTrackPlaybackSettings(track);
+            await _audio.SetPlaybackOptionsAsync(CurrentPlaybackOptions(track), _lifetime.Token);
             await _audio.LoadAsync(track, _lifetime.Token);
             if (session.PositionSeconds > 0 && session.PositionSeconds < track.Duration.TotalSeconds)
                 await _audio.SeekAsync(TimeSpan.FromSeconds(session.PositionSeconds), _lifetime.Token);
             await _audio.QueueNextAsync(PeekUpcomingTrack(), _lifetime.Token);
+            await LoadBookmarksAsync(track);
             await LoadLyricsAsync(track);
             if (session.WasPlaying) await _audio.PlayAsync(_lifetime.Token);
         }
@@ -3096,6 +4274,8 @@ public sealed class MainViewModel : ObservableObject
         var playing = snapshot.State == PlaybackState.Playing;
         var shuffle = _queue.Shuffle;
         var repeat = _queue.RepeatMode;
+        var shuffleUpcoming = _queue.ShuffleUpcomingPaths.ToList();
+        var historyPaths = QueueHistory.Select(item => item.Track.Path).Take(50).ToList();
         var view = CurrentView;
         return _settings.UpdateAsync(settings =>
         {
@@ -3105,8 +4285,23 @@ public sealed class MainViewModel : ObservableObject
             settings.PlaybackSession.WasPlaying = playing;
             settings.PlaybackSession.Shuffle = shuffle;
             settings.PlaybackSession.RepeatMode = repeat;
+            settings.PlaybackSession.ShuffleUpcomingPaths = shuffleUpcoming;
+            settings.PlaybackSession.QueueHistoryPaths = historyPaths;
             settings.PlaybackSession.LastView = view;
         }, cancellationToken);
+    }
+
+    private void RecordQueueHistory(Track track)
+    {
+        RunOnUi(() =>
+        {
+            if (QueueHistory.FirstOrDefault()?.Track.Path.Equals(track.Path, StringComparison.OrdinalIgnoreCase) == true)
+                return;
+            QueueHistory.Insert(0, new QueueHistoryEntryViewModel(track, DateTimeOffset.UtcNow));
+            while (QueueHistory.Count > 50) QueueHistory.RemoveAt(QueueHistory.Count - 1);
+            Raise(nameof(HasQueueHistory));
+            ScheduleSessionSave();
+        });
     }
 
     private void StartQueueArtworkResolution()
@@ -3285,7 +4480,43 @@ public sealed class MainViewModel : ObservableObject
         _ = Task.Run(async () => { try { await Task.Delay(220, token); await RefreshLibraryAsync(SearchText, token); } catch (OperationCanceledException) { } }, token);
     }
 
+    private void DebounceQuickFilter()
+    {
+        _quickFilterCancellation?.Cancel();
+        _quickFilterCancellation?.Dispose();
+        _quickFilterCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        var token = _quickFilterCancellation.Token;
+        _ = Task.Run(async () =>
+        {
+            try { await Task.Delay(160, token); await RefreshLibraryAsync(SearchText, token); }
+            catch (OperationCanceledException) { }
+        }, token);
+    }
+
+    private void RememberSearch(string? query)
+    {
+        if (string.IsNullOrWhiteSpace(query) || query.Trim().Length < 2) return;
+        var normalized = query.Trim();
+        _ = _settings.UpdateAsync(settings =>
+        {
+            settings.SearchHistory.RemoveAll(item => item.Equals(normalized, StringComparison.OrdinalIgnoreCase));
+            settings.SearchHistory.Insert(0, normalized);
+            if (settings.SearchHistory.Count > 50) settings.SearchHistory.RemoveRange(50, settings.SearchHistory.Count - 50);
+        });
+        Raise(nameof(SearchHistory));
+        Raise(nameof(SearchSuggestions));
+    }
+
     private static string FormatTime(TimeSpan time) => time.ToString(time.TotalHours >= 1 ? @"h\:mm\:ss" : @"m\:ss");
+    private static IReadOnlyList<string> NormalizeDashboardModules(IEnumerable<string>? modules)
+    {
+        var options = new[] { "Artwork", "Lyrics", "Queue" };
+        var normalized = (modules ?? []).Where(item => options.Contains(item, StringComparer.OrdinalIgnoreCase))
+            .Select(item => options.First(option => option.Equals(item, StringComparison.OrdinalIgnoreCase)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return normalized.Length == 0 ? ["Artwork"] : normalized;
+    }
     private static void Replace<T>(ObservableCollection<T> target, IEnumerable<T> source)
     {
         if (target is not ObservableRangeCollection<T> range)
@@ -3309,6 +4540,7 @@ public sealed class MainViewModel : ObservableObject
     private async Task ShutdownCoreAsync()
     {
         _sessionSaveCancellation?.Cancel();
+        _quickFilterCancellation?.Cancel();
         _libraryChangeCancellation?.Cancel();
         _replayGainAnalysisCancellation?.Cancel();
         _scanner.Cancel();
@@ -3363,3 +4595,7 @@ public sealed class MainViewModel : ObservableObject
     private sealed record CardSelection(string Kind, string Key);
     private readonly record struct IndexedTrack(int Index, Track Track);
 }
+
+public sealed record PlaylistEditContext(Playlist? Existing, IReadOnlyList<Track>? InitialTracks = null);
+public sealed record BookmarkRenameRequest(PlaybackBookmark Bookmark, string Name);
+internal sealed record PlaylistHistoryEntry(Func<Task> Undo, Func<Task> Redo);

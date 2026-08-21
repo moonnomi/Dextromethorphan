@@ -11,7 +11,17 @@ public sealed class TagLibMetadataReader : ITrackMetadataReader
     private static Track Read(string path)
     {
         var info = new FileInfo(path);
-        using var file = TagLib.File.Create(path);
+        TagLib.File file;
+        try { file = TagLib.File.Create(path); }
+        catch (TagLib.UnsupportedFormatException) { return ReadFallback(info); }
+        using (file)
+        {
+            return ReadTagged(path, info, file);
+        }
+    }
+
+    private static Track ReadTagged(string path, FileInfo info, TagLib.File file)
+    {
         var tag = file.Tag;
         var properties = file.Properties;
         var albumArtist = First(tag.AlbumArtists) ?? First(tag.Performers) ?? "";
@@ -24,10 +34,18 @@ public sealed class TagLibMetadataReader : ITrackMetadataReader
             Path = info.FullName,
             Title = title,
             Artist = string.IsNullOrWhiteSpace(artist) ? "Unknown artist" : artist,
+            ArtistSort = First(tag.PerformersSort) ?? "",
             AlbumArtist = albumArtist,
+            AlbumArtistSort = First(tag.AlbumArtistsSort) ?? "",
             Album = string.IsNullOrWhiteSpace(tag.Album) ? "Unknown album" : tag.Album.Trim(),
+            AlbumSort = tag.AlbumSort?.Trim() ?? "",
             Genre = Join(tag.Genres),
             Comment = ReadComment(file, tag),
+            Grouping = tag.Grouping?.Trim() ?? "",
+            Composer = Join(tag.Composers),
+            Conductor = tag.Conductor?.Trim() ?? "",
+            ReleaseType = ReadTagValue(file, "RELEASETYPE") ?? ReadTagValue(file, "RELEASE_TYPE") ?? "",
+            IsCompilation = IsCompilation(tag),
             Year = checked((int)tag.Year),
             TrackNumber = checked((int)tag.Track),
             DiscNumber = checked((int)tag.Disc),
@@ -51,8 +69,26 @@ public sealed class TagLibMetadataReader : ITrackMetadataReader
         };
     }
 
+    private static Track ReadFallback(FileInfo info) => new()
+    {
+        Path = info.FullName,
+        Title = Path.GetFileNameWithoutExtension(info.Name),
+        Artist = "Unknown artist",
+        Album = "Unknown album",
+        Codec = Path.GetExtension(info.Name).TrimStart('.').ToUpperInvariant(),
+        FileModifiedAt = info.LastWriteTimeUtc,
+        FileSize = info.Length
+    };
+
     private static string Join(IEnumerable<string> values) => string.Join("; ", values.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).Distinct(StringComparer.OrdinalIgnoreCase));
     private static string? First(IEnumerable<string> values) => values.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))?.Trim();
+
+    private static bool IsCompilation(TagLib.Tag tag) => tag switch
+    {
+        TagLib.Mpeg4.AppleTag apple => apple.IsCompilation,
+        TagLib.Id3v2.Tag id3 => id3.IsCompilation,
+        _ => false
+    };
 
     private static string? FindSidecarLyrics(string path)
     {
@@ -127,10 +163,41 @@ public sealed class TagLibMetadataReader : ITrackMetadataReader
         try
         {
             using var stream = File.OpenRead(path);
+            var flacOffset = FindFlacOffset(stream);
+            if (flacOffset < 0) return 0;
+            stream.Position = flacOffset;
             Span<byte> header = stackalloc byte[22];
             if (stream.Read(header) != header.Length || !header[..4].SequenceEqual("fLaC"u8) || (header[4] & 0x7F) != 0) return 0;
             return (((header[20] & 0x01) << 4) | (header[21] >> 4)) + 1;
         }
         catch { return 0; }
+    }
+
+    private static long FindFlacOffset(Stream stream)
+    {
+        Span<byte> marker = stackalloc byte[4];
+        stream.Position = 0;
+        if (stream.Read(marker) == marker.Length
+            && marker.SequenceEqual("fLaC"u8))
+            return 0;
+
+        stream.Position = 0;
+        Span<byte> id3 = stackalloc byte[10];
+        if (stream.Read(id3) != id3.Length
+            || !id3[..3].SequenceEqual("ID3"u8))
+            return -1;
+
+        var tagSize = (id3[6] << 21)
+            | (id3[7] << 14)
+            | (id3[8] << 7)
+            | id3[9];
+        var footerSize = (id3[5] & 0x10) != 0 ? 10 : 0;
+        var offset = 10L + tagSize + footerSize;
+        if (offset > stream.Length - marker.Length) return -1;
+        stream.Position = offset;
+        return stream.Read(marker) == marker.Length
+            && marker.SequenceEqual("fLaC"u8)
+            ? offset
+            : -1;
     }
 }
