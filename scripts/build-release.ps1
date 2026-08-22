@@ -14,6 +14,9 @@ $archive = [System.IO.Path]::GetFullPath(
     (Join-Path $root "artifacts\Dextromethorphan-$Runtime.zip"))
 $latest = [System.IO.Path]::GetFullPath(
     (Join-Path $root 'src\Dextromethorphan.App\bin\latest'))
+$intermediate = [System.IO.Path]::GetFullPath(
+    (Join-Path $root 'artifacts\build\release-publish'))
+$intermediateRoot = Split-Path -Parent $intermediate
 
 function Assert-WorkspaceChild([string]$Path) {
     $prefix = $root.TrimEnd(
@@ -30,13 +33,32 @@ function Assert-WorkspaceChild([string]$Path) {
 Assert-WorkspaceChild $publish
 Assert-WorkspaceChild $archive
 Assert-WorkspaceChild $latest
+Assert-WorkspaceChild $intermediate
+Assert-WorkspaceChild $intermediateRoot
 
 dotnet restore (Join-Path $root 'Dextromethorphan.slnx')
+if ($LASTEXITCODE -ne 0) { throw "Restore failed with exit code $LASTEXITCODE." }
 dotnet test (Join-Path $root 'Dextromethorphan.slnx') -c Release --no-restore
+if ($LASTEXITCODE -ne 0) { throw "Release tests failed with exit code $LASTEXITCODE." }
 if (Test-Path -LiteralPath $publish) {
     Remove-Item -LiteralPath $publish -Recurse -Force
 }
-dotnet publish (Join-Path $root 'src\Dextromethorphan.App\Dextromethorphan.App.csproj') -c Release -r $Runtime --self-contained:$($SelfContained.IsPresent.ToString().ToLowerInvariant()) -p:PublishReadyToRun=true -o $publish
+if (Test-Path -LiteralPath $intermediate) {
+    Remove-Item -LiteralPath $intermediate -Recurse -Force
+}
+try {
+    dotnet publish (Join-Path $root 'src\Dextromethorphan.App\Dextromethorphan.App.csproj') -c Release -r $Runtime --self-contained:$($SelfContained.IsPresent.ToString().ToLowerInvariant()) -p:PublishReadyToRun=true --artifacts-path $intermediate -o $publish
+    if ($LASTEXITCODE -ne 0) { throw "Publish failed with exit code $LASTEXITCODE." }
+}
+finally {
+    if (Test-Path -LiteralPath $intermediate) {
+        Remove-Item -LiteralPath $intermediate -Recurse -Force
+    }
+    if ((Test-Path -LiteralPath $intermediateRoot) -and
+        @(Get-ChildItem -LiteralPath $intermediateRoot -Force).Count -eq 0) {
+        Remove-Item -LiteralPath $intermediateRoot -Force
+    }
+}
 
 if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive }
 Compress-Archive -Path (Join-Path $publish '*') -DestinationPath $archive -CompressionLevel Optimal

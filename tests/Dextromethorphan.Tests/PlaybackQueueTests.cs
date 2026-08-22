@@ -138,5 +138,69 @@ public sealed class PlaybackQueueTests
         Assert.True(queue.Items[2].IsPlaying);
     }
 
+    [Fact]
+    public void PlaybackOrderStartsAtCurrentAndOmitsAlreadyPlayedTracks()
+    {
+        var queue = new PlaybackQueue();
+        var tracks = Enumerable.Range(1, 5).Select(NewTrack).ToArray();
+        queue.Replace(tracks, 2);
+
+        Assert.Equal(tracks.Skip(2), queue.PlaybackOrder.Select(item => item.Track));
+        Assert.True(queue.PlaybackOrder[0].IsPlaying);
+    }
+
+    [Fact]
+    public void ShuffledPlaybackOrderMatchesTheActualShuffleDeck()
+    {
+        var queue = new PlaybackQueue { Shuffle = true };
+        var tracks = Enumerable.Range(1, 6).Select(NewTrack).ToArray();
+        queue.Replace(tracks, 2);
+
+        Assert.Equal(
+            new[] { tracks[2].Path }.Concat(queue.ShuffleUpcomingPaths),
+            queue.PlaybackOrder.Select(item => item.Track.Path));
+    }
+
+    [Fact]
+    public void MovingAShuffledEntryToNextChangesTheTrackThatActuallyPlaysNext()
+    {
+        var queue = new PlaybackQueue { Shuffle = true };
+        queue.Replace(Enumerable.Range(1, 6).Select(NewTrack), 0);
+        var promoted = queue.PlaybackOrder[^1];
+
+        queue.MoveInPlaybackOrder([promoted.Id], 1);
+
+        Assert.Equal(promoted.Id, queue.PlaybackOrder[1].Id);
+        Assert.Equal(promoted.Track, queue.Advance());
+    }
+
+    [Fact]
+    public void ReorderingPlaybackOrderKeepsPlayedTracksAndCurrentPositionStable()
+    {
+        var queue = new PlaybackQueue();
+        var tracks = Enumerable.Range(1, 6).Select(NewTrack).ToArray();
+        queue.Replace(tracks, 2);
+        var promoted = queue.PlaybackOrder[^1];
+
+        queue.MoveInPlaybackOrder([promoted.Id], 1);
+
+        Assert.Equal(tracks[2], queue.Current);
+        Assert.Equal(new[] { 1L, 2L, 3L, 6L, 4L, 5L }, queue.Items.Select(item => item.Track.Id));
+        Assert.Equal(new[] { 3L, 6L, 4L, 5L }, queue.PlaybackOrder.Select(item => item.Track.Id));
+    }
+
+    [Fact]
+    public void AdvancingShiftsPlaybackOrderToTheNewCurrentTrack()
+    {
+        var queue = new PlaybackQueue { Shuffle = true };
+        queue.Replace(Enumerable.Range(1, 5).Select(NewTrack), 0);
+        var expected = queue.PlaybackOrder[1];
+
+        queue.Advance();
+
+        Assert.Equal(expected.Id, queue.PlaybackOrder[0].Id);
+        Assert.True(queue.PlaybackOrder[0].IsPlaying);
+    }
+
     private static Track NewTrack(int id) => new() { Id = id, Path = $"C:\\music\\{id}.flac", Title = $"Track {id}" };
 }

@@ -1110,8 +1110,7 @@ public sealed class MainViewModel : ObservableObject
     {
         var ids = SelectedQueueEntries.Select(entry => entry.Entry.Id).ToArray();
         if (ids.Length == 0) return;
-        if (toTop) _queue.MoveToTop(ids);
-        else _queue.MoveToBottom(ids);
+        _queue.MoveInPlaybackOrder(ids, toTop ? 1 : Queue.Count);
         ShowNotice(toTop ? "Moved selection to top" : "Moved selection to bottom");
     }
 
@@ -4019,23 +4018,19 @@ public sealed class MainViewModel : ObservableObject
 
     private void MoveQueueEntryNext(QueueEntryViewModel? entry)
     {
-        if (entry is null || _queue.Items.Count < 2) return;
-        var from = _queue.Items.ToList().FindIndex(x => x.Id == entry.Entry.Id);
-        var target = Math.Min(_queue.Items.Count - 1, _queue.CurrentIndex + 1);
-        if (from >= 0 && from != target) _queue.Move(from, target);
+        if (entry is null || _queue.PlaybackOrder.Count < 2) return;
+        _queue.MoveInPlaybackOrder([entry.Entry.Id], 1);
     }
 
     public void MoveQueueEntry(Guid sourceId, Guid targetId)
     {
-        var items = _queue.Items.ToList();
-        var from = items.FindIndex(x => x.Id == sourceId);
-        var to = items.FindIndex(x => x.Id == targetId);
-        if (from >= 0 && to >= 0) _queue.Move(from, to);
+        var to = _queue.PlaybackOrder.ToList().FindIndex(x => x.Id == targetId);
+        if (to >= 0) _queue.MoveInPlaybackOrder([sourceId], to);
     }
 
     public void MoveQueueEntries(IReadOnlyCollection<Guid> sourceIds, int targetIndex)
     {
-        _queue.MoveMany(sourceIds, targetIndex);
+        _queue.MoveInPlaybackOrder(sourceIds, targetIndex);
         ShowNotice(sourceIds.Count == 1 ? "Queue item moved" : $"Moved {sourceIds.Count} queue items");
     }
 
@@ -4059,9 +4054,9 @@ public sealed class MainViewModel : ObservableObject
         if (SelectedQueueEntries.Count == 0 || delta == 0) return;
         var ordered = SelectedQueueEntries.OrderBy(entry => entry.Index).ToArray();
         var target = delta < 0
-            ? Math.Max(0, ordered[0].Index - 1)
-            : Math.Min(_queue.Items.Count, ordered[^1].Index + 2);
-        _queue.MoveMany(ordered.Select(entry => entry.Entry.Id).ToArray(), target);
+            ? Math.Max(1, ordered[0].Index - 1)
+            : Math.Min(Queue.Count, ordered[^1].Index + 2);
+        _queue.MoveInPlaybackOrder(ordered.Select(entry => entry.Entry.Id).ToArray(), target);
         ShowNotice(delta < 0 ? "Moved selection up" : "Moved selection down");
     }
 
@@ -4526,9 +4521,8 @@ public sealed class MainViewModel : ObservableObject
     private Track? PeekUpcomingTrack()
     {
         if (StopAfterCurrent || StopAfterQueue && !HasAutomaticQueueSuccessor()) return null;
+        if (_queue.PlaybackOrder.Count > 1) return _queue.PlaybackOrder[1].Track;
         if (_queue.Shuffle || _queue.Items.Count == 0) return null;
-        var index = _queue.CurrentIndex + 1;
-        if (index < _queue.Items.Count) return _queue.Items[index].Track;
         return _queue.RepeatMode == RepeatMode.All ? _queue.Items[0].Track : null;
     }
 
@@ -4541,12 +4535,13 @@ public sealed class MainViewModel : ObservableObject
 
     private void QueueOnChanged(object? sender, EventArgs e) => RunOnUi(() =>
     {
-        Replace(Queue, _queue.Items.Select((item, index) =>
+        var playbackOrder = _queue.PlaybackOrder;
+        Replace(Queue, playbackOrder.Select((item, index) =>
         {
             var artwork = ExistingArtwork(item.Track);
             if (artwork is null && _resolvedArtwork.TryGet(item.Track.Path, out var cached)) artwork = cached;
             _playbackFailures.TryGetValue(item.Track.Path, out var failure);
-            return new QueueEntryViewModel(item, artwork, index, _queue.CurrentIndex, failure);
+            return new QueueEntryViewModel(item, artwork, index, index == 1, failure);
         }));
         Raise(nameof(HasQueue));
         Raise(nameof(IsShuffleEnabled)); Raise(nameof(ShuffleText)); Raise(nameof(IsRepeatEnabled)); Raise(nameof(IsRepeatOne)); Raise(nameof(RepeatText));
@@ -4709,7 +4704,7 @@ public sealed class MainViewModel : ObservableObject
     }
 
     private bool HasPreviousTrack() => _queue.CurrentIndex > 0 || (_queue.RepeatMode == RepeatMode.All && _queue.Items.Count > 1);
-    private bool HasNextTrack() => _queue.CurrentIndex >= 0 && (_queue.CurrentIndex + 1 < _queue.Items.Count || (_queue.RepeatMode == RepeatMode.All && _queue.Items.Count > 1));
+    private bool HasNextTrack() => _queue.PlaybackOrder.Count > 1 || (_queue.RepeatMode == RepeatMode.All && _queue.Items.Count > 1);
     private void ShortcutsOnActionInvoked(object? sender, string action) => RunOnUi(() => ExecuteShortcut(action));
     private void SystemMediaOnCommandReceived(object? sender, MediaTransportCommandEventArgs e) => RunOnUi(() =>
     {

@@ -184,6 +184,7 @@ public interface IAudioEngine : IAsyncDisposable
 public interface IPlaybackQueue
 {
     IReadOnlyList<QueueEntry> Items { get; }
+    IReadOnlyList<QueueEntry> PlaybackOrder { get; }
     int CurrentIndex { get; }
     RepeatMode RepeatMode { get; set; }
     bool Shuffle { get; set; }
@@ -194,6 +195,7 @@ public interface IPlaybackQueue
     void PlayNext(IEnumerable<Track> tracks);
     void Move(int fromIndex, int toIndex);
     void MoveMany(IReadOnlyCollection<Guid> ids, int toIndex);
+    void MoveInPlaybackOrder(IReadOnlyCollection<Guid> ids, int toIndex);
     bool Remove(Guid id);
     int RemoveMany(IReadOnlyCollection<Guid> ids);
     void MoveToTop(IReadOnlyCollection<Guid> ids);

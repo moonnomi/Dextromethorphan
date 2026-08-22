@@ -271,7 +271,146 @@
                 <Border Grid.Column="1" Width="320" Background="#FC101217" BorderBrush="{StaticResource BorderBrush}" BorderThickness="1,0,0,0" Visibility="{Binding QueueVisible, Converter={StaticResource BoolToVisibility}}">
                     <Grid><Grid.RowDefinitions><RowDefinition Height="78"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                         <Grid Margin="16,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel VerticalAlignment="Center"><TextBlock Text="Queue" FontSize="18" FontWeight="SemiBold"/><TextBlock Text="{Binding StopModeText}" FontSize="9" Foreground="{StaticResource TextMutedBrush}" Margin="0,3,0,0"/></StackPanel><StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center"><Button Style="{StaticResource IconButton}" Command="{Binding UndoQueueCommand}" Content="&#xE7A7;" ToolTip="Undo queue change"/><Button Style="{StaticResource IconButton}" Command="{Binding RedoQueueCommand}" Content="&#xE7A6;" ToolTip="Redo queue change"/><Button Style="{StaticResource IconButton}" Click="OpenContextMenu_Click" Content="&#xE712;" ToolTip="Queue actions"><Button.ContextMenu><ContextMenu><MenuItem Header="Remove selected" Command="{Binding DataContext.RemoveSelectedQueueCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/><MenuItem Header="Move selected to top" Command="{Binding DataContext.MoveSelectedQueueTopCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/><MenuItem Header="Move selected to bottom" Command="{Binding DataContext.MoveSelectedQueueBottomCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/><Separator/><MenuItem Header="Clear queue" Command="{Binding DataContext.ClearQueueCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/></ContextMenu></Button.ContextMenu></Button></StackPanel></Grid>
-                        <Grid Grid.Row="1"><ListBox x:Name="QueueList" ItemsSource="{Binding Queue}" Background="Transparent" BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled" AllowDrop="True" PreviewMouseLeftButtonDown="QueueList_PreviewMouseLeftButtonDown" PreviewMouseMove="QueueList_PreviewMouseMove" PreviewMouseLeftButtonUp="QueueList_PreviewMouseLeftButtonUp" DragOver="QueueList_DragOver" Drop="QueueList_Drop"><ListBox.ItemTemplate><DataTemplate><Border Margin="8,2" Padding="9" CornerRadius="9" Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ListBox}}"><Border.ContextMenu><ContextMenu><MenuItem Header="Play now" Command="{Binding PlacementTarget.Tag.PlayQueueEntryCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/><MenuItem Header="Move to play next" Command="{Binding PlacementTarget.Tag.PlayQueueEntryNextCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/><Separator/><MenuItem Header="Remove from queue" Command="{Binding PlacementTarget.Tag.RemoveQueueEntryCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/></ContextMenu></Border.ContextMenu><Border.Style><Style TargetType="Border"><Setter Property="Background" Value="Transparent"/><Setter Property="Cursor" Value="Hand"/><Style.Triggers><DataTrigger Binding="{Binding IsPlaying}" Value="True"><Setter Property="Background" Value="{StaticResource AccentSoftBrush}"/></DataTrigger><Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="#12FFFFFF"/></Trigger></Style.Triggers></Style></Border.Style><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="42"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><Border Width="38" Height="38" CornerRadius="7" ClipToBounds="True" Background="{StaticResource SurfaceRaisedBrush}"><Grid><TextBlock Text="♪" Foreground="{StaticResource TextMutedBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/><Image ui:AsyncArtwork.Path="{Binding ArtworkPath}" ui:AsyncArtwork.DecodePixelWidth="64" ui:AsyncArtwork.Priority="Visible" Stretch="UniformToFill"/></Grid></Border><StackPanel Grid.Column="1" Margin="9,0" VerticalAlignment="Center"><TextBlock Text="{Binding Track.Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding Track.Artist}" FontSize="10" Foreground="{StaticResource TextMutedBrush}" TextTrimming="CharacterEllipsis"/></StackPanel><TextBlock Grid.Column="2" Text="{Binding Track.DurationText}" FontSize="10" Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center"/></Grid></Border></DataTemplate></ListBox.ItemTemplate></ListBox><StackPanel Visibility="{Binding HasQueue, Converter={StaticResource InverseBoolToVisibility}}" HorizontalAlignment="Center" VerticalAlignment="Center"><TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8FD;" FontSize="30" Foreground="{StaticResource TextMutedBrush}" HorizontalAlignment="Center"/><TextBlock Text="Your queue is empty" FontWeight="SemiBold" Margin="0,12,0,0"/><TextBlock Text="Play an album, artist, playlist, or track" Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,4,0,0"/></StackPanel></Grid>
+                        <Grid Grid.Row="1">
+                            <ListBox x:Name="QueueList"
+                                     ItemsSource="{Binding Queue}"
+                                     Background="Transparent"
+                                     BorderThickness="0"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                     AllowDrop="True"
+                                     PreviewMouseLeftButtonDown="QueueList_PreviewMouseLeftButtonDown"
+                                     PreviewMouseMove="QueueList_PreviewMouseMove"
+                                     PreviewMouseLeftButtonUp="QueueList_PreviewMouseLeftButtonUp"
+                                     DragOver="QueueList_DragOver"
+                                     Drop="QueueList_Drop">
+                                <ListBox.ItemContainerStyle>
+                                    <Style TargetType="ListBoxItem">
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                        <Setter Property="Padding" Value="0"/>
+                                        <Setter Property="Margin" Value="0"/>
+                                        <Setter Property="Background" Value="Transparent"/>
+                                        <Setter Property="BorderBrush" Value="Transparent"/>
+                                        <Setter Property="BorderThickness" Value="0"/>
+                                        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+                                        <Setter Property="AutomationProperties.Name" Value="{Binding AutomationName}"/>
+                                        <Setter Property="AutomationProperties.HelpText" Value="{Binding PlaybackStateDescription}"/>
+                                        <Setter Property="ToolTip" Value="{Binding ToolTipText}"/>
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="ListBoxItem">
+                                                    <Border x:Name="ContainerSurface"
+                                                            Background="{TemplateBinding Background}"
+                                                            BorderBrush="{TemplateBinding BorderBrush}"
+                                                            BorderThickness="{TemplateBinding BorderThickness}"
+                                                            CornerRadius="10"
+                                                            SnapsToDevicePixels="True">
+                                                        <ContentPresenter/>
+                                                    </Border>
+                                                    <ControlTemplate.Triggers>
+                                                        <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                                                            <Setter TargetName="ContainerSurface" Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                                            <Setter TargetName="ContainerSurface" Property="BorderThickness" Value="1"/>
+                                                        </Trigger>
+                                                    </ControlTemplate.Triggers>
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </ListBox.ItemContainerStyle>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Margin="8,2"
+                                                Padding="9"
+                                                CornerRadius="9"
+                                                BorderThickness="1"
+                                                Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ListBox}}">
+                                            <Border.ContextMenu>
+                                                <ContextMenu>
+                                                    <MenuItem Header="Play now"
+                                                              Command="{Binding PlacementTarget.Tag.PlayQueueEntryCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                              CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                                    <MenuItem Header="Move to play next"
+                                                              Command="{Binding PlacementTarget.Tag.PlayQueueEntryNextCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                              CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                                    <Separator/>
+                                                    <MenuItem Header="Remove from queue"
+                                                              Command="{Binding PlacementTarget.Tag.RemoveQueueEntryCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                              CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                                </ContextMenu>
+                                            </Border.ContextMenu>
+                                            <Border.Style>
+                                                <Style TargetType="Border">
+                                                    <Setter Property="Background" Value="Transparent"/>
+                                                    <Setter Property="BorderBrush" Value="Transparent"/>
+                                                    <Setter Property="Cursor" Value="Hand"/>
+                                                    <Style.Triggers>
+                                                        <Trigger Property="IsMouseOver" Value="True">
+                                                            <Setter Property="Background" Value="#16FFFFFF"/>
+                                                        </Trigger>
+                                                        <DataTrigger Binding="{Binding IsNext}" Value="True">
+                                                            <Setter Property="Background" Value="#148290FF"/>
+                                                            <Setter Property="BorderBrush" Value="#4D8290FF"/>
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding IsPlaying}" Value="True">
+                                                            <Setter Property="Background" Value="{StaticResource AccentSoftBrush}"/>
+                                                            <Setter Property="BorderBrush" Value="{StaticResource AccentBrush}"/>
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding HasPlaybackError}" Value="True">
+                                                            <Setter Property="BorderBrush" Value="#FFE87575"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="42"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="18"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <Border Width="38" Height="38" CornerRadius="7" ClipToBounds="True" Background="{StaticResource SurfaceRaisedBrush}">
+                                                    <Grid>
+                                                        <TextBlock Text="♪" Foreground="{StaticResource TextMutedBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                        <Image ui:AsyncArtwork.Path="{Binding ArtworkPath}" ui:AsyncArtwork.DecodePixelWidth="64" ui:AsyncArtwork.Priority="Visible" Stretch="UniformToFill"/>
+                                                    </Grid>
+                                                </Border>
+                                                <StackPanel Grid.Column="1" Margin="9,0" VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding Track.Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Text="{Binding SecondaryText}" FontSize="10" TextTrimming="CharacterEllipsis">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/>
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding HasPlaybackError}" Value="True">
+                                                                        <Setter Property="Foreground" Value="#FFE87575"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                </StackPanel>
+                                                <TextBlock Grid.Column="2"
+                                                           FontFamily="Segoe Fluent Icons"
+                                                           Text="&#xE768;"
+                                                           FontSize="11"
+                                                           Foreground="{StaticResource AccentBrush}"
+                                                           Opacity="0.78"
+                                                           HorizontalAlignment="Center"
+                                                           VerticalAlignment="Center"
+                                                           Visibility="{Binding IsNext, Converter={StaticResource BoolToVisibility}}"
+                                                           ToolTip="Plays next"/>
+                                                <TextBlock Grid.Column="3" Text="{Binding Track.DurationText}" FontSize="10" Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center" Margin="6,0,0,0"/>
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                            <StackPanel Visibility="{Binding HasQueue, Converter={StaticResource InverseBoolToVisibility}}" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8FD;" FontSize="30" Foreground="{StaticResource TextMutedBrush}" HorizontalAlignment="Center"/>
+                                <TextBlock Text="Your queue is empty" FontWeight="SemiBold" Margin="0,12,0,0"/>
+                                <TextBlock Text="Play an album, artist, playlist, or track" Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,4,0,0"/>
+                            </StackPanel>
+                        </Grid>
                     </Grid>
                 </Border>
                 <Border Grid.ColumnSpan="2"

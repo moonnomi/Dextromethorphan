@@ -15,6 +15,21 @@ public sealed class PlaybackQueue : IPlaybackQueue
     private bool _shuffle;
 
     public IReadOnlyList<QueueEntry> Items => _items;
+    public IReadOnlyList<QueueEntry> PlaybackOrder
+    {
+        get
+        {
+            if (_items.Count == 0) return [];
+            if (!Shuffle) return _currentIndex < 0 ? [.. _items] : [.. _items.Skip(_currentIndex)];
+
+            var byId = _items.ToDictionary(item => item.Id);
+            var ordered = new List<QueueEntry>(_shuffleDeck.Count + 1);
+            if (CurrentId() is { } currentId && byId.TryGetValue(currentId, out var current)) ordered.Add(current);
+            foreach (var id in _shuffleDeck)
+                if (byId.TryGetValue(id, out var item)) ordered.Add(item);
+            return ordered;
+        }
+    }
     public int CurrentIndex => _currentIndex;
     public RepeatMode RepeatMode { get; set; }
     public bool Shuffle
@@ -115,6 +130,52 @@ public sealed class PlaybackQueue : IPlaybackQueue
         if (insertion < 0) insertion = Math.Clamp(toIndex, 0, _items.Count);
         _items.InsertRange(insertion, moving);
         RestoreCurrent(currentId);
+        OnChanged();
+    }
+
+    public void MoveInPlaybackOrder(IReadOnlyCollection<Guid> ids, int toIndex)
+    {
+        if (ids.Count == 0 || _items.Count < 2) return;
+        var selected = ids.ToHashSet();
+        var currentId = CurrentId();
+        if (currentId is { } current) selected.Remove(current);
+
+        var playbackOrder = PlaybackOrder;
+        var moving = playbackOrder.Where(item => selected.Contains(item.Id)).ToList();
+        if (moving.Count == 0) return;
+        var targetId = toIndex >= 0 && toIndex < playbackOrder.Count
+            ? playbackOrder[toIndex].Id
+            : (Guid?)null;
+
+        SaveUndo();
+        if (Shuffle)
+        {
+            _shuffleDeck.RemoveAll(selected.Contains);
+            var insertion = targetId is { } target
+                ? _shuffleDeck.IndexOf(target)
+                : _shuffleDeck.Count;
+            if (insertion < 0) insertion = Math.Clamp(toIndex - 1, 0, _shuffleDeck.Count);
+            _shuffleDeck.InsertRange(insertion, moving.Select(item => item.Id));
+        }
+        else
+        {
+            var remaining = playbackOrder
+                .Skip(1)
+                .Where(item => !selected.Contains(item.Id))
+                .ToList();
+            var insertion = targetId is { } target
+                ? remaining.FindIndex(item => item.Id == target)
+                : remaining.Count;
+            if (insertion < 0) insertion = Math.Clamp(toIndex - 1, 0, remaining.Count);
+            remaining.InsertRange(insertion, moving);
+
+            var prefixLength = Math.Clamp(_currentIndex + 1, 0, _items.Count);
+            var prefix = _items.Take(prefixLength).ToList();
+            _items.Clear();
+            _items.AddRange(prefix);
+            _items.AddRange(remaining);
+            RestoreCurrent(currentId);
+        }
         OnChanged();
     }
 

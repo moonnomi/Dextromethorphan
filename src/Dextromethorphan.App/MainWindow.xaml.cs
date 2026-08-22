@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Collections.Specialized;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
@@ -91,8 +92,7 @@ public partial class MainWindow : Window
         QueueList.MouseDoubleClick += QueueList_MouseDoubleClick;
         QueueList.PreviewKeyDown += QueueList_PreviewKeyDown;
         QueueList.DragLeave += QueueList_DragLeave;
-        QueueList.ItemContainerGenerator.StatusChanged += (_, _) => ApplyQueueEntryStates();
-        ViewModel.Queue.CollectionChanged += (_, _) => Dispatcher.BeginInvoke(ApplyQueueEntryStates, DispatcherPriority.Loaded);
+        ViewModel.Queue.CollectionChanged += QueueCollectionChanged;
         Loaded += ApplyAutomationNames;
         InstallChapterMarkers();
         ViewModel.PropertyChanged += ViewModelOnPropertyChanged;
@@ -209,25 +209,14 @@ public partial class MainWindow : Window
         catch (Exception exception) { ErrorDialog.Show(this, exception, "", true, "Track could not be relinked"); }
     }
 
-    private void ApplyQueueEntryStates()
+    private void QueueCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e) =>
+        Dispatcher.BeginInvoke(FollowCurrentQueueEntry, DispatcherPriority.Loaded);
+
+    private void FollowCurrentQueueEntry()
     {
-        if (QueueList.ItemContainerGenerator.Status != GeneratorStatus.ContainersGenerated) return;
-        foreach (var entry in ViewModel.Queue)
-        {
-            if (QueueList.ItemContainerGenerator.ContainerFromItem(entry) is not ListBoxItem container) continue;
-            container.ToolTip = entry.HasPlaybackError ? $"Playback error: {entry.PlaybackError}" : entry.AutomationName;
-            container.BorderBrush = entry.HasPlaybackError ? new SolidColorBrush(Color.FromRgb(232, 117, 117)) : Brushes.Transparent;
-            container.BorderThickness = entry.HasPlaybackError ? new Thickness(3, 0, 0, 0) : new Thickness(0);
-            var texts = FindVisualChildren<TextBlock>(container).ToArray();
-            var title = texts.FirstOrDefault(text => text.Text == entry.Track.Title);
-            if (title is not null) title.Text = $"{entry.QueuePosition}  {entry.Track.Title}";
-            var secondary = texts.FirstOrDefault(text => text.Text == entry.Track.Artist || text.Text == entry.Track.DisplayArtist);
-            if (secondary is not null)
-            {
-                secondary.Text = entry.SecondaryText;
-                if (entry.HasPlaybackError) secondary.Foreground = new SolidColorBrush(Color.FromRgb(232, 117, 117));
-            }
-        }
+        if (!QueueList.IsVisible) return;
+        var current = ViewModel.Queue.FirstOrDefault(entry => entry.IsPlaying);
+        if (current is not null) QueueList.ScrollIntoView(current);
     }
 
     private void OpenContextMenu_Click(object sender, RoutedEventArgs e)
@@ -405,14 +394,9 @@ public partial class MainWindow : Window
         var historyMenu = new MenuItem { Header = "Recently played", IsEnabled = ViewModel.QueueHistory.Count > 0 };
         foreach (var history in ViewModel.QueueHistory.Take(20))
         {
-            var entry = ViewModel.Queue.FirstOrDefault(item => item.Track.Path.Equals(history.Track.Path, StringComparison.OrdinalIgnoreCase));
-            historyMenu.Items.Add(new MenuItem
-            {
-                Header = $"{history.PlayedAtText}  {history.Track.Title}",
-                Command = entry is null ? null : ViewModel.PlayQueueEntryCommand,
-                CommandParameter = entry,
-                IsEnabled = entry is not null
-            });
+            var item = new MenuItem { Header = $"{history.PlayedAtText}  {history.Track.Title}" };
+            item.Click += async (_, _) => await ViewModel.PlayHistoryTrackAsync(history.Track);
+            historyMenu.Items.Add(item);
         }
         menu.Items.Add(historyMenu);
         menu.Items.Add(new Separator());
@@ -591,6 +575,8 @@ public partial class MainWindow : Window
             SeekSlider.GetBindingExpression(RangeBase.ValueProperty)?.UpdateTarget();
         if (e.PropertyName == nameof(MainViewModel.AlbumTileSize))
             Dispatcher.BeginInvoke(UpdateGalleryColumns, DispatcherPriority.Render);
+        if (e.PropertyName == nameof(MainViewModel.QueueVisible) && ViewModel.QueueVisible)
+            Dispatcher.BeginInvoke(FollowCurrentQueueEntry, DispatcherPriority.Loaded);
         if (e.PropertyName == nameof(MainViewModel.HasLyrics))
         {
             Dispatcher.BeginInvoke(ResetLyricsView, DispatcherPriority.Loaded);
@@ -2186,6 +2172,7 @@ public partial class MainWindow : Window
         StopIdleCleanup();
         CancelDeferredPageLoads();
         PerformanceOverlay.Dispose();
+        ViewModel.Queue.CollectionChanged -= QueueCollectionChanged;
         ViewModel.PropertyChanged -= ViewModelOnPropertyChanged;
         ViewModel.NavigationStarting -= ViewModelOnNavigationStarting;
         _allowClose = true;
@@ -2202,6 +2189,7 @@ public partial class MainWindow : Window
         StopIdleCleanup();
         CancelDeferredPageLoads();
         PerformanceOverlay.Dispose();
+        ViewModel.Queue.CollectionChanged -= QueueCollectionChanged;
         ViewModel.PropertyChanged -= ViewModelOnPropertyChanged;
         ViewModel.NavigationStarting -= ViewModelOnNavigationStarting;
         _allowClose = true;

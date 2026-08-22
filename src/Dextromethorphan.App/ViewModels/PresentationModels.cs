@@ -34,13 +34,13 @@ public sealed class QueueEntryViewModel : ObservableObject
         QueueEntry entry,
         string? artworkPath,
         int index = 0,
-        int currentIndex = -1,
+        bool isNext = false,
         string? playbackError = null)
     {
         Entry = entry;
         _artworkPath = artworkPath;
         Index = index;
-        IsNext = currentIndex >= 0 && index == currentIndex + 1;
+        IsNext = isNext;
         PlaybackError = playbackError;
     }
 
@@ -51,16 +51,19 @@ public sealed class QueueEntryViewModel : ObservableObject
     public bool IsNext { get; }
     public bool HasPlaybackError => !string.IsNullOrWhiteSpace(PlaybackError);
     public string? PlaybackError { get; }
-    public string QueuePosition => IsPlaying
-        ? "CURRENT"
-        : IsNext
-            ? "NEXT"
-            : "LATER";
     public string SecondaryText => HasPlaybackError
         ? PlaybackError!
         : Track.DisplayArtist;
+    public string PlaybackStateDescription => IsPlaying
+        ? "Currently playing"
+        : IsNext
+            ? "Plays next"
+            : "Queued for later";
     public string AutomationName =>
-        $"{Track.Title} by {Track.DisplayArtist}, {Track.DurationText}";
+        $"{PlaybackStateDescription}. {Track.Title} by {Track.DisplayArtist}, {Track.DurationText}";
+    public string ToolTipText => HasPlaybackError
+        ? $"Playback error: {PlaybackError}"
+        : AutomationName;
     public string? ArtworkPath { get => _artworkPath; set => Set(ref _artworkPath, value); }
     public override string ToString() => AutomationName;
 }
