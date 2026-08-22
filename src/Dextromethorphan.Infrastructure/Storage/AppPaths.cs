@@ -17,7 +17,11 @@ public sealed class AppPaths
             File.Exists(Path.Combine(AppContext.BaseDirectory, PortableMarkerFileName)),
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData));
         SettingsFile = Path.Combine(Root, "settings.json");
-        DatabaseFile = Path.Combine(Root, "library.db");
+        // Storage generation 2 uses a different SQLite basename. This lets an
+        // upgraded app recover from a legacy process that is stuck holding the
+        // old WAL shared-memory file without abandoning the catalog itself.
+        LegacyDatabaseFile = Path.Combine(Root, "library.db");
+        DatabaseFile = Path.Combine(Root, "library-v2.db");
         ScanCheckpointFile = Path.Combine(Root, "scan-checkpoint.json");
         StartupStateFile = Path.Combine(Root, "startup-state.json");
         DatabaseBackups = Path.Combine(Root, "backups");
@@ -29,6 +33,7 @@ public sealed class AppPaths
     public string Root { get; }
     public bool IsPortable { get; }
     public string SettingsFile { get; }
+    public string LegacyDatabaseFile { get; }
     public string DatabaseFile { get; }
     public string ScanCheckpointFile { get; }
     public string StartupStateFile { get; }

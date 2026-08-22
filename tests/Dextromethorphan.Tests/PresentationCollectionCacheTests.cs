@@ -45,6 +45,20 @@ public sealed class PresentationCollectionCacheTests
     }
 
     [Fact]
+    public void ClearRebuildsTheSameViewKeyWithANewSortOrder()
+    {
+        var cache = new PresentationCollectionCache<int>();
+        var first = cache.GetOrCreate("primary:Albums", () => [1, 2, 3], int.MaxValue, out _);
+
+        cache.Clear();
+        var second = cache.GetOrCreate("primary:Albums", () => [3, 2, 1], int.MaxValue, out var cacheHit);
+
+        Assert.False(cacheHit);
+        Assert.NotSame(first, second);
+        Assert.Equal([3, 2, 1], second.Items);
+    }
+
+    [Fact]
     public void MaximumInitialCountExposesTheCompleteVirtualizedSource()
     {
         var cache = new PresentationCollectionCache<int>();

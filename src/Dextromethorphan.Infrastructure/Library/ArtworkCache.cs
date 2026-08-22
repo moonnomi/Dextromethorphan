@@ -12,6 +12,29 @@ public sealed class ArtworkCache(AppPaths paths, ISettingsService settings) : IA
     private readonly SemaphoreSlim _gate = new(1, 1);
     private DateTimeOffset _nextPrune = DateTimeOffset.MinValue;
 
+    public bool IsManagedPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        try
+        {
+            var root = Path.GetFullPath(paths.ArtworkCache)
+                           .TrimEnd(
+                               Path.DirectorySeparatorChar,
+                               Path.AltDirectorySeparatorChar)
+                       + Path.DirectorySeparatorChar;
+            return Path.GetFullPath(path).StartsWith(
+                root,
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException
+                or NotSupportedException
+                or PathTooLongException)
+        {
+            return false;
+        }
+    }
+
     public async Task<string?> StoreAsync(string mediaPath, DateTimeOffset modifiedAt, ReadOnlyMemory<byte> artwork, CancellationToken cancellationToken = default)
     {
         if (artwork.IsEmpty) return null;

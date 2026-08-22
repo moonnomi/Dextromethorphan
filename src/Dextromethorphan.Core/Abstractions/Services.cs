@@ -122,6 +122,7 @@ public interface IMetadataMatchService
 
 public interface IArtworkCache
 {
+    bool IsManagedPath(string? path);
     Task<string?> StoreAsync(string mediaPath, DateTimeOffset modifiedAt, ReadOnlyMemory<byte> artwork, CancellationToken cancellationToken = default);
     Task<string?> GetOrCreateAsync(string mediaPath, CancellationToken cancellationToken = default);
     Task<ArtworkCacheStats> GetStatsAsync(CancellationToken cancellationToken = default);

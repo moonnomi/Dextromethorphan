@@ -47,7 +47,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly IPlaylistFileService _playlistFiles;
     private readonly IPlaylistBackupService _playlistBackups;
     private readonly CancellationTokenSource _lifetime = new();
-    private readonly ConcurrentDictionary<string, string?> _resolvedArtwork = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ArtworkResolutionState _resolvedArtwork = new();
     private readonly ConcurrentDictionary<string, string> _playbackFailures = new(StringComparer.OrdinalIgnoreCase);
     private readonly Stack<NavigationEntry> _backHistory = new();
     private readonly Stack<NavigationEntry> _forwardHistory = new();
@@ -64,6 +64,7 @@ public sealed class MainViewModel : ObservableObject
     private CancellationTokenSource? _searchCancellation;
     private CancellationTokenSource? _quickFilterCancellation;
     private CancellationTokenSource? _artworkCancellation;
+    private CancellationTokenSource? _artworkReconciliationCancellation;
     private CancellationTokenSource? _queueArtworkCancellation;
     private CancellationTokenSource? _sessionSaveCancellation;
     private CancellationTokenSource? _volumeCancellation;
@@ -74,6 +75,7 @@ public sealed class MainViewModel : ObservableObject
     private Task? _activeScanTask;
     private Task? _shutdownTask;
     private Task _artworkResolutionTask = Task.CompletedTask;
+    private Task _artworkReconciliationTask = Task.CompletedTask;
     private readonly DispatcherTimer _scheduledScanTimer;
     private DateTimeOffset _lastCompletedLibraryScan = DateTimeOffset.UtcNow;
     private bool _scheduledScanEnabled = true;
@@ -354,6 +356,9 @@ public sealed class MainViewModel : ObservableObject
         ToggleDiagnosticsCommand = new RelayCommand(_ => DiagnosticsVisible = !DiagnosticsVisible);
         ClearSearchHistoryCommand = new AsyncRelayCommand(_ => ClearSearchHistoryAsync());
         UseSearchHistoryCommand = new RelayCommand(parameter => { if (parameter is string value) SearchText = value; });
+        SetQuickFilterCommand = new RelayCommand(parameter => QuickFilter = parameter?.ToString() ?? "");
+        ClearQuickFilterCommand = new RelayCommand(_ => QuickFilter = "");
+        ToggleSortDirectionCommand = new RelayCommand(_ => SortDescending = !SortDescending);
         ToggleTrackColumnCommand = new RelayCommand(parameter => ToggleTrackColumn(parameter?.ToString()));
         MoveTrackColumnCommand = new RelayCommand(parameter => MoveTrackColumn(parameter?.ToString()));
         SetTrackColumnWidthCommand = new RelayCommand(parameter => SetTrackColumnWidth(parameter?.ToString()));
@@ -657,9 +662,29 @@ public sealed class MainViewModel : ObservableObject
     public string SortBy
     {
         get => _sortBy;
-        set { var normalized = SortOptions.Contains(value, StringComparer.OrdinalIgnoreCase) ? value : "Title"; if (Set(ref _sortBy, normalized)) { PersistViewSettings(); ApplyCurrentView(false); } }
+        set
+        {
+            var normalized = SortOptions.Contains(value, StringComparer.OrdinalIgnoreCase) ? value : "Title";
+            if (Set(ref _sortBy, normalized)) ApplySortSettings();
+        }
     }
-    public bool SortDescending { get => _sortDescending; set { if (Set(ref _sortDescending, value)) { PersistViewSettings(); ApplyCurrentView(false); } } }
+    public bool SortDescending
+    {
+        get => _sortDescending;
+        set
+        {
+            if (!Set(ref _sortDescending, value)) return;
+            Raise(nameof(SortDirectionGlyph));
+            Raise(nameof(SortDirectionLabel));
+            Raise(nameof(SortDirectionToolTip));
+            ApplySortSettings();
+        }
+    }
+    public string SortDirectionGlyph => SortDescending ? "\uE74B" : "\uE74A";
+    public string SortDirectionLabel => SortDescending ? "Descending" : "Ascending";
+    public string SortDirectionToolTip => SortDescending
+        ? "Sorted descending. Activate to sort ascending."
+        : "Sorted ascending. Activate to sort descending.";
     public LibraryDensity Density
     {
         get => _density;
@@ -667,7 +692,33 @@ public sealed class MainViewModel : ObservableObject
     }
     public bool IsGridDensity => Density == LibraryDensity.Grid;
     public bool IsCompactDensity => Density == LibraryDensity.Compact;
-    public string QuickFilter { get => _quickFilter; set { if (Set(ref _quickFilter, value ?? "")) { PersistViewSettings(); DebounceQuickFilter(); } } }
+    public string QuickFilter
+    {
+        get => _quickFilter;
+        set
+        {
+            if (!Set(ref _quickFilter, value ?? "")) return;
+            Raise(nameof(HasQuickFilter));
+            Raise(nameof(QuickFilterLabel));
+            Raise(nameof(QuickFilterToolTip));
+            PersistViewSettings();
+            DebounceQuickFilter();
+        }
+    }
+    public bool HasQuickFilter => !string.IsNullOrWhiteSpace(QuickFilter);
+    public string QuickFilterLabel => QuickFilter.Trim().ToLowerInvariant() switch
+    {
+        "" => "Filter",
+        "lossless" => "Lossless",
+        "loved" => "Loved",
+        "unloved" => "Unloved",
+        "compilation" => "Compilations",
+        "rating:>=4" => "Rating 4+",
+        _ => "Custom filter"
+    };
+    public string QuickFilterToolTip => HasQuickFilter
+        ? $"Filter this view: {QuickFilter}"
+        : "Filter this view";
     public IReadOnlyList<string> SearchHistory => _settings.Current.SearchHistory;
     public IReadOnlyList<string> SearchSuggestions => string.IsNullOrWhiteSpace(SearchText)
         ? SearchHistory.Take(8).ToArray()
@@ -773,7 +824,7 @@ public sealed class MainViewModel : ObservableObject
         _density = view.Density;
         _quickFilter = view.QuickFilter;
         _albumTileSize = Math.Clamp(view.CoverSize, 80, 400);
-        Raise(nameof(SortBy)); Raise(nameof(SortDescending)); Raise(nameof(Density)); Raise(nameof(IsGridDensity)); Raise(nameof(IsCompactDensity)); Raise(nameof(QuickFilter)); Raise(nameof(AlbumTileSize)); Raise(nameof(GalleryItemWidth)); Raise(nameof(GalleryItemHeight)); Raise(nameof(VisibleTrackColumns)); Raise(nameof(TrackColumnOrder)); Raise(nameof(TrackColumnWidths));
+        Raise(nameof(SortBy)); Raise(nameof(SortDescending)); Raise(nameof(SortDirectionGlyph)); Raise(nameof(SortDirectionLabel)); Raise(nameof(SortDirectionToolTip)); Raise(nameof(Density)); Raise(nameof(IsGridDensity)); Raise(nameof(IsCompactDensity)); Raise(nameof(QuickFilter)); Raise(nameof(HasQuickFilter)); Raise(nameof(QuickFilterLabel)); Raise(nameof(QuickFilterToolTip)); Raise(nameof(AlbumTileSize)); Raise(nameof(GalleryItemWidth)); Raise(nameof(GalleryItemHeight)); Raise(nameof(VisibleTrackColumns)); Raise(nameof(TrackColumnOrder)); Raise(nameof(TrackColumnWidths));
     }
 
     private void PersistViewSettings()
@@ -784,6 +835,18 @@ public sealed class MainViewModel : ObservableObject
             if (!settings.ViewSettings.TryGetValue(viewName, out var view)) settings.ViewSettings[viewName] = view = new ViewSettings();
             view.SortBy = _sortBy; view.SortDescending = _sortDescending; view.Density = _density; view.QuickFilter = _quickFilter; view.CoverSize = _albumTileSize;
         });
+    }
+
+    private void ApplySortSettings()
+    {
+        PersistViewSettings();
+        _galleryViews.Clear();
+        _sidebarViews.Clear();
+        _trackViews.Clear();
+        _activeGalleryPresentation = null;
+        _activeSidebarPresentation = null;
+        _activeTrackPresentation = null;
+        ApplyCurrentView(false);
     }
     public bool IsArtworkCacheBusy
     {
@@ -1002,6 +1065,9 @@ public sealed class MainViewModel : ObservableObject
     public RelayCommand SaveQueueAsPlaylistCommand { get; }
     public AsyncRelayCommand ClearSearchHistoryCommand { get; }
     public RelayCommand UseSearchHistoryCommand { get; }
+    public RelayCommand SetQuickFilterCommand { get; }
+    public RelayCommand ClearQuickFilterCommand { get; }
+    public RelayCommand ToggleSortDirectionCommand { get; }
     public RelayCommand ToggleTrackColumnCommand { get; }
     public RelayCommand MoveTrackColumnCommand { get; }
     public RelayCommand SetTrackColumnWidthCommand { get; }
@@ -1602,6 +1668,7 @@ public sealed class MainViewModel : ObservableObject
         IsLibraryReady = true;
         _lastCompletedLibraryScan = DateTimeOffset.UtcNow;
         _scheduledScanTimer.Start();
+        StartArtworkReferenceReconciliation();
     }
 
     private async void ScheduledScanTimerOnTick(object? sender, EventArgs e)
@@ -1912,7 +1979,6 @@ public sealed class MainViewModel : ObservableObject
             if (!settings.LibraryFolders.Contains(normalized, StringComparer.OrdinalIgnoreCase)) settings.LibraryFolders.Add(normalized);
         }, _lifetime.Token);
         RestartSourceWatchers();
-        await RefreshLibrarySourceCountsAsync();
         await ScanAsync([normalized]);
     }
 
@@ -2028,7 +2094,6 @@ public sealed class MainViewModel : ObservableObject
                 }
             }, _lifetime.Token);
             RestartSourceWatchers();
-            await RefreshLibrarySourceCountsAsync();
             await ScanAsync(folders);
         }
 
@@ -2043,7 +2108,9 @@ public sealed class MainViewModel : ObservableObject
                 tracks.Add(await _repository.GetByPathAsync(file, _lifetime.Token)
                     ?? await _metadataReader.ReadAsync(file, _lifetime.Token));
             _queue.Replace(tracks);
-            await ChangeTrackAsync(tracks[0]);
+            await ChangeTrackAsync(
+                tracks[0],
+                startReason: PlaybackStartReason.ExplicitSelection);
             StatusText = files.Length == 1
                 ? $"Opened {Path.GetFileName(files[0])}"
                 : $"Opened {files.Length:N0} dropped tracks";
@@ -2123,14 +2190,28 @@ public sealed class MainViewModel : ObservableObject
         ArtworkCacheStatus = "Clearing artwork cache…";
         try
         {
+            await StopArtworkReferenceReconciliationAsync();
             _artworkCancellation?.Cancel();
             _queueArtworkCancellation?.Cancel();
             _artworkImages.ClearMemoryCache();
             _resolvedArtwork.Clear();
+            await ClearManagedArtworkReferencesAsync(_lifetime.Token);
             await _artwork.ClearAsync(_lifetime.Token);
-            if (CurrentTrack is not null) CurrentTrack = CurrentTrack with { ArtworkPath = null };
+            if (CurrentTrack is not null && _artwork.IsManagedPath(CurrentTrack.ArtworkPath))
+                CurrentTrack = CurrentTrack with { ArtworkPath = null };
             await RefreshLibraryAsync(SearchText, _lifetime.Token);
             await RefreshArtworkCacheStatsAsync();
+            ShowNotice("Artwork cache cleared");
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            ArtworkCacheStatus = "Artwork cache could not be cleared · " + exception.GetBaseException().Message;
+            _applicationLog.Write(
+                ApplicationLogLevel.Warning,
+                "artwork",
+                "cache-clear-failed",
+                exception: exception);
         }
         finally { IsArtworkCacheBusy = false; }
     }
@@ -2142,34 +2223,217 @@ public sealed class MainViewModel : ObservableObject
         ArtworkCacheStatus = "Clearing cache before rebuild…";
         try
         {
+            await StopArtworkReferenceReconciliationAsync();
             _artworkCancellation?.Cancel();
             _queueArtworkCancellation?.Cancel();
             _artworkImages.ClearMemoryCache();
             _resolvedArtwork.Clear();
+            var tracks = await ClearManagedArtworkReferencesAsync(_lifetime.Token);
             await _artwork.ClearAsync(_lifetime.Token);
 
-            var tracks = _allTracks.ToArray();
             var rebuilt = new ConcurrentBag<Track>();
+            var failures = 0;
             var completed = 0;
+            var mediaGroups = tracks
+                .Where(track => !track.IsMissing && File.Exists(track.EffectiveMediaPath))
+                .GroupBy(track => track.EffectiveMediaPath, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
             await Parallel.ForEachAsync(
-                tracks,
+                mediaGroups,
                 new ParallelOptions
                 {
                     CancellationToken = _lifetime.Token,
                     MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 2, 2, 4)
                 },
-                async (track, cancellationToken) =>
+                async (group, cancellationToken) =>
                 {
-                    var artwork = await _artwork.GetOrCreateAsync(track.EffectiveMediaPath, cancellationToken);
-                    if (artwork is not null) rebuilt.Add(track with { ArtworkPath = artwork });
-                    var current = Interlocked.Increment(ref completed);
-                    if (current == tracks.Length || current % 50 == 0)
-                        RunOnUi(() => ArtworkCacheStatus = $"Rebuilding artwork… {current:N0} / {tracks.Length:N0}");
+                    try
+                    {
+                        var artwork = await _artwork.GetOrCreateAsync(group.Key, cancellationToken);
+                        if (artwork is not null)
+                        {
+                            foreach (var track in group)
+                                rebuilt.Add(track with { ArtworkPath = artwork });
+                        }
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                    catch (Exception exception)
+                    {
+                        Interlocked.Increment(ref failures);
+                        _applicationLog.Write(
+                            ApplicationLogLevel.Warning,
+                            "artwork",
+                            "cache-rebuild-item-failed",
+                            new Dictionary<string, object?> { ["mediaPath"] = group.Key },
+                            exception);
+                    }
+                    finally
+                    {
+                        var current = Interlocked.Increment(ref completed);
+                        if (current == mediaGroups.Length || current % 50 == 0)
+                            RunOnUi(() => ArtworkCacheStatus = $"Rebuilding artwork… {current:N0} / {mediaGroups.Length:N0}");
+                    }
                 });
             if (!rebuilt.IsEmpty)
                 await _repository.UpsertBatchAsync(rebuilt.ToArray(), _lifetime.Token);
             await RefreshLibraryAsync(SearchText, _lifetime.Token);
             await RefreshArtworkCacheStatsAsync();
+            ShowNotice(failures == 0
+                ? $"Rebuilt artwork for {rebuilt.Count:N0} tracks"
+                : $"Rebuilt {rebuilt.Count:N0} tracks · {failures:N0} files skipped");
+            _applicationLog.Write(
+                ApplicationLogLevel.Information,
+                "artwork",
+                "cache-rebuild-completed",
+                new Dictionary<string, object?>
+                {
+                    ["tracks"] = tracks.Count,
+                    ["rebuilt"] = rebuilt.Count,
+                    ["failures"] = failures
+                });
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            ArtworkCacheStatus = "Artwork cache could not be rebuilt · " + exception.GetBaseException().Message;
+            _applicationLog.Write(
+                ApplicationLogLevel.Warning,
+                "artwork",
+                "cache-rebuild-failed",
+                exception: exception);
+        }
+        finally { IsArtworkCacheBusy = false; }
+    }
+
+    private async Task<IReadOnlyList<Track>> ClearManagedArtworkReferencesAsync(CancellationToken cancellationToken)
+    {
+        var tracks = await _repository.GetAllAsync(cancellationToken);
+        var cleared = tracks
+            .Where(track => !track.IsMissing && _artwork.IsManagedPath(track.ArtworkPath))
+            .Select(track => track with { ArtworkPath = null })
+            .ToArray();
+        if (cleared.Length == 0) return tracks;
+
+        await _repository.UpsertBatchAsync(cleared, cancellationToken);
+        var clearedByPath = cleared.ToDictionary(track => track.Path, StringComparer.OrdinalIgnoreCase);
+        return tracks
+            .Select(track => clearedByPath.TryGetValue(track.Path, out var replacement) ? replacement : track)
+            .ToArray();
+    }
+
+    private void StartArtworkReferenceReconciliation()
+    {
+        _artworkReconciliationCancellation?.Cancel();
+        _artworkReconciliationCancellation?.Dispose();
+        _artworkReconciliationCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        _artworkReconciliationTask = ReconcileMissingArtworkReferencesAsync(_artworkReconciliationCancellation.Token);
+    }
+
+    private async Task StopArtworkReferenceReconciliationAsync()
+    {
+        var cancellation = _artworkReconciliationCancellation;
+        if (cancellation is null) return;
+        cancellation.Cancel();
+        try { await _artworkReconciliationTask; }
+        catch (OperationCanceledException) { }
+        finally
+        {
+            if (ReferenceEquals(cancellation, _artworkReconciliationCancellation))
+            {
+                _artworkReconciliationCancellation = null;
+                cancellation.Dispose();
+            }
+        }
+    }
+
+    private async Task ReconcileMissingArtworkReferencesAsync(CancellationToken cancellationToken)
+    {
+        var stale = _allTracks
+            .Where(track =>
+                !track.IsMissing
+                && File.Exists(track.EffectiveMediaPath)
+                && track.ArtworkPath is { Length: > 0 } artworkPath
+                && !File.Exists(artworkPath))
+            .ToArray();
+        if (stale.Length == 0) return;
+
+        IsArtworkCacheBusy = true;
+        ArtworkCacheStatus = $"Repairing artwork… 0 / {stale.Length:N0}";
+        _artworkCancellation?.Cancel();
+        _queueArtworkCancellation?.Cancel();
+        var repaired = new ConcurrentBag<Track>();
+        var completed = 0;
+        var recovered = 0;
+        var failures = 0;
+        var groups = stale
+            .GroupBy(track => track.EffectiveMediaPath, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        try
+        {
+            await Parallel.ForEachAsync(
+                groups,
+                new ParallelOptions
+                {
+                    CancellationToken = cancellationToken,
+                    MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount / 2, 2, 4)
+                },
+                async (group, ct) =>
+                {
+                    try
+                    {
+                        var artwork = await _artwork.GetOrCreateAsync(group.Key, ct);
+                        foreach (var track in group)
+                            repaired.Add(track with { ArtworkPath = artwork });
+                        if (artwork is not null)
+                            Interlocked.Add(ref recovered, group.Count());
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch (Exception exception)
+                    {
+                        Interlocked.Increment(ref failures);
+                        _applicationLog.Write(
+                            ApplicationLogLevel.Warning,
+                            "artwork",
+                            "reference-repair-item-failed",
+                            new Dictionary<string, object?> { ["mediaPath"] = group.Key },
+                            exception);
+                    }
+                    finally
+                    {
+                        var current = Interlocked.Add(ref completed, group.Count());
+                        if (current >= stale.Length || current % 50 == 0)
+                            RunOnUi(() => ArtworkCacheStatus = $"Repairing artwork… {Math.Min(current, stale.Length):N0} / {stale.Length:N0}");
+                    }
+                });
+
+            if (!repaired.IsEmpty)
+                await _repository.UpsertBatchAsync(repaired.ToArray(), cancellationToken);
+            await RefreshLibraryAsync(SearchText, cancellationToken);
+            await RefreshArtworkCacheStatsAsync();
+            var cleared = repaired.Count - recovered;
+            ShowNotice($"Artwork repaired · {recovered:N0} restored · {cleared:N0} stale references cleared");
+            _applicationLog.Write(
+                ApplicationLogLevel.Information,
+                "artwork",
+                "reference-repair-completed",
+                new Dictionary<string, object?>
+                {
+                    ["stale"] = stale.Length,
+                    ["recovered"] = recovered,
+                    ["cleared"] = cleared,
+                    ["failures"] = failures
+                });
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            ArtworkCacheStatus = "Artwork repair could not finish · " + exception.GetBaseException().Message;
+            _applicationLog.Write(
+                ApplicationLogLevel.Warning,
+                "artwork",
+                "reference-repair-failed",
+                new Dictionary<string, object?> { ["stale"] = stale.Length },
+                exception);
         }
         finally { IsArtworkCacheBusy = false; }
     }
@@ -2412,12 +2676,18 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task ResolveCardArtworkAsync(IReadOnlyList<LibraryCardViewModel> cards, CancellationToken cancellationToken)
     {
+        var resolvedTracks = new ConcurrentBag<Track>();
         try
         {
             await Parallel.ForEachAsync(cards, new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = cancellationToken }, async (card, ct) =>
             {
-                var path = await ResolveArtworkAsync(card.RepresentativeTrack!, ct);
-                if (path is not null)
+                try
+                {
+                    var track = card.RepresentativeTrack!;
+                    var path = await ResolveArtworkAsync(track, ct);
+                    if (path is null) return;
+                    if (!string.Equals(track.ArtworkPath, path, StringComparison.OrdinalIgnoreCase))
+                        resolvedTracks.Add(track with { ArtworkPath = path });
                     _artworkUpdates.Enqueue(
                         () =>
                         {
@@ -2425,18 +2695,51 @@ public sealed class MainViewModel : ObservableObject
                             if (ReferenceEquals(card, SelectedCard)) Raise(nameof(HasDetailArtwork));
                         },
                         ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch (Exception exception)
+                {
+                    _applicationLog.Write(
+                        ApplicationLogLevel.Warning,
+                        "artwork",
+                        "card-resolution-item-failed",
+                        new Dictionary<string, object?>
+                        {
+                            ["track"] = card.RepresentativeTrack?.Path,
+                            ["card"] = card.Key
+                        },
+                        exception);
+                }
             });
+            if (!cancellationToken.IsCancellationRequested
+                && !IsArtworkCacheBusy
+                && !resolvedTracks.IsEmpty)
+            {
+                var updates = resolvedTracks
+                    .GroupBy(track => track.Path, StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.Last())
+                    .ToArray();
+                await _repository.UpsertBatchAsync(updates, _lifetime.Token);
+            }
         }
         catch (OperationCanceledException) { }
-        catch (Exception exception) { RunOnUi(() => StatusText = exception.Message); }
+        catch (Exception exception)
+        {
+            RunOnUi(() => StatusText = "Artwork could not be fully resolved · " + exception.GetBaseException().Message);
+            _applicationLog.Write(
+                ApplicationLogLevel.Warning,
+                "artwork",
+                "card-resolution-failed",
+                exception: exception);
+        }
     }
 
     private async Task<string?> ResolveArtworkAsync(Track track, CancellationToken cancellationToken)
     {
         if (track.ArtworkPath is { Length: > 0 } existing && File.Exists(existing)) return existing;
-        if (_resolvedArtwork.TryGetValue(track.Path, out var cached)) return cached;
+        if (_resolvedArtwork.TryGet(track.Path, out var cached)) return cached;
         var resolved = await _artwork.GetOrCreateAsync(track.EffectiveMediaPath, cancellationToken);
-        _resolvedArtwork[track.Path] = resolved;
+        _resolvedArtwork.Remember(track.Path, resolved);
         return resolved;
     }
 
@@ -2751,7 +3054,7 @@ public sealed class MainViewModel : ObservableObject
 
     private void SetActiveGroups(IReadOnlyList<LibraryCardViewModel> groups)
     {
-        groups = SortCards(groups);
+        groups = SortCards(groups, SortBy, SortDescending);
         var presentation = _galleryViews.GetOrCreate(
             PrimaryViewStateKey,
             () => groups,
@@ -2813,6 +3116,7 @@ public sealed class MainViewModel : ObservableObject
 
     private void SetSidebarGroups(IReadOnlyList<LibraryCardViewModel> groups)
     {
+        groups = SortCards(groups, SortBy, SortDescending);
         var presentation = _sidebarViews.GetOrCreate(
             PrimaryViewStateKey,
             () => groups,
@@ -2882,7 +3186,7 @@ public sealed class MainViewModel : ObservableObject
         string contentStateKey,
         int initialCount = int.MaxValue)
     {
-        tracks = SortTracks(tracks);
+        tracks = SortTracks(tracks, SortBy, SortDescending);
         var presentation = _trackViews.GetOrCreate(
             contentStateKey,
             () => tracks as IReadOnlyList<Track> ?? tracks.ToArray(),
@@ -2906,9 +3210,12 @@ public sealed class MainViewModel : ObservableObject
         Raise(nameof(HasBrowseTracks));
     }
 
-    private IReadOnlyList<LibraryCardViewModel> SortCards(IReadOnlyList<LibraryCardViewModel> cards)
+    internal static IReadOnlyList<LibraryCardViewModel> SortCards(
+        IReadOnlyList<LibraryCardViewModel> cards,
+        string sortBy,
+        bool sortDescending)
     {
-        Func<LibraryCardViewModel, object?> key = SortBy switch
+        Func<LibraryCardViewModel, object?> key = sortBy switch
         {
             "Artist" => card => card.Subtitle,
             "Album" => card => card.Title,
@@ -2917,15 +3224,19 @@ public sealed class MainViewModel : ObservableObject
             "Played" => card => card.RepresentativeTrack?.LastPlayedAt ?? DateTimeOffset.MinValue,
             "Rating" => card => card.RepresentativeTrack?.Rating ?? 0,
             "Duration" => card => card.RepresentativeTrack?.Duration ?? TimeSpan.Zero,
+            "Codec" => card => card.RepresentativeTrack?.Codec,
             _ => card => card.Title
         };
-        var ordered = SortDescending ? cards.OrderByDescending(key, Comparer<object?>.Create(CompareSortValues)) : cards.OrderBy(key, Comparer<object?>.Create(CompareSortValues));
+        var ordered = sortDescending ? cards.OrderByDescending(key, Comparer<object?>.Create(CompareSortValues)) : cards.OrderBy(key, Comparer<object?>.Create(CompareSortValues));
         return ordered.ThenBy(card => card.Title, StringComparer.CurrentCultureIgnoreCase).ToArray();
     }
 
-    private IReadOnlyList<Track> SortTracks(IEnumerable<Track> tracks)
+    internal static IReadOnlyList<Track> SortTracks(
+        IEnumerable<Track> tracks,
+        string sortBy,
+        bool sortDescending)
     {
-        Func<Track, object?> key = SortBy switch
+        Func<Track, object?> key = sortBy switch
         {
             "Artist" => track => track.Artist,
             "Album" => track => track.Album,
@@ -2937,7 +3248,7 @@ public sealed class MainViewModel : ObservableObject
             "Codec" => track => track.Codec,
             _ => track => track.Title
         };
-        var ordered = SortDescending ? tracks.OrderByDescending(key, Comparer<object?>.Create(CompareSortValues)) : tracks.OrderBy(key, Comparer<object?>.Create(CompareSortValues));
+        var ordered = sortDescending ? tracks.OrderByDescending(key, Comparer<object?>.Create(CompareSortValues)) : tracks.OrderBy(key, Comparer<object?>.Create(CompareSortValues));
         return ordered.ThenBy(track => track.TrackNumber).ThenBy(track => track.Title, StringComparer.CurrentCultureIgnoreCase).ToArray();
     }
 
@@ -3061,6 +3372,24 @@ public sealed class MainViewModel : ObservableObject
         {
             if (!_lifetime.IsCancellationRequested)
                 StatusText = "Library scan cancelled · progress will resume next time";
+        }
+        catch (Exception exception)
+        {
+            var message = exception.GetBaseException().Message;
+            StatusText = "Library scan failed: " + message;
+            ShowNotice("Library scan failed: " + message);
+            _applicationLog.Write(
+                ApplicationLogLevel.Error,
+                "scanner",
+                "scan-failed",
+                new Dictionary<string, object?>
+                {
+                    ["roots"] = string.Join(";", roots),
+                    ["discovered"] = ScanDiscovered,
+                    ["processed"] = ScanProcessed,
+                    ["failed"] = ScanFailed
+                },
+                exception);
         }
         finally
         {
@@ -3511,7 +3840,7 @@ public sealed class MainViewModel : ObservableObject
         foreach (var key in _resolvedArtwork.Keys)
         {
             if (!retainedArtworkPaths.Contains(key))
-                _resolvedArtwork.TryRemove(key, out _);
+                _resolvedArtwork.Remove(key);
         }
 
         _artworkImages.TrimMemoryCache(4L * 1024 * 1024);
@@ -3554,12 +3883,15 @@ public sealed class MainViewModel : ObservableObject
             .FirstOrDefault(index => ReferenceEquals(source[index], SelectedTrack)
                 || source[index].Path.Equals(SelectedTrack.Path, StringComparison.OrdinalIgnoreCase));
         _queue.Replace(source, selectedIndex);
-        await ChangeTrackAsync(SelectedTrack);
+        await ChangeTrackAsync(
+            SelectedTrack,
+            startReason: PlaybackStartReason.ExplicitSelection);
     }
 
     private async Task ChangeTrackAsync(
         Track? track,
-        HashSet<string>? failedPaths = null)
+        HashSet<string>? failedPaths = null,
+        PlaybackStartReason startReason = PlaybackStartReason.QueueNavigation)
     {
         if (track is null) return;
         try
@@ -3571,7 +3903,10 @@ public sealed class MainViewModel : ObservableObject
             ApplyTrackPlaybackSettings(track);
             await _audio.SetPlaybackOptionsAsync(CurrentPlaybackOptions(track), _lifetime.Token);
             await _audio.LoadAsync(track, _lifetime.Token);
-            var bookmark = track.Id > 0 && ResumeTrackBookmarks
+            var bookmark = track.Id > 0
+                           && ShouldResumeTrackBookmark(
+                               ResumeTrackBookmarks,
+                               startReason)
                 ? await _repository.GetBookmarkAsync(track.Id, _lifetime.Token)
                 : null;
             if (bookmark.HasValue && bookmark.Value > TimeSpan.Zero && bookmark.Value < track.Duration - TimeSpan.FromSeconds(10)) await _audio.SeekAsync(bookmark.Value, _lifetime.Token);
@@ -3708,8 +4043,16 @@ public sealed class MainViewModel : ObservableObject
     {
         _queue.PlayNext([track]);
         var entry = _queue.Items.Last(item => item.Track.Path.Equals(track.Path, StringComparison.OrdinalIgnoreCase));
-        await ChangeTrackAsync(_queue.Select(entry.Id));
+        await ChangeTrackAsync(
+            _queue.Select(entry.Id),
+            startReason: PlaybackStartReason.ExplicitSelection);
     }
+
+    internal static bool ShouldResumeTrackBookmark(
+        bool resumeEnabled,
+        PlaybackStartReason startReason) =>
+        resumeEnabled
+        && startReason == PlaybackStartReason.ExplicitSelection;
 
     public void MoveSelectedQueueBy(int delta)
     {
@@ -4108,7 +4451,7 @@ public sealed class MainViewModel : ObservableObject
                         : sourceFormat.Channels
                 };
             }
-            if (track is not null && _resolvedArtwork.TryGetValue(track.Path, out var artwork) && artwork is not null) track = track with { ArtworkPath = artwork };
+            if (track is not null && _resolvedArtwork.TryGet(track.Path, out var artwork) && artwork is not null) track = track with { ArtworkPath = artwork };
             CurrentTrack = track;
             PlayGlyph = snapshot.State == PlaybackState.Playing ? "Ⅱ" : "▶";
             DurationSeconds = snapshot.Duration.TotalSeconds;
@@ -4201,7 +4544,7 @@ public sealed class MainViewModel : ObservableObject
         Replace(Queue, _queue.Items.Select((item, index) =>
         {
             var artwork = ExistingArtwork(item.Track);
-            if (artwork is null && _resolvedArtwork.TryGetValue(item.Track.Path, out var cached)) artwork = cached;
+            if (artwork is null && _resolvedArtwork.TryGet(item.Track.Path, out var cached)) artwork = cached;
             _playbackFailures.TryGetValue(item.Track.Path, out var failure);
             return new QueueEntryViewModel(item, artwork, index, _queue.CurrentIndex, failure);
         }));
@@ -4241,13 +4584,14 @@ public sealed class MainViewModel : ObservableObject
             if (artwork is not null) track = track with { ArtworkPath = artwork };
             ApplyTrackPlaybackSettings(track);
             await _audio.SetPlaybackOptionsAsync(CurrentPlaybackOptions(track), _lifetime.Token);
+            // Restore the track and position as paused. Audio output always
+            // waits for an explicit play action after launch.
             await _audio.LoadAsync(track, _lifetime.Token);
             if (session.PositionSeconds > 0 && session.PositionSeconds < track.Duration.TotalSeconds)
                 await _audio.SeekAsync(TimeSpan.FromSeconds(session.PositionSeconds), _lifetime.Token);
             await _audio.QueueNextAsync(PeekUpcomingTrack(), _lifetime.Token);
             await LoadBookmarksAsync(track);
             await LoadLyricsAsync(track);
-            if (session.WasPlaying) await _audio.PlayAsync(_lifetime.Token);
         }
         finally { _restoringSession = false; }
     }
@@ -4320,20 +4664,41 @@ public sealed class MainViewModel : ObservableObject
         {
             await Parallel.ForEachAsync(groups, new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = cancellationToken }, async (entries, ct) =>
             {
-                string? artwork = null;
-                foreach (var entry in entries)
+                try
                 {
-                    artwork = await ResolveArtworkAsync(entry.Track, ct);
-                    if (artwork is not null) break;
+                    string? artwork = null;
+                    foreach (var entry in entries)
+                    {
+                        artwork = await ResolveArtworkAsync(entry.Track, ct);
+                        if (artwork is not null) break;
+                    }
+                    if (artwork is not null)
+                        _artworkUpdates.Enqueue(
+                            () => { foreach (var entry in entries) entry.ArtworkPath = artwork; },
+                            ct);
                 }
-                if (artwork is not null)
-                    _artworkUpdates.Enqueue(
-                        () => { foreach (var entry in entries) entry.ArtworkPath = artwork; },
-                        ct);
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch (Exception exception)
+                {
+                    _applicationLog.Write(
+                        ApplicationLogLevel.Warning,
+                        "artwork",
+                        "queue-resolution-item-failed",
+                        new Dictionary<string, object?> { ["track"] = entries.FirstOrDefault()?.Track.Path },
+                        exception);
+                }
             });
         }
         catch (OperationCanceledException) { }
-        catch (Exception exception) { RunOnUi(() => StatusText = exception.Message); }
+        catch (Exception exception)
+        {
+            RunOnUi(() => StatusText = "Queue artwork could not be fully resolved · " + exception.GetBaseException().Message);
+            _applicationLog.Write(
+                ApplicationLogLevel.Warning,
+                "artwork",
+                "queue-resolution-failed",
+                exception: exception);
+        }
     }
 
     private static string QueueArtworkKey(Track track)
@@ -4543,6 +4908,7 @@ public sealed class MainViewModel : ObservableObject
         _quickFilterCancellation?.Cancel();
         _libraryChangeCancellation?.Cancel();
         _replayGainAnalysisCancellation?.Cancel();
+        _artworkReconciliationCancellation?.Cancel();
         _scanner.Cancel();
         var activeScan = _activeScanTask;
         if (activeScan is not null)
@@ -4557,6 +4923,16 @@ public sealed class MainViewModel : ObservableObject
                     "scan-cancel-timeout",
                     exception: exception);
             }
+        }
+        try { await _artworkReconciliationTask.WaitAsync(TimeSpan.FromSeconds(5)); }
+        catch (OperationCanceledException) { }
+        catch (TimeoutException exception)
+        {
+            _applicationLog.Write(
+                ApplicationLogLevel.Warning,
+                "shutdown",
+                "artwork-repair-cancel-timeout",
+                exception: exception);
         }
         if (_audio.Snapshot.Track is { Id: > 0 } current
             && _audio.Snapshot.Position > TimeSpan.Zero)
@@ -4586,7 +4962,7 @@ public sealed class MainViewModel : ObservableObject
         _audio.OutputDevicesChanged -= AudioOnOutputDevicesChanged;
         _shortcuts.ActionInvoked -= ShortcutsOnActionInvoked; _systemMedia.CommandReceived -= SystemMediaOnCommandReceived;
         await _scanner.DisposeAsync();
-        _searchCancellation?.Dispose(); _artworkCancellation?.Dispose(); _queueArtworkCancellation?.Dispose(); _sessionSaveCancellation?.Dispose(); _volumeCancellation?.Dispose(); _libraryChangeCancellation?.Dispose(); _replayGainAnalysisCancellation?.Dispose(); _lifetime.Dispose();
+        _searchCancellation?.Dispose(); _artworkCancellation?.Dispose(); _artworkReconciliationCancellation?.Dispose(); _queueArtworkCancellation?.Dispose(); _sessionSaveCancellation?.Dispose(); _volumeCancellation?.Dispose(); _libraryChangeCancellation?.Dispose(); _replayGainAnalysisCancellation?.Dispose(); _lifetime.Dispose();
         _applicationLog.Write(ApplicationLogLevel.Information, "shutdown", "state-flushed");
     }
 
@@ -4599,3 +4975,9 @@ public sealed class MainViewModel : ObservableObject
 public sealed record PlaylistEditContext(Playlist? Existing, IReadOnlyList<Track>? InitialTracks = null);
 public sealed record BookmarkRenameRequest(PlaybackBookmark Bookmark, string Name);
 internal sealed record PlaylistHistoryEntry(Func<Task> Undo, Func<Task> Redo);
+
+internal enum PlaybackStartReason
+{
+    QueueNavigation,
+    ExplicitSelection
+}

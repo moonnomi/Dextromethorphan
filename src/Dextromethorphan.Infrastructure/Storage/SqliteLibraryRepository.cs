@@ -15,13 +15,20 @@ public sealed class SqliteLibraryRepository(
     {
         DataSource = paths.DatabaseFile,
         Mode = SqliteOpenMode.ReadWriteCreate,
-        Cache = SqliteCacheMode.Shared,
+        // WAL already provides concurrent readers and a writer. SQLite's
+        // process-wide shared page cache uses a different locking model and
+        // is explicitly a poor fit for WAL, especially across an app restart.
+        Cache = SqliteCacheMode.Default,
         Pooling = true
     }.ToString();
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         paths.EnsureCreated();
+        var migratedLegacyDatabase =
+            await SqliteDatabaseMaintenance.MigrateLegacyDatabaseAsync(
+                paths,
+                cancellationToken);
         var databaseExisted = File.Exists(paths.DatabaseFile)
             && new FileInfo(paths.DatabaseFile).Length > 0;
         string? backup = null;
@@ -59,7 +66,8 @@ public sealed class SqliteLibraryRepository(
                 {
                     ["fromVersion"] = fromVersion,
                     ["schemaVersion"] = health.SchemaVersion,
-                    ["backupCreated"] = backup is not null
+                    ["backupCreated"] = backup is not null,
+                    ["migratedLegacyDatabase"] = migratedLegacyDatabase
                 });
         }
         catch (DatabaseCorruptionException exception)

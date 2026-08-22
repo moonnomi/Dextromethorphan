@@ -327,8 +327,17 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
         foreach (var path in settings.LibraryFolders)
             if (!sources.Any(source => source.Path.Equals(path, StringComparison.OrdinalIgnoreCase)))
                 sources.Add(new LibrarySourceSettings { Path = path });
-        settings.LibrarySources = sources;
-        settings.LibraryFolders = sources.Where(source => source.Enabled).Select(source => source.Path).ToList();
+        settings.LibrarySources = sources
+            .Where(source => !sources.Any(parent =>
+                !ReferenceEquals(parent, source)
+                && parent.Enabled == source.Enabled
+                && parent.WatchEnabled == source.WatchEnabled
+                && IsNestedUnder(source.Path, parent.Path)))
+            .ToList();
+        settings.LibraryFolders = settings.LibrarySources
+            .Where(source => source.Enabled)
+            .Select(source => source.Path)
+            .ToList();
         settings.ScheduledLibraryScanIntervalMinutes = Math.Clamp(settings.ScheduledLibraryScanIntervalMinutes, 15, 1440);
         settings.MultiValueSeparators = NormalizeSeparators(settings.MultiValueSeparators);
         settings.DiscogsUserToken = NormalizeText(settings.DiscogsUserToken, "", 512);
@@ -669,6 +678,17 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
             }
         }
         return result;
+    }
+
+    private static bool IsNestedUnder(string path, string root)
+    {
+        var relative = Path.GetRelativePath(root, path);
+        return relative != "."
+               && relative != ".."
+               && !relative.StartsWith(
+                   ".." + Path.DirectorySeparatorChar,
+                   StringComparison.Ordinal)
+               && !Path.IsPathRooted(relative);
     }
 
     private static string NormalizeText(

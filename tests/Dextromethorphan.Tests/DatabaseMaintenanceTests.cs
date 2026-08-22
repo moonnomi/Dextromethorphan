@@ -12,6 +12,73 @@ public sealed class DatabaseMaintenanceTests : IDisposable
         Guid.NewGuid().ToString("N"));
 
     [Fact]
+    public void WalConnectionsDoNotEnableSharedPageCache()
+    {
+        var repository = new SqliteLibraryRepository(new AppPaths(_root));
+        var connection = new SqliteConnectionStringBuilder(
+            repository.ConnectionString);
+
+        Assert.Equal(SqliteCacheMode.Default, connection.Cache);
+        Assert.True(connection.Pooling);
+    }
+
+    [Fact]
+    public async Task LegacyWalDatabaseMigratesToIndependentStorageGeneration()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var paths = new AppPaths(_root);
+        paths.EnsureCreated();
+        var seedRoot = Path.Combine(_root, "seed");
+        var seedPaths = new AppPaths(seedRoot);
+        var seedRepository = new SqliteLibraryRepository(seedPaths);
+        await seedRepository.InitializeAsync(cancellationToken);
+        SqliteConnection.ClearAllPools();
+        File.Copy(seedPaths.DatabaseFile, paths.LegacyDatabaseFile);
+
+        await using var legacyConnection = new SqliteConnection(
+            new SqliteConnectionStringBuilder
+            {
+                DataSource = paths.LegacyDatabaseFile,
+                Mode = SqliteOpenMode.ReadWrite,
+                Pooling = false
+            }.ToString());
+        await legacyConnection.OpenAsync(cancellationToken);
+        await using (var command = legacyConnection.CreateCommand())
+        {
+            command.CommandText = """
+                PRAGMA journal_mode=WAL;
+                PRAGMA wal_autocheckpoint=0;
+                INSERT INTO tracks(
+                  path,title,artist,album_artist,album,genre,comment,year,
+                  track_number,disc_number,duration_ms,bitrate,sample_rate,
+                  bits_per_sample,channels,codec,rating,loved,play_count,
+                  file_modified_at,file_size,lyrics,added_at,updated_at,
+                  is_missing)
+                VALUES(
+                  $path,'Recovered from WAL','Migration','Migration',
+                  'Recovery','','',0,0,0,60000,0,0,0,0,'FLAC',0,0,0,
+                  1,42,'',1,1,0);
+                """;
+            command.Parameters.AddWithValue(
+                "$path",
+                Path.Combine(_root, "wal-only.flac"));
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+        Assert.True(File.Exists(paths.LegacyDatabaseFile + "-wal"));
+
+        var repository = new SqliteLibraryRepository(paths);
+        await repository.InitializeAsync(cancellationToken);
+
+        Assert.True(File.Exists(paths.DatabaseFile));
+        Assert.True(File.Exists(paths.LegacyDatabaseFile));
+        Assert.Equal(
+            "Recovered from WAL",
+            Assert.Single(await repository.SearchAsync(
+                "Recovered from WAL",
+                cancellationToken: cancellationToken)).Title);
+    }
+
+    [Fact]
     public async Task NumberedMigrationCreatesBackupAndRepairsSearchIndex()
     {
         var cancellationToken = TestContext.Current.CancellationToken;

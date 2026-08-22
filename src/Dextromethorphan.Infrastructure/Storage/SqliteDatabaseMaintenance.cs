@@ -35,6 +35,151 @@ public static class SqliteDatabaseMaintenance
 {
     public const int DefaultRetainedBackups = 5;
 
+    public static async Task<bool> MigrateLegacyDatabaseAsync(
+        AppPaths paths,
+        CancellationToken cancellationToken = default)
+    {
+        if (File.Exists(paths.DatabaseFile)
+            || !File.Exists(paths.LegacyDatabaseFile)
+            || new FileInfo(paths.LegacyDatabaseFile).Length == 0)
+            return false;
+
+        paths.EnsureCreated();
+        SqliteConnection.ClearAllPools();
+        var stagingRoot = Path.Combine(
+            paths.DatabaseBackups,
+            $"storage-upgrade-{Guid.NewGuid():N}");
+        var stagedSource = Path.Combine(stagingRoot, "library.db");
+        var stagedTarget = Path.Combine(stagingRoot, "library-v2.db");
+        Directory.CreateDirectory(stagingRoot);
+        try
+        {
+            await CopyStableDatabaseSnapshotAsync(
+                paths.LegacyDatabaseFile,
+                stagedSource,
+                cancellationToken);
+
+            await using (var source = new SqliteConnection(
+                             new SqliteConnectionStringBuilder
+                             {
+                                 DataSource = stagedSource,
+                                 Mode = SqliteOpenMode.ReadWrite,
+                                 Pooling = false,
+                                 DefaultTimeout = 5
+                             }.ToString()))
+            await using (var destination = new SqliteConnection(
+                             new SqliteConnectionStringBuilder
+                             {
+                                 DataSource = stagedTarget,
+                                 Mode = SqliteOpenMode.ReadWriteCreate,
+                                 Pooling = false,
+                                 DefaultTimeout = 5
+                             }.ToString()))
+            {
+                await source.OpenAsync(cancellationToken);
+                var sourceHealth = await CheckIntegrityAsync(
+                    source,
+                    cancellationToken);
+                if (!sourceHealth.IsHealthy)
+                    throw new DatabaseCorruptionException(
+                        sourceHealth.Message,
+                        paths.LegacyDatabaseFile);
+
+                await destination.OpenAsync(cancellationToken);
+                source.BackupDatabase(destination);
+                var destinationHealth = await CheckIntegrityAsync(
+                    destination,
+                    cancellationToken);
+                if (!destinationHealth.IsHealthy)
+                    throw new DatabaseCorruptionException(
+                        destinationHealth.Message,
+                        paths.LegacyDatabaseFile);
+            }
+
+            File.Move(stagedTarget, paths.DatabaseFile);
+            return true;
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            try
+            {
+                if (Directory.Exists(stagingRoot))
+                    Directory.Delete(stagingRoot, recursive: true);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    private static async Task CopyStableDatabaseSnapshotAsync(
+        string sourceDatabase,
+        string targetDatabase,
+        CancellationToken cancellationToken)
+    {
+        var sourceWal = sourceDatabase + "-wal";
+        var targetWal = targetDatabase + "-wal";
+        for (var attempt = 1; attempt <= 3; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var databaseBefore = CaptureFileState(sourceDatabase);
+            var walBefore = CaptureFileState(sourceWal);
+            await CopyFileAsync(
+                sourceDatabase,
+                targetDatabase,
+                cancellationToken);
+            if (walBefore.Exists)
+                await CopyFileAsync(sourceWal, targetWal, cancellationToken);
+            else if (File.Exists(targetWal))
+                File.Delete(targetWal);
+
+            var databaseAfter = CaptureFileState(sourceDatabase);
+            var walAfter = CaptureFileState(sourceWal);
+            if (databaseBefore == databaseAfter && walBefore == walAfter)
+                return;
+
+            if (attempt < 3)
+                await Task.Delay(100, cancellationToken);
+        }
+
+        throw new IOException(
+            "The legacy library database changed while it was being recovered. Close every other Dextromethorphan process and try again.");
+    }
+
+    private static async Task CopyFileAsync(
+        string source,
+        string destination,
+        CancellationToken cancellationToken)
+    {
+        await using var input = new FileStream(
+            source,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete,
+            64 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        await using var output = new FileStream(
+            destination,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None,
+            64 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        await input.CopyToAsync(output, cancellationToken);
+        await output.FlushAsync(cancellationToken);
+        output.Flush(flushToDisk: true);
+    }
+
+    private static DatabaseFileState CaptureFileState(string path)
+    {
+        if (!File.Exists(path)) return default;
+        var file = new FileInfo(path);
+        return new DatabaseFileState(
+            true,
+            file.Length,
+            file.LastWriteTimeUtc);
+    }
+
     public static async Task<string?> CreateBackupAsync(
         AppPaths paths,
         int retainedBackups = DefaultRetainedBackups,
@@ -164,4 +309,9 @@ public static class SqliteDatabaseMaintenance
             catch (UnauthorizedAccessException) { }
         }
     }
+
+    private readonly record struct DatabaseFileState(
+        bool Exists,
+        long Length,
+        DateTime LastWriteTimeUtc);
 }

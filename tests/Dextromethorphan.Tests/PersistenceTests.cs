@@ -179,6 +179,46 @@ public sealed class PersistenceTests : IDisposable
     }
 
     [Fact]
+    public void NestedSourcesWithIdenticalBehaviorAreCollapsed()
+    {
+        var root = Path.Combine(_root, "music");
+        var nested = Path.Combine(root, "soundtracks");
+        var settings = new AppSettings
+        {
+            LibrarySources =
+            [
+                new() { Path = nested, Enabled = true, WatchEnabled = true },
+                new() { Path = root, Enabled = true, WatchEnabled = true }
+            ]
+        };
+
+        JsonSettingsService.Normalize(settings);
+
+        var source = Assert.Single(settings.LibrarySources);
+        Assert.Equal(Path.GetFullPath(root), source.Path);
+        Assert.Equal([Path.GetFullPath(root)], settings.LibraryFolders);
+    }
+
+    [Fact]
+    public void NestedSourceWithDifferentWatcherBehaviorIsRetained()
+    {
+        var root = Path.Combine(_root, "music");
+        var nested = Path.Combine(root, "soundtracks");
+        var settings = new AppSettings
+        {
+            LibrarySources =
+            [
+                new() { Path = root, Enabled = true, WatchEnabled = false },
+                new() { Path = nested, Enabled = true, WatchEnabled = true }
+            ]
+        };
+
+        JsonSettingsService.Normalize(settings);
+
+        Assert.Equal(2, settings.LibrarySources.Count);
+    }
+
+    [Fact]
     public async Task LibraryUpsertPreservesUserStateAndSearchesMetadata()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
@@ -220,6 +260,22 @@ public sealed class PersistenceTests : IDisposable
         Assert.Equal(".png", Path.GetExtension(first));
         Assert.Equal(bytes, await File.ReadAllBytesAsync(first!, cancellationToken));
         Assert.Equal(2, Directory.EnumerateFiles(paths.ArtworkCache, "*.png").Count());
+    }
+
+    [Fact]
+    public async Task ArtworkCacheRecognizesOnlyPathsItOwns()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var paths = new AppPaths(_root);
+        var settings = new JsonSettingsService(paths);
+        await settings.InitializeAsync(cancellationToken);
+        var cache = new ArtworkCache(paths, settings);
+
+        Assert.True(cache.IsManagedPath(Path.Combine(paths.ArtworkCache, "cover.jpg")));
+        Assert.True(cache.IsManagedPath(Path.Combine(paths.ArtworkCache, "thumbnails", "cover.png")));
+        Assert.False(cache.IsManagedPath(Path.Combine(_root, "music", "cover.jpg")));
+        Assert.False(cache.IsManagedPath(paths.ArtworkCache + "-other" + Path.DirectorySeparatorChar + "cover.jpg"));
+        Assert.False(cache.IsManagedPath(null));
     }
 
     [Fact]

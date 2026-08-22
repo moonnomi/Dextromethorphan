@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
+using System.Runtime.ExceptionServices;
 using System.Threading.Channels;
 using Dextromethorphan.Core.Abstractions;
 using Dextromethorphan.Core.Models;
 using Dextromethorphan.Infrastructure.Storage;
+using Microsoft.Data.Sqlite;
 
 namespace Dextromethorphan.Infrastructure.Library;
 
@@ -149,7 +151,7 @@ public sealed class LibraryScanner(
             });
             var writerTask = Task.Run(async () =>
             {
-                var batch = new List<(Track Track, bool IsNew)>(250);
+                var batch = new List<(Track Track, bool IsNew, string SourceRoot)>(250);
                 async Task FlushAsync()
                 {
                     if (batch.Count == 0) return;
@@ -160,7 +162,7 @@ public sealed class LibraryScanner(
                         Interlocked.Add(ref updated, batch.Count(x => !x.IsNew));
                         Interlocked.Add(ref processed, batch.Count);
                     }
-                    catch
+                    catch (Exception exception) when (!IsFatalStorageFailure(exception))
                     {
                         foreach (var item in batch)
                         {
@@ -170,7 +172,15 @@ public sealed class LibraryScanner(
                                 if (item.IsNew) Interlocked.Increment(ref added); else Interlocked.Increment(ref updated);
                             }
                             catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
-                            catch { Interlocked.Increment(ref failed); }
+                            catch (Exception itemException) when (
+                                !IsFatalStorageFailure(itemException))
+                            {
+                                Interlocked.Increment(ref failed);
+                                ReportFailure(
+                                    item.SourceRoot,
+                                    item.Track.Path,
+                                    itemException);
+                            }
                             Interlocked.Increment(ref processed);
                         }
                     }
@@ -200,20 +210,30 @@ public sealed class LibraryScanner(
                         {
                             throw;
                         }
-                        catch
+                        catch (Exception exception) when (!IsFatalStorageFailure(exception))
                         {
                             Interlocked.Add(ref failed, item.Tracks.Count);
+                            ReportFailure(
+                                item.SourceRoot,
+                                cueSheetPath,
+                                exception);
                         }
                         Interlocked.Add(ref processed, item.Tracks.Count);
                         Report(cueSheetPath);
                         continue;
                     }
                     var track = item.Tracks[0];
-                    batch.Add((track, item.NewCount == 1));
+                    batch.Add((track, item.NewCount == 1, item.SourceRoot));
                     if (batch.Count >= 250) await FlushAsync();
                 }
                 await FlushAsync();
             }, token);
+            _ = writerTask.ContinueWith(
+                _ => linked.Cancel(),
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted
+                | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
 
             var files = Channel.CreateBounded<SourceFile>(new BoundedChannelOptions(1_024)
             {
@@ -268,6 +288,7 @@ public sealed class LibraryScanner(
                     try
                     {
                         await ProcessFileAsync(
+                            item.Root,
                             item.Path,
                             fileIndex,
                             directoryArtwork,
@@ -299,17 +320,45 @@ public sealed class LibraryScanner(
                 }
             }, token)).ToArray();
 
+            Exception? pipelineFailure = null;
             try
             {
                 await producerTask;
+            }
+            catch (Exception exception)
+            {
+                pipelineFailure = exception;
+                linked.Cancel();
+            }
+            try
+            {
                 await Task.WhenAll(workers);
+            }
+            catch (Exception exception)
+            {
+                pipelineFailure ??= exception;
+                linked.Cancel();
             }
             finally
             {
-                pending.Writer.TryComplete();
+                pending.Writer.TryComplete(pipelineFailure);
                 foreach (var limiter in sourceLimiters.Values) limiter.Dispose();
             }
-            await writerTask;
+            Exception? writerFailure = null;
+            try
+            {
+                await writerTask;
+            }
+            catch (Exception exception)
+            {
+                writerFailure = exception;
+            }
+            var scanFailure = writerFailure is not null
+                              && writerFailure is not OperationCanceledException
+                ? writerFailure
+                : pipelineFailure ?? writerFailure;
+            if (scanFailure is not null)
+                ExceptionDispatchInfo.Capture(scanFailure).Throw();
             var fullyEnumeratedRoots = validRoots
                 .Where(root => !incompleteRoots.ContainsKey(root))
                 .ToArray();
@@ -401,7 +450,7 @@ public sealed class LibraryScanner(
     public void StartWatching(IEnumerable<string> roots)
     {
         StopWatching();
-        foreach (var root in roots.Where(Directory.Exists).Distinct(StringComparer.OrdinalIgnoreCase))
+        foreach (var root in CollapseRoots(roots).Where(Directory.Exists))
         {
             try
             {
@@ -563,7 +612,10 @@ public sealed class LibraryScanner(
                 await RefreshContainingSourceStatusAsync(path, source.Token);
             }
             catch (OperationCanceledException) { }
-            catch { }
+            catch (Exception exception)
+            {
+                ReportFailure(SourceRootFor(path), path, exception);
+            }
             finally { _debounce.TryRemove(new KeyValuePair<string, CancellationTokenSource>(path, source)); source.Dispose(); }
         });
     }
@@ -618,7 +670,10 @@ public sealed class LibraryScanner(
                 await RefreshContainingSourceStatusAsync(path, source.Token);
             }
             catch (OperationCanceledException) { }
-            catch { }
+            catch (Exception exception)
+            {
+                ReportFailure(SourceRootFor(path), path, exception);
+            }
             finally
             {
                 _debounce.TryRemove(
@@ -630,9 +685,59 @@ public sealed class LibraryScanner(
         });
     }
 
-    private void QueueRootRescan(string root) => _ = Task.Run(async () => { try { await ScanAsync([root]); } catch { } });
+    private void QueueRootRescan(string root)
+    {
+        var key = "rescan\0" + root;
+        var source = new CancellationTokenSource();
+        _debounce.AddOrUpdate(
+            key,
+            source,
+            (_, previous) =>
+            {
+                previous.Cancel();
+                previous.Dispose();
+                return source;
+            });
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(800, source.Token);
+                while (true)
+                {
+                    while (IsScanning)
+                        await Task.Delay(500, source.Token);
+                    try
+                    {
+                        await ScanAsync(
+                            [root],
+                            cancellationToken: source.Token);
+                        break;
+                    }
+                    catch (InvalidOperationException) when (IsScanning)
+                    {
+                        // Another scan won the race after the idle check.
+                    }
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception exception)
+            {
+                ReportFailure(root, root, exception);
+            }
+            finally
+            {
+                _debounce.TryRemove(
+                    new KeyValuePair<string, CancellationTokenSource>(
+                        key,
+                        source));
+                source.Dispose();
+            }
+        });
+    }
 
     private async Task ProcessFileAsync(
+        string sourceRoot,
         string path,
         IReadOnlyDictionary<string, LibraryFileStamp> fileIndex,
         ConcurrentDictionary<string, ExternalArtworkSelection> directoryArtwork,
@@ -656,7 +761,8 @@ public sealed class LibraryScanner(
                     new PendingWrite(
                         cueTracks.Tracks,
                         path,
-                        cueTracks.NewCount),
+                        cueTracks.NewCount,
+                        sourceRoot),
                     cancellationToken);
                 return;
             }
@@ -677,7 +783,8 @@ public sealed class LibraryScanner(
                         await pending.WriteAsync(
                             PendingWrite.Single(
                                 persisted with { ArtworkPath = preferredArtwork, Artwork = null },
-                                false),
+                                false,
+                                sourceRoot),
                             cancellationToken);
                         return;
                     }
@@ -691,7 +798,7 @@ public sealed class LibraryScanner(
                         preferredArtwork,
                         cancellationToken);
                     await pending.WriteAsync(
-                        PendingWrite.Single(refreshed, false),
+                        PendingWrite.Single(refreshed, false, sourceRoot),
                         cancellationToken);
                     return;
                 }
@@ -703,7 +810,7 @@ public sealed class LibraryScanner(
                 preferredArtwork,
                 cancellationToken);
             await pending.WriteAsync(
-                PendingWrite.Single(track, existing is null),
+                PendingWrite.Single(track, existing is null, sourceRoot),
                 cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -902,6 +1009,35 @@ public sealed class LibraryScanner(
     private bool IsWatched(string root) =>
         _watchers.Any(watcher => watcher.Path.Equals(root, StringComparison.OrdinalIgnoreCase));
 
+    private string SourceRootFor(string path)
+    {
+        lock (_stateGate)
+            return _sourceStatuses.Keys
+                       .Where(root => IsWithin(path, root))
+                       .OrderByDescending(root => root.Length)
+                       .FirstOrDefault()
+                   ?? Path.GetDirectoryName(path)
+                   ?? path;
+    }
+
+    private void ReportFailure(
+        string sourceRoot,
+        string path,
+        Exception exception) =>
+        FailureOccurred?.Invoke(
+            this,
+            new LibraryScanFailure(
+                sourceRoot,
+                path,
+                exception.GetBaseException().Message,
+                DateTimeOffset.UtcNow));
+
+    private static bool IsFatalStorageFailure(Exception exception) =>
+        exception is SqliteException
+        {
+            SqliteErrorCode: 10 or 13 or 14
+        };
+
     private async Task<Track> CacheArtworkAsync(
         Track track,
         string? preferredArtwork,
@@ -1058,10 +1194,14 @@ public sealed class LibraryScanner(
     private sealed record PendingWrite(
         IReadOnlyList<Track> Tracks,
         string? CueSheetPath,
-        int NewCount)
+        int NewCount,
+        string SourceRoot)
     {
-        public static PendingWrite Single(Track track, bool isNew) =>
-            new([track], null, isNew ? 1 : 0);
+        public static PendingWrite Single(
+            Track track,
+            bool isNew,
+            string sourceRoot) =>
+            new([track], null, isNew ? 1 : 0, sourceRoot);
     }
     private sealed record CueTrackBatch(
         IReadOnlyList<Track> Tracks,

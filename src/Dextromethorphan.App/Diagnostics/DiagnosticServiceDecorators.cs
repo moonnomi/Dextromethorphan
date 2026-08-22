@@ -180,6 +180,8 @@ internal sealed class DiagnosticPlaylistRepository(IPlaylistRepository inner, De
 
 internal sealed class DiagnosticArtworkCache(IArtworkCache inner, DeveloperDiagnostics diagnostics) : IArtworkCache
 {
+    public bool IsManagedPath(string? path) => inner.IsManagedPath(path);
+
     public Task<string?> StoreAsync(string mediaPath, DateTimeOffset modifiedAt, ReadOnlyMemory<byte> artwork, CancellationToken cancellationToken = default) =>
         diagnostics.MeasureAsync("artwork", "cache.store", () => inner.StoreAsync(mediaPath, modifiedAt, artwork, cancellationToken),
             new Dictionary<string, object?> { ["bytes"] = artwork.Length });

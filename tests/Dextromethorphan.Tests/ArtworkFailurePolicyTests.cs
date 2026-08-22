@@ -14,6 +14,30 @@ public sealed class ArtworkFailurePolicyTests : IDisposable
         Guid.NewGuid().ToString("N"));
 
     [Fact]
+    public void ResolutionStateDoesNotStoreNullAndEvictsMissingFiles()
+    {
+        Directory.CreateDirectory(_root);
+        var artwork = Path.Combine(_root, "cover.jpg");
+        File.WriteAllBytes(artwork, [1, 2, 3]);
+        var state = new ArtworkResolutionState();
+
+        state.Remember("missing-art.flac", null);
+
+        Assert.Equal(0, state.Count);
+        Assert.False(state.TryGet("missing-art.flac", out _));
+
+        state.Remember("covered.flac", artwork);
+
+        Assert.True(state.TryGet("covered.flac", out var cached));
+        Assert.Equal(artwork, cached);
+
+        File.Delete(artwork);
+
+        Assert.False(state.TryGet("covered.flac", out _));
+        Assert.Equal(0, state.Count);
+    }
+
+    [Fact]
     public void ClassifiesIoFailuresForRetryAndContentFailuresAsPermanent()
     {
         Assert.Equal(

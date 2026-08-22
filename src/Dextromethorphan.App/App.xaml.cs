@@ -29,6 +29,7 @@ public partial class App : Application
     private readonly ConcurrentQueue<IReadOnlyList<string>> _pendingLaunchArguments = new();
     private SingleInstanceCoordinator? _singleInstance;
     private StartupRecoveryGuard? _startupRecoveryGuard;
+    private bool _restartRequested;
     private readonly IHost _host = Host.CreateDefaultBuilder()
         .ConfigureServices(services =>
         {
@@ -177,7 +178,7 @@ public partial class App : Application
                 case ErrorDialogResult.Continue when canContinue:
                     break;
                 case ErrorDialogResult.Restart:
-                    RestartApplication();
+                    _restartRequested = true;
                     Shutdown(-1);
                     break;
                 default:
@@ -305,16 +306,10 @@ public partial class App : Application
         }
     }
 
-    private void RestartApplication()
+    private static void StartRestartedApplication()
     {
         try
         {
-            if (_singleInstance is not null)
-            {
-                _singleInstance.ArgumentsReceived -= SingleInstanceOnArgumentsReceived;
-                _singleInstance.DisposeAsync().AsTask().GetAwaiter().GetResult();
-                _singleInstance = null;
-            }
             var executable = Environment.ProcessPath;
             if (string.IsNullOrWhiteSpace(executable)) return;
             var start = new ProcessStartInfo(executable) { UseShellExecute = true };
@@ -415,5 +410,7 @@ public partial class App : Application
             _host.Dispose();
             base.OnExit(e);
         }
+        if (_restartRequested)
+            StartRestartedApplication();
     }
 }
