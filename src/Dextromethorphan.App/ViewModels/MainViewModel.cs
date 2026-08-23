@@ -308,8 +308,8 @@ public sealed class MainViewModel : ObservableObject
             ShowNotice("Queue cleared");
         });
         RemoveSelectedQueueCommand = new AsyncRelayCommand(_ => RemoveSelectedQueueAsync(), _ => SelectedQueueEntries.Count > 0);
-        MoveSelectedQueueTopCommand = new RelayCommand(_ => MoveSelectedQueue(toTop: true), _ => SelectedQueueEntries.Count > 0);
-        MoveSelectedQueueBottomCommand = new RelayCommand(_ => MoveSelectedQueue(toTop: false), _ => SelectedQueueEntries.Count > 0);
+        MoveSelectedQueueTopCommand = new RelayCommand(_ => MoveSelectedQueue(toTop: true), _ => SelectedQueueEntries.Any(entry => entry.CanReorder));
+        MoveSelectedQueueBottomCommand = new RelayCommand(_ => MoveSelectedQueue(toTop: false), _ => SelectedQueueEntries.Any(entry => entry.CanReorder));
         ToggleStopAfterCurrentCommand = new RelayCommand(_ => ToggleStopMode(stopAfterCurrent: true));
         ToggleStopAfterQueueCommand = new RelayCommand(_ => ToggleStopMode(stopAfterCurrent: false));
         SetPlaybackSpeedCommand = new AsyncRelayCommand(p => SetPlaybackSpeedAsync(p));
@@ -1108,9 +1108,12 @@ public sealed class MainViewModel : ObservableObject
 
     private void MoveSelectedQueue(bool toTop)
     {
-        var ids = SelectedQueueEntries.Select(entry => entry.Entry.Id).ToArray();
+        var ids = SelectedQueueEntries
+            .Where(entry => entry.CanReorder)
+            .Select(entry => entry.Entry.Id)
+            .ToArray();
         if (ids.Length == 0) return;
-        _queue.MoveInPlaybackOrder(ids, toTop ? 1 : Queue.Count);
+        _queue.MoveInPlaybackOrder(ids, toTop ? 1 : QueuePlaybackCount());
         ShowNotice(toTop ? "Moved selection to top" : "Moved selection to bottom");
     }
 
@@ -4018,7 +4021,7 @@ public sealed class MainViewModel : ObservableObject
 
     private void MoveQueueEntryNext(QueueEntryViewModel? entry)
     {
-        if (entry is null || _queue.PlaybackOrder.Count < 2) return;
+        if (entry is null || !entry.CanReorder || _queue.PlaybackOrder.Count < 2) return;
         _queue.MoveInPlaybackOrder([entry.Entry.Id], 1);
     }
 
@@ -4052,13 +4055,20 @@ public sealed class MainViewModel : ObservableObject
     public void MoveSelectedQueueBy(int delta)
     {
         if (SelectedQueueEntries.Count == 0 || delta == 0) return;
-        var ordered = SelectedQueueEntries.OrderBy(entry => entry.Index).ToArray();
+        var ordered = SelectedQueueEntries
+            .Where(entry => entry.CanReorder)
+            .OrderBy(entry => entry.PlaybackIndex)
+            .ToArray();
+        if (ordered.Length == 0) return;
         var target = delta < 0
-            ? Math.Max(1, ordered[0].Index - 1)
-            : Math.Min(Queue.Count, ordered[^1].Index + 2);
+            ? Math.Max(1, ordered[0].PlaybackIndex - 1)
+            : Math.Min(QueuePlaybackCount(), ordered[^1].PlaybackIndex + 2);
         _queue.MoveInPlaybackOrder(ordered.Select(entry => entry.Entry.Id).ToArray(), target);
         ShowNotice(delta < 0 ? "Moved selection up" : "Moved selection down");
     }
+
+    private int QueuePlaybackCount() =>
+        Queue.Count(entry => entry.PlaybackIndex >= 0);
 
     private async Task ToggleLoveAsync()
     {
@@ -4536,12 +4546,24 @@ public sealed class MainViewModel : ObservableObject
     private void QueueOnChanged(object? sender, EventArgs e) => RunOnUi(() =>
     {
         var playbackOrder = _queue.PlaybackOrder;
-        Replace(Queue, playbackOrder.Select((item, index) =>
+        var playbackIndexes = playbackOrder
+            .Select((item, index) => (item.Id, index))
+            .ToDictionary(pair => pair.Id, pair => pair.index);
+        var timeline = _queue.TimelineOrder;
+        Replace(Queue, timeline.Select((item, index) =>
         {
             var artwork = ExistingArtwork(item.Track);
             if (artwork is null && _resolvedArtwork.TryGet(item.Track.Path, out var cached)) artwork = cached;
             _playbackFailures.TryGetValue(item.Track.Path, out var failure);
-            return new QueueEntryViewModel(item, artwork, index, index == 1, failure);
+            var playbackIndex = playbackIndexes.GetValueOrDefault(item.Id, -1);
+            return new QueueEntryViewModel(
+                item,
+                artwork,
+                index,
+                playbackIndex,
+                playbackIndex < 0,
+                playbackIndex == 1,
+                failure);
         }));
         Raise(nameof(HasQueue));
         Raise(nameof(IsShuffleEnabled)); Raise(nameof(ShuffleText)); Raise(nameof(IsRepeatEnabled)); Raise(nameof(IsRepeatOne)); Raise(nameof(RepeatText));

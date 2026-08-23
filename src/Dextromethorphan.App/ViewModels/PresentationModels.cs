@@ -34,12 +34,16 @@ public sealed class QueueEntryViewModel : ObservableObject
         QueueEntry entry,
         string? artworkPath,
         int index = 0,
+        int playbackIndex = -1,
+        bool isPast = false,
         bool isNext = false,
         string? playbackError = null)
     {
         Entry = entry;
         _artworkPath = artworkPath;
         Index = index;
+        PlaybackIndex = playbackIndex;
+        IsPast = isPast;
         IsNext = isNext;
         PlaybackError = playbackError;
     }
@@ -48,7 +52,10 @@ public sealed class QueueEntryViewModel : ObservableObject
     public Track Track => Entry.Track;
     public bool IsPlaying => Entry.IsPlaying;
     public int Index { get; }
+    public int PlaybackIndex { get; }
+    public bool IsPast { get; }
     public bool IsNext { get; }
+    public bool CanReorder => PlaybackIndex > 0;
     public bool HasPlaybackError => !string.IsNullOrWhiteSpace(PlaybackError);
     public string? PlaybackError { get; }
     public string SecondaryText => HasPlaybackError
@@ -56,6 +63,8 @@ public sealed class QueueEntryViewModel : ObservableObject
         : Track.DisplayArtist;
     public string PlaybackStateDescription => IsPlaying
         ? "Currently playing"
+        : IsPast
+            ? "Previously played"
         : IsNext
             ? "Plays next"
             : "Queued for later";

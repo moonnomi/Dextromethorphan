@@ -150,6 +150,37 @@ public sealed class PlaybackQueueTests
     }
 
     [Fact]
+    public void TimelineOrderKeepsPlayedTracksBeforeTheCurrentTrack()
+    {
+        var queue = new PlaybackQueue();
+        var tracks = Enumerable.Range(1, 5).Select(NewTrack).ToArray();
+        queue.Replace(tracks, 2);
+
+        Assert.Equal(tracks, queue.TimelineOrder.Select(item => item.Track));
+        Assert.Equal(2, queue.TimelineOrder.ToList().FindIndex(item => item.IsPlaying));
+    }
+
+    [Fact]
+    public void ShuffledTimelineCombinesHistoryCurrentAndTrueUpcomingOrder()
+    {
+        var queue = new PlaybackQueue { Shuffle = true };
+        var tracks = Enumerable.Range(1, 6).Select(NewTrack).ToArray();
+        queue.Replace(tracks, 0);
+        var first = queue.Current;
+        var second = queue.Advance();
+        var third = queue.Advance();
+
+        Assert.Equal(first, queue.TimelineOrder[0].Track);
+        Assert.Equal(second, queue.TimelineOrder[1].Track);
+        Assert.Equal(third, queue.TimelineOrder[2].Track);
+        Assert.True(queue.TimelineOrder[2].IsPlaying);
+        Assert.Equal(
+            queue.ShuffleUpcomingPaths,
+            queue.TimelineOrder.Skip(3).Select(item => item.Track.Path));
+        Assert.Equal(queue.Items.Count, queue.TimelineOrder.Select(item => item.Id).Distinct().Count());
+    }
+
+    [Fact]
     public void ShuffledPlaybackOrderMatchesTheActualShuffleDeck()
     {
         var queue = new PlaybackQueue { Shuffle = true };
@@ -187,6 +218,22 @@ public sealed class PlaybackQueueTests
         Assert.Equal(tracks[2], queue.Current);
         Assert.Equal(new[] { 1L, 2L, 3L, 6L, 4L, 5L }, queue.Items.Select(item => item.Track.Id));
         Assert.Equal(new[] { 3L, 6L, 4L, 5L }, queue.PlaybackOrder.Select(item => item.Track.Id));
+    }
+
+    [Fact]
+    public void DroppingAnEntryOnEitherSideOfItselfDoesNotMoveIt()
+    {
+        var queue = new PlaybackQueue();
+        var tracks = Enumerable.Range(1, 6).Select(NewTrack).ToArray();
+        queue.Replace(tracks, 1);
+        var entry = queue.PlaybackOrder[2];
+        var expected = queue.Items.Select(item => item.Id).ToArray();
+
+        queue.MoveInPlaybackOrder([entry.Id], 2);
+        Assert.Equal(expected, queue.Items.Select(item => item.Id));
+
+        queue.MoveInPlaybackOrder([entry.Id], 3);
+        Assert.Equal(expected, queue.Items.Select(item => item.Id));
     }
 
     [Fact]

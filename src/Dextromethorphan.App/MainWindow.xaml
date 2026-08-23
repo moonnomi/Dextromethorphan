@@ -277,6 +277,10 @@
                                      Background="Transparent"
                                      BorderThickness="0"
                                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                     ScrollViewer.CanContentScroll="True"
+                                     VirtualizingPanel.IsVirtualizing="True"
+                                     VirtualizingPanel.VirtualizationMode="Recycling"
+                                     VirtualizingPanel.ScrollUnit="Pixel"
                                      AllowDrop="True"
                                      PreviewMouseLeftButtonDown="QueueList_PreviewMouseLeftButtonDown"
                                      PreviewMouseMove="QueueList_PreviewMouseMove"
@@ -342,8 +346,14 @@
                                                 <Style TargetType="Border">
                                                     <Setter Property="Background" Value="Transparent"/>
                                                     <Setter Property="BorderBrush" Value="Transparent"/>
-                                                    <Setter Property="Cursor" Value="Hand"/>
+                                                    <Setter Property="Cursor" Value="Arrow"/>
                                                     <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding CanReorder}" Value="True">
+                                                            <Setter Property="Cursor" Value="SizeAll"/>
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding IsPast}" Value="True">
+                                                            <Setter Property="Opacity" Value="0.58"/>
+                                                        </DataTrigger>
                                                         <Trigger Property="IsMouseOver" Value="True">
                                                             <Setter Property="Background" Value="#16FFFFFF"/>
                                                         </Trigger>
@@ -405,6 +415,20 @@
                                     </DataTemplate>
                                 </ListBox.ItemTemplate>
                             </ListBox>
+                            <Border x:Name="QueueDropIndicator"
+                                    Height="2"
+                                    Margin="16,0"
+                                    VerticalAlignment="Top"
+                                    Background="{StaticResource AccentBrush}"
+                                    CornerRadius="1"
+                                    Opacity="0"
+                                    Visibility="Collapsed"
+                                    IsHitTestVisible="False"
+                                    Panel.ZIndex="20">
+                                <Border.RenderTransform>
+                                    <TranslateTransform/>
+                                </Border.RenderTransform>
+                            </Border>
                             <StackPanel Visibility="{Binding HasQueue, Converter={StaticResource InverseBoolToVisibility}}" HorizontalAlignment="Center" VerticalAlignment="Center">
                                 <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE8FD;" FontSize="30" Foreground="{StaticResource TextMutedBrush}" HorizontalAlignment="Center"/>
                                 <TextBlock Text="Your queue is empty" FontWeight="SemiBold" Margin="0,12,0,0"/>

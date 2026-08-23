@@ -185,6 +185,7 @@ public interface IPlaybackQueue
 {
     IReadOnlyList<QueueEntry> Items { get; }
     IReadOnlyList<QueueEntry> PlaybackOrder { get; }
+    IReadOnlyList<QueueEntry> TimelineOrder { get; }
     int CurrentIndex { get; }
     RepeatMode RepeatMode { get; set; }
     bool Shuffle { get; set; }

@@ -10,6 +10,7 @@ using System.Windows.Interop;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Data;
+using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
@@ -35,9 +36,17 @@ public partial class MainWindow : Window
     private SettingsWindow? _settingsWindow;
     private CancellationTokenSource? _lyricScrollCancellation;
     private Point _queueDragStart;
+    private Point _queueDragGrip;
     private QueueEntryViewModel? _queuePointerEntry;
     private bool _queueDragStarted;
-    private ListBoxItem? _queueInsertionTarget;
+    private Guid[] _queueDraggedIds = [];
+    private readonly List<ListBoxItem> _queueDragSourceContainers = [];
+    private QueueDragAdorner? _queueDragAdorner;
+    private AdornerLayer? _queueDragAdornerLayer;
+    private int _queueInsertionPlaybackIndex = -1;
+    private DateTimeOffset _lastQueueEdgeScroll = DateTimeOffset.MinValue;
+    private Guid? _lastQueueFollowedEntryId;
+    private CancellationTokenSource? _queueScrollCancellation;
     private Point _groupCardDragStart;
     private DateTime _startupStartedAt;
     private DateTimeOffset? _firstGalleryArtworkRenderedAt;
@@ -209,14 +218,70 @@ public partial class MainWindow : Window
         catch (Exception exception) { ErrorDialog.Show(this, exception, "", true, "Track could not be relinked"); }
     }
 
-    private void QueueCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e) =>
-        Dispatcher.BeginInvoke(FollowCurrentQueueEntry, DispatcherPriority.Loaded);
-
-    private void FollowCurrentQueueEntry()
+    private void QueueCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        if (!QueueList.IsVisible) return;
+        var currentId = ViewModel.Queue.FirstOrDefault(entry => entry.IsPlaying)?.Entry.Id;
+        if (currentId is null)
+        {
+            _lastQueueFollowedEntryId = null;
+            return;
+        }
+        if (_lastQueueFollowedEntryId == currentId) return;
+        _lastQueueFollowedEntryId = currentId;
+        Dispatcher.BeginInvoke(
+            () => _ = FollowCurrentQueueEntryAsync(currentId.Value),
+            DispatcherPriority.Loaded);
+    }
+
+    private async Task FollowCurrentQueueEntryAsync(Guid? expectedId = null)
+    {
+        if (!QueueList.IsVisible || _queueDragStarted) return;
         var current = ViewModel.Queue.FirstOrDefault(entry => entry.IsPlaying);
-        if (current is not null) QueueList.ScrollIntoView(current);
+        if (current is null || expectedId is { } id && current.Entry.Id != id) return;
+
+        _queueScrollCancellation?.Cancel();
+        _queueScrollCancellation?.Dispose();
+        _queueScrollCancellation = new CancellationTokenSource();
+        var token = _queueScrollCancellation.Token;
+        try
+        {
+            await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Loaded, token);
+            var viewer = FindVisualChild<ScrollViewer>(QueueList);
+            if (viewer is null || viewer.ViewportHeight <= 0) return;
+            var start = viewer.VerticalOffset;
+            var container = QueueList.ItemContainerGenerator.ContainerFromItem(current) as ListBoxItem;
+            if (container is null)
+            {
+                QueueList.ScrollIntoView(current);
+                await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Loaded, token);
+                container = QueueList.ItemContainerGenerator.ContainerFromItem(current) as ListBoxItem;
+                if (container is null) return;
+            }
+
+            var currentTop = container.TranslatePoint(new Point(0, 0), viewer).Y;
+            var target = Math.Clamp(viewer.VerticalOffset + currentTop - 2, 0, viewer.ScrollableHeight);
+            if (Math.Abs(target - start) < 0.75) return;
+            if (Math.Abs(viewer.VerticalOffset - start) > 0.75)
+                viewer.ScrollToVerticalOffset(start);
+            if (!MotionPolicy.IsEnabled(ViewModel.AnimationsEnabled))
+            {
+                viewer.ScrollToVerticalOffset(target);
+                return;
+            }
+
+            var clock = Stopwatch.StartNew();
+            var duration = Math.Clamp(150 + Math.Abs(target - start) * 0.08, 170, 260);
+            while (clock.Elapsed.TotalMilliseconds < duration)
+            {
+                token.ThrowIfCancellationRequested();
+                var progress = Math.Clamp(clock.Elapsed.TotalMilliseconds / duration, 0, 1);
+                var eased = 1 - Math.Pow(1 - progress, 3);
+                viewer.ScrollToVerticalOffset(start + ((target - start) * eased));
+                await Task.Delay(16, token);
+            }
+            viewer.ScrollToVerticalOffset(target);
+        }
+        catch (OperationCanceledException) { }
     }
 
     private void OpenContextMenu_Click(object sender, RoutedEventArgs e)
@@ -576,7 +641,9 @@ public partial class MainWindow : Window
         if (e.PropertyName == nameof(MainViewModel.AlbumTileSize))
             Dispatcher.BeginInvoke(UpdateGalleryColumns, DispatcherPriority.Render);
         if (e.PropertyName == nameof(MainViewModel.QueueVisible) && ViewModel.QueueVisible)
-            Dispatcher.BeginInvoke(FollowCurrentQueueEntry, DispatcherPriority.Loaded);
+            Dispatcher.BeginInvoke(
+                () => _ = FollowCurrentQueueEntryAsync(),
+                DispatcherPriority.Loaded);
         if (e.PropertyName == nameof(MainViewModel.HasLyrics))
         {
             Dispatcher.BeginInvoke(ResetLyricsView, DispatcherPriority.Loaded);
@@ -790,28 +857,50 @@ public partial class MainWindow : Window
     {
         _queueDragStart = e.GetPosition(QueueList);
         _queueDragStarted = false;
-        _queuePointerEntry = FindVisualParent<ListBoxItem>(e.OriginalSource as DependencyObject)?.DataContext as QueueEntryViewModel;
+        var container = FindVisualParent<ListBoxItem>(e.OriginalSource as DependencyObject);
+        _queuePointerEntry = container?.DataContext as QueueEntryViewModel;
+        _queueDragGrip = container is null
+            ? new Point(24, 24)
+            : e.GetPosition(container);
     }
 
     private void QueueList_PreviewMouseMove(object sender, MouseEventArgs e)
     {
-        if (_queuePointerEntry is null || e.LeftButton != MouseButtonState.Pressed || _queueDragStarted) return;
+        if (_queuePointerEntry is null
+            || !_queuePointerEntry.CanReorder
+            || e.LeftButton != MouseButtonState.Pressed
+            || _queueDragStarted)
+            return;
         var position = e.GetPosition(QueueList);
         if (Math.Abs(position.X - _queueDragStart.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(position.Y - _queueDragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
         _queueDragStarted = true;
         var entry = _queuePointerEntry;
-        var entries = QueueList.SelectedItems.OfType<QueueEntryViewModel>().ToArray();
+        var entries = QueueList.SelectedItems
+            .OfType<QueueEntryViewModel>()
+            .Where(item => item.CanReorder)
+            .ToArray();
         if (!entries.Contains(entry)) entries = [entry];
+        _queueDraggedIds = entries.Select(item => item.Entry.Id).ToArray();
         var data = new DataObject();
         data.SetData(typeof(QueueEntryViewModel), entry);
-        data.SetData("Dextromethorphan.QueueEntryIds", entries.Select(item => item.Entry.Id).ToArray());
-        DragDrop.DoDragDrop(QueueList, data, DragDropEffects.Move);
-        _queuePointerEntry = null;
+        data.SetData("Dextromethorphan.QueueEntryIds", _queueDraggedIds);
+        BeginQueueDragVisuals(entry, entries);
+        try
+        {
+            DragDrop.DoDragDrop(QueueList, data, DragDropEffects.Move);
+        }
+        finally
+        {
+            _queueDragStarted = false;
+            EndQueueDragVisuals();
+            _queuePointerEntry = null;
+        }
     }
 
     private void QueueList_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
         _queuePointerEntry = null;
+        if (!_queueDragStarted) ClearQueueInsertionMarker();
     }
 
     private void QueueList_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
@@ -860,11 +949,32 @@ public partial class MainWindow : Window
 
     private void QueueList_DragOver(object sender, DragEventArgs e)
     {
-        e.Effects = e.Data.GetDataPresent(typeof(QueueEntryViewModel)) || e.Data.GetDataPresent("Dextromethorphan.TrackPaths") ? DragDropEffects.Move : DragDropEffects.None;
-        ClearQueueInsertionMarker();
-        var hit = QueueList.InputHitTest(e.GetPosition(QueueList)) as DependencyObject;
-        _queueInsertionTarget = FindVisualParent<ListBoxItem>(hit);
-        if (_queueInsertionTarget is not null) _queueInsertionTarget.BorderThickness = new Thickness(0, 2, 0, 0);
+        var isQueueMove = e.Data.GetDataPresent("Dextromethorphan.QueueEntryIds");
+        var isTrackDrop = e.Data.GetDataPresent("Dextromethorphan.TrackPaths");
+        if (!isQueueMove && !isTrackDrop)
+        {
+            e.Effects = DragDropEffects.None;
+            ClearQueueInsertionMarker();
+            e.Handled = true;
+            return;
+        }
+
+        var pointer = e.GetPosition(QueueList);
+        _queueDragAdorner?.MoveTo(pointer, _queueDragGrip);
+        UpdateQueueEdgeScroll(pointer);
+        var hit = QueueList.InputHitTest(pointer) as DependencyObject;
+        var targetContainer = FindVisualParent<ListBoxItem>(hit);
+        if (isQueueMove
+            && targetContainer?.DataContext is QueueEntryViewModel { IsPast: true })
+        {
+            e.Effects = DragDropEffects.None;
+            ClearQueueInsertionMarker();
+            e.Handled = true;
+            return;
+        }
+
+        e.Effects = isQueueMove ? DragDropEffects.Move : DragDropEffects.Copy;
+        UpdateQueueInsertionMarker(pointer, targetContainer);
         e.Handled = true;
     }
 
@@ -872,13 +982,15 @@ public partial class MainWindow : Window
 
     private void ClearQueueInsertionMarker()
     {
-        if (_queueInsertionTarget is null) return;
-        _queueInsertionTarget.BorderThickness = new Thickness(0);
-        _queueInsertionTarget = null;
+        QueueDropIndicator.BeginAnimation(OpacityProperty, null);
+        QueueDropIndicator.Opacity = 0;
+        QueueDropIndicator.Visibility = Visibility.Collapsed;
+        _queueInsertionPlaybackIndex = -1;
     }
 
     private void QueueList_Drop(object sender, DragEventArgs e)
     {
+        var targetIndex = _queueInsertionPlaybackIndex;
         ClearQueueInsertionMarker();
         if (e.Data.GetData("Dextromethorphan.TrackPaths") is string[] paths)
         {
@@ -886,15 +998,148 @@ public partial class MainWindow : Window
             e.Handled = true;
             return;
         }
-        var hit = QueueList.InputHitTest(e.GetPosition(QueueList)) as DependencyObject;
-        var targetContainer = FindVisualParent<ListBoxItem>(hit);
-        var targetIndex = targetContainer is null ? QueueList.Items.Count : QueueList.ItemContainerGenerator.IndexFromContainer(targetContainer);
         if (e.Data.GetData("Dextromethorphan.QueueEntryIds") is Guid[] ids)
-            ViewModel.MoveQueueEntries(ids, targetIndex);
-        else if (e.Data.GetData(typeof(QueueEntryViewModel)) is QueueEntryViewModel source
-                 && targetContainer?.DataContext is QueueEntryViewModel target)
-            ViewModel.MoveQueueEntry(source.Entry.Id, target.Entry.Id);
+            ViewModel.MoveQueueEntries(ids, targetIndex < 1 ? 1 : targetIndex);
         e.Handled = true;
+    }
+
+    private void BeginQueueDragVisuals(
+        QueueEntryViewModel primaryEntry,
+        IReadOnlyCollection<QueueEntryViewModel> entries)
+    {
+        _queueDragSourceContainers.Clear();
+        foreach (var item in entries)
+        {
+            if (QueueList.ItemContainerGenerator.ContainerFromItem(item) is not ListBoxItem container)
+                continue;
+            _queueDragSourceContainers.Add(container);
+        }
+
+        if (QueueList.ItemContainerGenerator.ContainerFromItem(primaryEntry) is ListBoxItem source)
+        {
+            _queueDragAdornerLayer = AdornerLayer.GetAdornerLayer(QueueList);
+            if (_queueDragAdornerLayer is not null)
+            {
+                FrameworkElement previewSource =
+                    FindVisualChild<ContentPresenter>(source) is { } content
+                        ? content
+                        : source;
+                _queueDragAdorner = new QueueDragAdorner(
+                    QueueList,
+                    previewSource,
+                    entries.Count);
+                _queueDragAdornerLayer.Add(_queueDragAdorner);
+                _queueDragAdorner.MoveTo(_queueDragStart, _queueDragGrip);
+                _queueDragAdorner.Show(MotionPolicy.IsEnabled(ViewModel.AnimationsEnabled));
+            }
+        }
+
+        foreach (var container in _queueDragSourceContainers)
+            AnimateQueueSourceOpacity(container, 0.28, 90);
+    }
+
+    private void EndQueueDragVisuals()
+    {
+        ClearQueueInsertionMarker();
+        foreach (var container in _queueDragSourceContainers)
+            AnimateQueueSourceOpacity(container, 1, 90);
+        _queueDragSourceContainers.Clear();
+        if (_queueDragAdorner is not null && _queueDragAdornerLayer is not null)
+            _queueDragAdornerLayer.Remove(_queueDragAdorner);
+        _queueDragAdorner = null;
+        _queueDragAdornerLayer = null;
+        _queueDraggedIds = [];
+        Dispatcher.BeginInvoke(
+            () => _ = FollowCurrentQueueEntryAsync(),
+            DispatcherPriority.Loaded);
+    }
+
+    private void AnimateQueueSourceOpacity(
+        ListBoxItem container,
+        double target,
+        double durationMilliseconds)
+    {
+        container.BeginAnimation(OpacityProperty, null);
+        var start = container.Opacity;
+        container.Opacity = target;
+        if (!MotionPolicy.IsEnabled(ViewModel.AnimationsEnabled)) return;
+        container.BeginAnimation(
+            OpacityProperty,
+            new DoubleAnimation(start, target, TimeSpan.FromMilliseconds(durationMilliseconds))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+                FillBehavior = FillBehavior.Stop
+            });
+    }
+
+    private void UpdateQueueInsertionMarker(
+        Point pointer,
+        ListBoxItem? targetContainer)
+    {
+        double lineY;
+        if (targetContainer?.DataContext is QueueEntryViewModel target)
+        {
+            var targetTop = targetContainer.TranslatePoint(new Point(0, 0), QueueList).Y;
+            var after = pointer.Y >= targetTop + targetContainer.ActualHeight / 2;
+            if (target.IsPlaying)
+            {
+                _queueInsertionPlaybackIndex = 1;
+                lineY = targetTop + targetContainer.ActualHeight;
+            }
+            else
+            {
+                _queueInsertionPlaybackIndex = Math.Max(
+                    1,
+                    target.PlaybackIndex + (after ? 1 : 0));
+                lineY = targetTop + (after ? targetContainer.ActualHeight : 0);
+            }
+        }
+        else
+        {
+            _queueInsertionPlaybackIndex = Math.Max(
+                1,
+                ViewModel.Queue.Count(entry => entry.PlaybackIndex >= 0));
+            var last = ViewModel.Queue.LastOrDefault(entry => entry.PlaybackIndex >= 0);
+            if (last is not null
+                && QueueList.ItemContainerGenerator.ContainerFromItem(last) is ListBoxItem lastContainer)
+            {
+                lineY = lastContainer.TranslatePoint(
+                    new Point(0, lastContainer.ActualHeight),
+                    QueueList).Y;
+            }
+            else
+                lineY = Math.Clamp(pointer.Y, 2, Math.Max(2, QueueList.ActualHeight - 2));
+        }
+
+        if (QueueDropIndicator.RenderTransform is TranslateTransform transform)
+            transform.Y = Math.Clamp(lineY - 1, 0, Math.Max(0, QueueList.ActualHeight - 2));
+        if (QueueDropIndicator.Visibility == Visibility.Visible) return;
+        QueueDropIndicator.Visibility = Visibility.Visible;
+        QueueDropIndicator.Opacity = 1;
+        if (!MotionPolicy.IsEnabled(ViewModel.AnimationsEnabled)) return;
+        QueueDropIndicator.BeginAnimation(
+            OpacityProperty,
+            new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(90))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+                FillBehavior = FillBehavior.Stop
+            });
+    }
+
+    private void UpdateQueueEdgeScroll(Point pointer)
+    {
+        if (DateTimeOffset.UtcNow - _lastQueueEdgeScroll < TimeSpan.FromMilliseconds(16)) return;
+        var viewer = FindVisualChild<ScrollViewer>(QueueList);
+        if (viewer is null || viewer.ScrollableHeight <= 0) return;
+        const double edge = 52;
+        const double step = 15;
+        if (pointer.Y < edge)
+            viewer.ScrollToVerticalOffset(Math.Max(0, viewer.VerticalOffset - step));
+        else if (pointer.Y > QueueList.ActualHeight - edge)
+            viewer.ScrollToVerticalOffset(Math.Min(viewer.ScrollableHeight, viewer.VerticalOffset + step));
+        else
+            return;
+        _lastQueueEdgeScroll = DateTimeOffset.UtcNow;
     }
 
     private void Gallery_ScrollChanged(object sender, ScrollChangedEventArgs e)
@@ -2169,6 +2414,8 @@ public partial class MainWindow : Window
         await _diagnostics.CompleteAsync();
         _lyricScrollCancellation?.Cancel();
         _lyricScrollCancellation?.Dispose();
+        _queueScrollCancellation?.Cancel();
+        _queueScrollCancellation?.Dispose();
         StopIdleCleanup();
         CancelDeferredPageLoads();
         PerformanceOverlay.Dispose();
@@ -2186,6 +2433,8 @@ public partial class MainWindow : Window
         await _diagnostics.CompleteAsync();
         _lyricScrollCancellation?.Cancel();
         _lyricScrollCancellation?.Dispose();
+        _queueScrollCancellation?.Cancel();
+        _queueScrollCancellation?.Dispose();
         StopIdleCleanup();
         CancelDeferredPageLoads();
         PerformanceOverlay.Dispose();
