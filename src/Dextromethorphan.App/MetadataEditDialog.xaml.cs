@@ -17,7 +17,10 @@ public partial class MetadataEditDialog : Window
     private readonly IMetadataMatchService? _matcher;
     private byte[]? _artwork;
 
-    private MetadataEditDialog(IReadOnlyList<Track> tracks, IMetadataMatchService? matcher)
+    private MetadataEditDialog(
+        IReadOnlyList<Track> tracks,
+        IMetadataMatchService? matcher,
+        MetadataWriteMode defaultMode)
     {
         _tracks = tracks; _matcher = matcher;
         InitializeComponent();
@@ -34,13 +37,17 @@ public partial class MetadataEditDialog : Window
         TrackNumberBox.Text = Common(tracks.Select(track => track.TrackNumber == 0 ? string.Empty : track.TrackNumber.ToString()));
         DiscNumberBox.Text = Common(tracks.Select(track => track.DiscNumber == 0 ? string.Empty : track.DiscNumber.ToString()));
         CommentBox.Text = Common(tracks.Select(track => track.Comment));
-        WriteModeBox.SelectedIndex = 0;
+        WriteModeBox.SelectedIndex = defaultMode == MetadataWriteMode.WriteToFile ? 1 : 0;
     }
 
-    public static MetadataEditRequest? Show(Window owner, IReadOnlyList<Track> tracks, IMetadataMatchService? matcher = null)
+    public static MetadataEditRequest? Show(
+        Window owner,
+        IReadOnlyList<Track> tracks,
+        IMetadataMatchService? matcher = null,
+        MetadataWriteMode defaultMode = MetadataWriteMode.DatabaseOnly)
     {
         if (tracks.Count == 0) return null;
-        var dialog = new MetadataEditDialog(tracks, matcher) { Owner = owner };
+        var dialog = new MetadataEditDialog(tracks, matcher, defaultMode) { Owner = owner };
         return dialog.ShowDialog() == true ? dialog.Request : null;
     }
 

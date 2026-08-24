@@ -84,6 +84,9 @@ public partial class App : Application
     {
         base.OnStartup(e);
         var benchmark = PerformanceBenchmarkOptions.Parse(e.Args);
+        var openSettings = e.Args.Any(argument => argument.Equals(
+            "--open-settings",
+            StringComparison.OrdinalIgnoreCase));
         var paths = _host.Services.GetRequiredService<AppPaths>();
         var diagnostics = _host.Services.GetRequiredService<DeveloperDiagnostics>();
         var applicationLog = _host.Services.GetRequiredService<IApplicationLog>();
@@ -211,6 +214,8 @@ public partial class App : Application
         var processStartedAt = new DateTimeOffset(Process.GetCurrentProcess().StartTime.ToUniversalTime(), TimeSpan.Zero);
         var libraryInitialization = window.ViewModel.InitializeLibraryAsync();
         await window.CompleteStartupPresentationAsync();
+        if (openSettings)
+            window.OpenSettingsWindow();
         await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
         var interactiveAt = DateTimeOffset.UtcNow;
         diagnostics.RecordDuration("startup", "process-to-interactive", interactiveAt - processStartedAt);

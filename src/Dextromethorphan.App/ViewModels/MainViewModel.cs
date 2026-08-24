@@ -7,6 +7,7 @@ using Dextromethorphan.App.Diagnostics;
 using Dextromethorphan.App.Library;
 using Dextromethorphan.App.Lyrics;
 using Dextromethorphan.App.UI;
+using Dextromethorphan.App.UI.Views;
 using Dextromethorphan.Core.Abstractions;
 using Dextromethorphan.Core.Lyrics;
 using Dextromethorphan.Core.Library;
@@ -238,6 +239,13 @@ public sealed class MainViewModel : ObservableObject
         _metadataMatcher = metadataMatcher;
         _playlistFiles = playlistFiles;
         _playlistBackups = playlistBackups;
+        SettingsWorkspace = new SettingsWorkspaceViewModel(
+            _settings,
+            _shortcuts,
+            this);
+        SettingsWorkspace.ThemeApplyRequested += (_, _) => ApplyWorkspaceTheme();
+        OutputProfile.PropertyChanged += (_, _) =>
+            SettingsWorkspace.NotifyOutputProfileDraftChanged();
         _scheduledScanTimer = new DispatcherTimer(
             TimeSpan.FromMinutes(1),
             DispatcherPriority.Background,
@@ -402,6 +410,7 @@ public sealed class MainViewModel : ObservableObject
     public ObservableCollection<LibraryScanFailure> ScanFailures { get; } = new ObservableRangeCollection<LibraryScanFailure>();
     public ObservableCollection<DuplicateTrackGroup> DuplicateGroups { get; } = new ObservableRangeCollection<DuplicateTrackGroup>();
     public ObservableCollection<DecoderCapability> DecoderCapabilities { get; } = new ObservableRangeCollection<DecoderCapability>();
+    public SettingsWorkspaceViewModel SettingsWorkspace { get; }
     public string DuplicateScanStatus { get => _duplicateScanStatus; private set => Set(ref _duplicateScanStatus, value); }
     public AudioOutputProfileDraft OutputProfile { get; } = new();
     public AudioDeviceInfo? SelectedOutputDevice
@@ -657,14 +666,19 @@ public sealed class MainViewModel : ObservableObject
     public string ArtistProfileAttribution { get => _artistProfileAttribution; private set => Set(ref _artistProfileAttribution, value); }
     public string ArtistDiscographyText { get => _artistDiscographyText; private set => Set(ref _artistDiscographyText, value); }
     public string SearchText { get => _searchText; set { if (Set(ref _searchText, value)) { Raise(nameof(SearchSuggestions)); DebounceSearch(); } } }
-    public IReadOnlyList<string> SortOptions { get; } = ["Title", "Artist", "Album", "Year", "Added", "Played", "Rating", "Duration", "Codec"];
+    internal static IReadOnlyList<string> SupportedSortOptions { get; } =
+    [
+        "Title", "Artist", "Album", "Year", "Duration", "Date added",
+        "Last played", "Play count", "Rating", "Codec"
+    ];
+    public IReadOnlyList<string> SortOptions => SupportedSortOptions;
     public IReadOnlyList<LibraryDensity> DensityOptions { get; } = Enum.GetValues<LibraryDensity>();
     public string SortBy
     {
         get => _sortBy;
         set
         {
-            var normalized = SortOptions.Contains(value, StringComparer.OrdinalIgnoreCase) ? value : "Title";
+            var normalized = NormalizeSortField(value);
             if (Set(ref _sortBy, normalized)) ApplySortSettings();
         }
     }
@@ -688,7 +702,16 @@ public sealed class MainViewModel : ObservableObject
     public LibraryDensity Density
     {
         get => _density;
-        set { if (Set(ref _density, value)) { PersistViewSettings(); Raise(nameof(IsGridDensity)); Raise(nameof(IsCompactDensity)); } }
+        set
+        {
+            if (!Set(ref _density, value)) return;
+            PersistViewSettings();
+            Raise(nameof(IsGridDensity));
+            Raise(nameof(IsCompactDensity));
+            Raise(nameof(GalleryMetadataHeight));
+            Raise(nameof(GalleryItemHeight));
+            Raise(nameof(TrackRowHeight));
+        }
     }
     public bool IsGridDensity => Density == LibraryDensity.Grid;
     public bool IsCompactDensity => Density == LibraryDensity.Compact;
@@ -726,7 +749,8 @@ public sealed class MainViewModel : ObservableObject
     public IReadOnlyList<string> DashboardModuleNames { get; } = ["Artwork", "Lyrics", "Queue"];
     public IReadOnlyList<string> DashboardModules => _dashboardModules;
     public bool IsDashboardModuleVisible(string module) => _dashboardModules.Contains(module, StringComparer.OrdinalIgnoreCase);
-    public IReadOnlyList<string> TrackColumnNames { get; } = ["Track", "Title", "Artist", "Album", "Quality", "Rating", "Duration", "Year", "Codec", "Source"];
+    public IReadOnlyList<string> TrackColumnNames { get; } =
+        TrackListColumnLayout.ColumnNames;
     public IReadOnlyList<string> VisibleTrackColumns => GetViewSettings().VisibleColumns;
     public IReadOnlyList<string> TrackColumnOrder => GetViewSettings().ColumnOrder;
     public IReadOnlyDictionary<string, double> TrackColumnWidths => GetViewSettings().ColumnWidths;
@@ -819,12 +843,12 @@ public sealed class MainViewModel : ObservableObject
     private void LoadViewSettings()
     {
         var view = GetViewSettings();
-        _sortBy = SortOptions.Contains(view.SortBy, StringComparer.OrdinalIgnoreCase) ? view.SortBy : "Title";
+        _sortBy = NormalizeSortField(view.SortBy);
         _sortDescending = view.SortDescending;
         _density = view.Density;
         _quickFilter = view.QuickFilter;
         _albumTileSize = Math.Clamp(view.CoverSize, 80, 400);
-        Raise(nameof(SortBy)); Raise(nameof(SortDescending)); Raise(nameof(SortDirectionGlyph)); Raise(nameof(SortDirectionLabel)); Raise(nameof(SortDirectionToolTip)); Raise(nameof(Density)); Raise(nameof(IsGridDensity)); Raise(nameof(IsCompactDensity)); Raise(nameof(QuickFilter)); Raise(nameof(HasQuickFilter)); Raise(nameof(QuickFilterLabel)); Raise(nameof(QuickFilterToolTip)); Raise(nameof(AlbumTileSize)); Raise(nameof(GalleryItemWidth)); Raise(nameof(GalleryItemHeight)); Raise(nameof(VisibleTrackColumns)); Raise(nameof(TrackColumnOrder)); Raise(nameof(TrackColumnWidths));
+        Raise(nameof(SortBy)); Raise(nameof(SortDescending)); Raise(nameof(SortDirectionGlyph)); Raise(nameof(SortDirectionLabel)); Raise(nameof(SortDirectionToolTip)); Raise(nameof(Density)); Raise(nameof(IsGridDensity)); Raise(nameof(IsCompactDensity)); Raise(nameof(TrackRowHeight)); Raise(nameof(GalleryMetadataHeight)); Raise(nameof(QuickFilter)); Raise(nameof(HasQuickFilter)); Raise(nameof(QuickFilterLabel)); Raise(nameof(QuickFilterToolTip)); Raise(nameof(AlbumTileSize)); Raise(nameof(GalleryItemWidth)); Raise(nameof(GalleryItemHeight)); Raise(nameof(VisibleTrackColumns)); Raise(nameof(TrackColumnOrder)); Raise(nameof(TrackColumnWidths));
     }
 
     private void PersistViewSettings()
@@ -840,12 +864,28 @@ public sealed class MainViewModel : ObservableObject
     private void ApplySortSettings()
     {
         PersistViewSettings();
+        ApplyViewPresentationSettings();
+    }
+
+    private void ApplyViewPresentationSettings()
+    {
         _galleryViews.Clear();
         _sidebarViews.Clear();
         _trackViews.Clear();
         _activeGalleryPresentation = null;
         _activeSidebarPresentation = null;
         _activeTrackPresentation = null;
+        if (IsCollectionDetailOpen
+            && SelectedCard is { } selected
+            && TryGetCardTracks(selected) is { } selectedTracks)
+        {
+            SetBrowseTracks(
+                selectedTracks,
+                selected.Title,
+                FormatCollectionSubtitle(selected, selectedTracks));
+            RestartActiveArtworkResolution();
+            return;
+        }
         ApplyCurrentView(false);
     }
     public bool IsArtworkCacheBusy
@@ -901,14 +941,27 @@ public sealed class MainViewModel : ObservableObject
         get => _albumTileSize;
         set
         {
+            value = Math.Clamp(value, 80, 400);
             if (!Set(ref _albumTileSize, value)) return;
             Raise(nameof(GalleryItemWidth));
             Raise(nameof(GalleryItemHeight));
-            _ = _settings.UpdateAsync(x => { x.AlbumTileSize = value; var view = GetViewSettings(); view.CoverSize = value; x.ViewSettings[CurrentView] = view; });
+            var viewName = CurrentView;
+            var view = GetViewSettings();
+            view.CoverSize = value;
+            _ = _settings.UpdateAsync(settings =>
+            {
+                settings.AlbumTileSize = value;
+                settings.ViewSettings[viewName] = view;
+            });
         }
     }
     public double GalleryItemWidth => AlbumTileSize + 14;
-    public double GalleryItemHeight => AlbumTileSize + 94;
+    public double GalleryMetadataHeight =>
+        TrackListColumnLayout.GalleryMetadataHeight(Density);
+    public double GalleryItemHeight =>
+        AlbumTileSize + GalleryMetadataHeight + 18;
+    public double TrackRowHeight =>
+        TrackListColumnLayout.TrackRowHeight(Density);
     public string ActiveLyric { get => _activeLyric; private set => Set(ref _activeLyric, value); }
     public LyricLineViewModel? ActiveLyricLine { get => _activeLyricLine; private set => Set(ref _activeLyricLine, value); }
     public bool HasLyrics => Lyrics.Count > 0;
@@ -1297,10 +1350,11 @@ public sealed class MainViewModel : ObservableObject
     private void ToggleTrackColumn(string? column)
     {
         if (string.IsNullOrWhiteSpace(column) || !TrackColumnNames.Contains(column, StringComparer.OrdinalIgnoreCase)) return;
+        var viewName = CurrentView;
         var view = GetViewSettings();
         if (view.VisibleColumns.Contains(column, StringComparer.OrdinalIgnoreCase)) view.VisibleColumns.RemoveAll(item => item.Equals(column, StringComparison.OrdinalIgnoreCase));
         else view.VisibleColumns.Add(column);
-        _ = _settings.UpdateAsync(settings => settings.ViewSettings[CurrentView] = view);
+        _ = _settings.UpdateAsync(settings => settings.ViewSettings[viewName] = view);
         Raise(nameof(VisibleTrackColumns));
     }
 
@@ -1329,7 +1383,9 @@ public sealed class MainViewModel : ObservableObject
         var target = parts[1].Equals("left", StringComparison.OrdinalIgnoreCase) ? index - 1 : index + 1;
         if (target < 0 || target >= order.Count) return;
         (order[index], order[target]) = (order[target], order[index]);
-        _ = _settings.UpdateAsync(settings => settings.ViewSettings[CurrentView] = GetViewSettings());
+        var viewName = CurrentView;
+        var view = GetViewSettings();
+        _ = _settings.UpdateAsync(settings => settings.ViewSettings[viewName] = view);
         Raise(nameof(TrackColumnOrder));
     }
 
@@ -1338,9 +1394,10 @@ public sealed class MainViewModel : ObservableObject
         if (string.IsNullOrWhiteSpace(parameter)) return;
         var parts = parameter.Split('|', 2, StringSplitOptions.TrimEntries);
         if (parts.Length != 2 || !TrackColumnNames.Contains(parts[0], StringComparer.OrdinalIgnoreCase) || !double.TryParse(parts[1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var width)) return;
+        var viewName = CurrentView;
         var view = GetViewSettings();
         view.ColumnWidths[parts[0]] = Math.Clamp(width, 40, 800);
-        _ = _settings.UpdateAsync(settings => settings.ViewSettings[CurrentView] = view);
+        _ = _settings.UpdateAsync(settings => settings.ViewSettings[viewName] = view);
         Raise(nameof(TrackColumnWidths));
     }
 
@@ -1605,6 +1662,8 @@ public sealed class MainViewModel : ObservableObject
     private async Task InitializeShellCoreAsync()
     {
         await _settings.InitializeAsync(_lifetime.Token);
+        SettingsWorkspace.Reload();
+        ApplyWorkspaceTheme();
         LoadViewSettings();
         _volume = _settings.Current.Volume; Raise(nameof(Volume));
         _queueVisible = !IsSafeMode && _settings.Current.QueuePanelVisible; Raise(nameof(QueueVisible));
@@ -1965,6 +2024,7 @@ public sealed class MainViewModel : ObservableObject
         await _audio.SetVolumeAsync(Volume, _lifetime.Token);
         OutputProfileStatus =
             $"Saved {profile.Name} · {profile.Mode} · {profile.BufferMilliseconds} ms";
+        SettingsWorkspace.NotifyOutputProfileDraftChanged();
         Raise(nameof(DiagnosticBuffer));
     }
 
@@ -2485,7 +2545,6 @@ public sealed class MainViewModel : ObservableObject
         IReadOnlyList<Track> tracks = indexedTracks
             .Where(track => IsWithinEnabledSources(track.Path, activeRoots))
             .ToArray();
-        if (!string.IsNullOrWhiteSpace(QuickFilter)) tracks = LibraryFilter.Apply(tracks, QuickFilter);
         LibraryGroupSnapshot groups;
         await _groupingGate.WaitAsync(cancellationToken);
         try
@@ -2766,11 +2825,11 @@ public sealed class MainViewModel : ObservableObject
         if (resetSelection && IsCollectionDetailOpen) IsCollectionDetailOpen = false;
         switch (CurrentView)
         {
-            case "Albums": ViewSubtitle = $"{Albums.Count:N0} albums in your library"; SetActiveGroups(Albums); RestoreGallerySelection(Albums); break;
-            case "Artists": ViewSubtitle = $"{Artists.Count:N0} artists in your library"; SetActiveGroups(Artists); RestoreGallerySelection(Artists); break;
-            case "Genres": ViewSubtitle = $"{Genres.Count:N0} genres in your library"; SetActiveGroups(Genres); RestoreGallerySelection(Genres); break;
+            case "Albums": ViewSubtitle = $"{Albums.Count:N0} albums in your library"; SetActiveGroups(Albums); RestoreGallerySelection(ActiveGroups); break;
+            case "Artists": ViewSubtitle = $"{Artists.Count:N0} artists in your library"; SetActiveGroups(Artists); RestoreGallerySelection(ActiveGroups); break;
+            case "Genres": ViewSubtitle = $"{Genres.Count:N0} genres in your library"; SetActiveGroups(Genres); RestoreGallerySelection(ActiveGroups); break;
             case "Folders": ViewSubtitle = $"{Folders.Count:N0} folders across {_settings.Current.LibraryFolders.Count:N0} sources"; SetSidebarGroups(Folders); SelectDefaultFolder(); break;
-            case "Playlists": ViewSubtitle = $"{Playlists.Count:N0} saved and smart playlists"; SetSidebarGroups(Playlists); SelectDefault(Playlists, resetSelection, selectFirst: false); break;
+            case "Playlists": ViewSubtitle = $"{Playlists.Count:N0} saved and smart playlists"; SetSidebarGroups(Playlists); SelectDefault(SidebarCards, resetSelection, selectFirst: false); break;
             case "Favorites":
                 ViewSubtitle = "Tracks you have marked as loved";
                 SetBrowseTracks(_allTracks.Where(x => !x.IsMissing && x.IsLoved).OrderBy(x => x.Artist).ThenBy(x => x.Album).ThenBy(x => x.TrackNumber), "Favorites", $"{_allTracks.Count(x => !x.IsMissing && x.IsLoved):N0} loved tracks", PrimaryViewStateKey);
@@ -3056,7 +3115,12 @@ public sealed class MainViewModel : ObservableObject
 
     private void SetActiveGroups(IReadOnlyList<LibraryCardViewModel> groups)
     {
-        groups = SortCards(groups, SortBy, SortDescending);
+        groups = ApplyCardViewSettings(
+            groups,
+            TryGetCardTracks,
+            QuickFilter,
+            SortBy,
+            SortDescending);
         var presentation = _galleryViews.GetOrCreate(
             PrimaryViewStateKey,
             () => groups,
@@ -3118,7 +3182,12 @@ public sealed class MainViewModel : ObservableObject
 
     private void SetSidebarGroups(IReadOnlyList<LibraryCardViewModel> groups)
     {
-        groups = SortCards(groups, SortBy, SortDescending);
+        groups = ApplyCardViewSettings(
+            groups,
+            TryGetCardTracks,
+            QuickFilter,
+            SortBy,
+            SortDescending);
         var presentation = _sidebarViews.GetOrCreate(
             PrimaryViewStateKey,
             () => groups,
@@ -3188,7 +3257,11 @@ public sealed class MainViewModel : ObservableObject
         string contentStateKey,
         int initialCount = int.MaxValue)
     {
-        tracks = SortTracks(tracks, SortBy, SortDescending);
+        tracks = ApplyTrackViewSettings(
+            tracks,
+            QuickFilter,
+            SortBy,
+            SortDescending);
         var presentation = _trackViews.GetOrCreate(
             contentStateKey,
             () => tracks as IReadOnlyList<Track> ?? tracks.ToArray(),
@@ -3212,18 +3285,62 @@ public sealed class MainViewModel : ObservableObject
         Raise(nameof(HasBrowseTracks));
     }
 
+    internal static IReadOnlyList<Track> ApplyTrackViewSettings(
+        IEnumerable<Track> tracks,
+        string? quickFilter,
+        string sortBy,
+        bool sortDescending) =>
+        SortTracks(
+            LibraryFilter.Apply(tracks, quickFilter),
+            sortBy,
+            sortDescending);
+
+    internal static string NormalizeSortField(string? sortBy)
+    {
+        var candidate = sortBy?.Trim() ?? "Title";
+        if (candidate.Equals("Added", StringComparison.OrdinalIgnoreCase))
+            candidate = "Date added";
+        else if (candidate.Equals("Played", StringComparison.OrdinalIgnoreCase))
+            candidate = "Last played";
+        return SupportedSortOptions.FirstOrDefault(option => option.Equals(
+                   candidate,
+                   StringComparison.OrdinalIgnoreCase))
+               ?? "Title";
+    }
+
+    internal static IReadOnlyList<LibraryCardViewModel> ApplyCardViewSettings(
+        IReadOnlyList<LibraryCardViewModel> cards,
+        Func<LibraryCardViewModel, IReadOnlyList<Track>?> trackResolver,
+        string? quickFilter,
+        string sortBy,
+        bool sortDescending)
+    {
+        ArgumentNullException.ThrowIfNull(trackResolver);
+        var filters = LibraryFilter.Parse(quickFilter);
+        var filtered = filters.Count == 0
+            ? cards
+            : cards.Where(card =>
+            {
+                var tracks = trackResolver(card);
+                return tracks is null
+                       || tracks.Any(track => filters.All(filter => filter(track)));
+            }).ToArray();
+        return SortCards(filtered, sortBy, sortDescending);
+    }
+
     internal static IReadOnlyList<LibraryCardViewModel> SortCards(
         IReadOnlyList<LibraryCardViewModel> cards,
         string sortBy,
         bool sortDescending)
     {
-        Func<LibraryCardViewModel, object?> key = sortBy switch
+        Func<LibraryCardViewModel, object?> key = NormalizeSortField(sortBy) switch
         {
             "Artist" => card => card.Subtitle,
             "Album" => card => card.Title,
             "Year" => card => card.RepresentativeTrack?.Year ?? 0,
-            "Added" => card => card.RepresentativeTrack?.AddedAt ?? DateTimeOffset.MinValue,
-            "Played" => card => card.RepresentativeTrack?.LastPlayedAt ?? DateTimeOffset.MinValue,
+            "Date added" => card => card.RepresentativeTrack?.AddedAt ?? DateTimeOffset.MinValue,
+            "Last played" => card => card.RepresentativeTrack?.LastPlayedAt ?? DateTimeOffset.MinValue,
+            "Play count" => card => card.RepresentativeTrack?.PlayCount ?? 0,
             "Rating" => card => card.RepresentativeTrack?.Rating ?? 0,
             "Duration" => card => card.RepresentativeTrack?.Duration ?? TimeSpan.Zero,
             "Codec" => card => card.RepresentativeTrack?.Codec,
@@ -3238,13 +3355,14 @@ public sealed class MainViewModel : ObservableObject
         string sortBy,
         bool sortDescending)
     {
-        Func<Track, object?> key = sortBy switch
+        Func<Track, object?> key = NormalizeSortField(sortBy) switch
         {
             "Artist" => track => track.Artist,
             "Album" => track => track.Album,
             "Year" => track => track.Year,
-            "Added" => track => track.AddedAt,
-            "Played" => track => track.LastPlayedAt ?? DateTimeOffset.MinValue,
+            "Date added" => track => track.AddedAt,
+            "Last played" => track => track.LastPlayedAt ?? DateTimeOffset.MinValue,
+            "Play count" => track => track.PlayCount,
             "Rating" => track => track.Rating,
             "Duration" => track => track.Duration,
             "Codec" => track => track.Codec,
@@ -3655,14 +3773,14 @@ public sealed class MainViewModel : ObservableObject
     public async Task ImportSettingsAsync(string source)
     {
         await _settings.ImportAsync(source, _lifetime.Token);
-        await ApplyImportedSettingsAsync();
+        await ApplySettingsFromStoreAsync();
         StatusText = "Settings imported";
     }
 
     public async Task ResetSettingsAsync(SettingsResetScope scope)
     {
         await _settings.ResetAsync(scope, _lifetime.Token);
-        await ApplyImportedSettingsAsync();
+        await ApplySettingsFromStoreAsync();
         StatusText = $"{scope} settings reset";
     }
 
@@ -3680,7 +3798,7 @@ public sealed class MainViewModel : ObservableObject
         await _userDataBackups.RestoreAsync(
             source,
             _lifetime.Token);
-        await ApplyImportedSettingsAsync();
+        await ApplySettingsFromStoreAsync();
         await RefreshLibraryAsync(
             cancellationToken: _lifetime.Token);
         RestartSourceWatchers();
@@ -3701,8 +3819,10 @@ public sealed class MainViewModel : ObservableObject
             : $"{groups.Count:N0} groups · {files:N0} files · {FormatBytes(reclaimable)} potentially reclaimable";
     }
 
-    private async Task ApplyImportedSettingsAsync()
+    public async Task ApplySettingsFromStoreAsync()
     {
+        SettingsWorkspace.Reload();
+        ApplyWorkspaceTheme();
         _volume = _settings.Current.Volume;
         _queueVisible =
             !IsSafeMode && _settings.Current.QueuePanelVisible;
@@ -3716,6 +3836,10 @@ public sealed class MainViewModel : ObservableObject
         _audio.SetVisualizationEnabled(_visualizerEnabled);
         _artworkCacheMegabytes =
             _settings.Current.ArtworkCacheMegabytes;
+        _scheduledScanEnabled = _settings.Current.ScheduledLibraryScanEnabled;
+        _scheduledScanIntervalMinutes = _settings.Current.ScheduledLibraryScanIntervalMinutes;
+        _allowScheduledScanOnBattery = _settings.Current.AllowScheduledScanOnBattery;
+        _allowScheduledScanOnMeteredNetwork = _settings.Current.AllowScheduledScanOnMeteredNetwork;
         _replayGainMode = _settings.Current.ReplayGainMode;
         _replayGainPreampDb = _settings.Current.ReplayGainPreampDb;
         _preventClipping = _settings.Current.PreventClipping;
@@ -3736,6 +3860,10 @@ public sealed class MainViewModel : ObservableObject
         Raise(nameof(VisualizerText));
         Raise(nameof(ArtworkCacheMegabytes));
         Raise(nameof(ArtworkCacheLimitText));
+        Raise(nameof(ScheduledScanEnabled));
+        Raise(nameof(ScheduledScanIntervalMinutes));
+        Raise(nameof(AllowScheduledScanOnBattery));
+        Raise(nameof(AllowScheduledScanOnMeteredNetwork));
         Raise(nameof(ReplayGainMode));
         Raise(nameof(ReplayGainPreampDb));
         Raise(nameof(PreventClipping));
@@ -3747,15 +3875,37 @@ public sealed class MainViewModel : ObservableObject
         Raise(nameof(HasStopMode));
         Raise(nameof(StopModeText));
         _shortcuts.Refresh(_settings.Current.Shortcuts);
+
+        // Settings can be opened while the library initializes in the
+        // background. Import/reset must not manipulate repository-backed
+        // watchers or reconfigure audio alongside that initialization.
+        await SettingsRuntimeApplyPolicy.EnsureLibraryReadyAsync(
+            IsLibraryReady,
+            InitializeLibraryAsync);
+
         _scanner.StopWatching();
         RestartSourceWatchers();
-        var profile = _settings.Current.OutputProfiles.FirstOrDefault(
-                          item => item.DeviceId.Equals(
-                              _settings.Current.ActiveOutputDeviceId,
-                              StringComparison.OrdinalIgnoreCase))
-                      ?? _settings.Current.OutputProfiles[0];
+        await RefreshLibrarySourceCountsAsync();
+        ApplyCurrentView(false);
+
+        var outputSelection =
+            SettingsRuntimeApplyPolicy.ResolveOutputSelection(
+                _settings.Current,
+                OutputDevices);
+        IsOutputProfileBusy = true;
+        try
+        {
+            SelectedOutputDevice = outputSelection.Device;
+            OutputProfile.Load(outputSelection.Profile);
+            OutputCapabilities = null;
+        }
+        finally
+        {
+            IsOutputProfileBusy = false;
+        }
+        SettingsWorkspace.NotifyOutputProfileDraftChanged();
         await _audio.ConfigureOutputAsync(
-            profile,
+            outputSelection.Profile,
             _lifetime.Token);
         await _audio.SetPlaybackOptionsAsync(
             CurrentPlaybackOptions(),
@@ -3763,6 +3913,80 @@ public sealed class MainViewModel : ObservableObject
         await _audio.SetVolumeAsync(
             _volume,
             _lifetime.Token);
+    }
+
+    public async Task ApplyPlaybackSettingsFromStoreAsync()
+    {
+        _replayGainMode = _settings.Current.ReplayGainMode;
+        _replayGainPreampDb = _settings.Current.ReplayGainPreampDb;
+        _preventClipping = _settings.Current.PreventClipping;
+        _playbackSpeed = _settings.Current.PlaybackSpeed;
+        _pitchSemitones = _settings.Current.PitchSemitones;
+        _preservePitch = _settings.Current.PreservePitch;
+        _stopAfterCurrent = _settings.Current.StopAfterCurrent;
+        _stopAfterQueue = _settings.Current.StopAfterQueue;
+        Raise(nameof(ReplayGainMode));
+        Raise(nameof(ReplayGainPreampDb));
+        Raise(nameof(PreventClipping));
+        Raise(nameof(PlaybackSpeed));
+        Raise(nameof(PitchSemitones));
+        Raise(nameof(PreservePitch));
+        Raise(nameof(StopAfterCurrent));
+        Raise(nameof(StopAfterQueue));
+        Raise(nameof(HasStopMode));
+        Raise(nameof(StopModeText));
+        Raise(nameof(ResumeTrackBookmarks));
+        await _audio.SetPlaybackOptionsAsync(CurrentPlaybackOptions(), _lifetime.Token);
+    }
+
+    public async Task ApplyMetadataSettingsFromStoreAsync()
+    {
+        ApplyLyricsSettings();
+        if (IsLibraryReady)
+            await RefreshLibraryAsync(SearchText, _lifetime.Token);
+    }
+
+    public void ApplyViewSettingsFromStore()
+    {
+        LoadViewSettings();
+        if (IsLibraryReady)
+            ApplyViewPresentationSettings();
+    }
+
+    private void ApplyWorkspaceTheme()
+    {
+        if (Application.Current is null) return;
+        var configuration = IsSafeMode
+            ? new ThemeConfiguration(
+                ThemeManager.DefaultTheme,
+                ThemeManager.DefaultAccent,
+                ThemeManager.DefaultFontFamily,
+                ThemeManager.DefaultFontSize)
+            : new ThemeConfiguration(
+                SettingsWorkspace.Theme,
+                SettingsWorkspace.AccentColor,
+                SettingsWorkspace.FontFamily,
+                SettingsWorkspace.InterfaceFontSize,
+                SettingsWorkspace.BackgroundOpacity);
+        ThemeManager.ApplyToCurrentApplication(configuration);
+    }
+
+    public bool HasUnsavedOutputProfileChanges()
+    {
+        return SettingsRuntimeApplyPolicy.HasOutputProfileChanges(
+            _settings.Current,
+            SelectedOutputDevice,
+            OutputProfile.ToProfile());
+    }
+
+    public void RevertOutputProfileDraft()
+    {
+        if (SelectedOutputDevice is null) return;
+        var configured = _settings.Current.OutputProfiles.FirstOrDefault(profile =>
+            profile.DeviceId.Equals(SelectedOutputDevice.Id, StringComparison.OrdinalIgnoreCase));
+        OutputProfile.Load(configured ?? AudioOutputProfileDefaults.For(SelectedOutputDevice));
+        OutputProfileStatus = "Output edits reverted.";
+        SettingsWorkspace.NotifyOutputProfileDraftChanged();
     }
 
     private void ApplyLyricsSettings()
@@ -4115,6 +4339,7 @@ public sealed class MainViewModel : ObservableObject
             case ShortcutActions.RatingUp: _ = SetRatingAsync((CurrentTrack?.Rating ?? 0) + 1); break;
             case ShortcutActions.RatingDown: _ = SetRatingAsync((CurrentTrack?.Rating ?? 0) - 1); break;
             case ShortcutActions.Love: LoveCommand.Execute(null); break;
+            case ShortcutActions.Search: SearchFocusRequested?.Invoke(this, EventArgs.Empty); break;
             case ShortcutActions.UndoQueue: UndoQueueCommand.Execute(null); break;
             default: return false;
         }
@@ -4211,6 +4436,7 @@ public sealed class MainViewModel : ObservableObject
     }
 
     public event EventHandler? MetadataEditRequested;
+    public event EventHandler? SearchFocusRequested;
 
     private async Task UndoMetadataAsync()
     {
@@ -4870,7 +5096,16 @@ public sealed class MainViewModel : ObservableObject
         var token = _quickFilterCancellation.Token;
         _ = Task.Run(async () =>
         {
-            try { await Task.Delay(160, token); await RefreshLibraryAsync(SearchText, token); }
+            try
+            {
+                await Task.Delay(160, token);
+                token.ThrowIfCancellationRequested();
+                RunOnUi(() =>
+                {
+                    if (!token.IsCancellationRequested && IsLibraryReady)
+                        ApplyViewPresentationSettings();
+                });
+            }
             catch (OperationCanceledException) { }
         }, token);
     }

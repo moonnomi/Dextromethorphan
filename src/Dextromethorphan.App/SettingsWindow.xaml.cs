@@ -1,6 +1,11 @@
+using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Media;
 using Dextromethorphan.App.ViewModels;
 using Dextromethorphan.App.UI;
 using Dextromethorphan.Core.Models;
@@ -11,6 +16,33 @@ namespace Dextromethorphan.App;
 public partial class SettingsWindow : Window
 {
     private bool _decoderCheckStarted;
+    private bool _allowClose;
+    private bool _closeInProgress;
+
+    private static readonly IReadOnlyList<SettingsSearchEntry> SearchIndex =
+    [
+        new("Output device", "WASAPI endpoint, mode, format, buffer, DSD, and recovery", "Audio"),
+        new("Bit-perfect playback", "Exclusive mode, direct path, and reported endpoint formats", "Audio"),
+        new("Resume playback", "Startup session and per-track bookmark behavior", "Playback"),
+        new("Crossfade and fades", "Gapless, crossfade, fade-in, and fade-out", "Playback"),
+        new("ReplayGain", "Track or album normalization, preamp, and clipping guard", "Playback"),
+        new("Speed and pitch", "Tempo, pitch preservation, seek, and volume steps", "Playback"),
+        new("Music sources", "Local, mounted, network, SMB, watchers, and exclusions", "Library"),
+        new("Background scanning", "Schedule, power, and metered-network rules", "Library"),
+        new("Artwork cache", "Cache size, clear, rebuild, and duplicate analysis", "Library"),
+        new("Metadata editing", "Multi-artist separators and database/file write default", "Metadata"),
+        new("MusicBrainz and Discogs", "Opt-in provider lookup, token, and cache lifetime", "Metadata"),
+        new("Lyrics display", "Mode, alignment, typography, blur, and karaoke", "Lyrics"),
+        new("Online lyrics", "Manual LRCLIB lookup and local cache", "Lyrics"),
+        new("Theme and accent", "Dark, Light, AMOLED, accent color, and contrast", "Appearance"),
+        new("Font and opacity", "Interface font, size, and surface opacity", "Appearance"),
+        new("Queue and fullscreen", "Panel width, visualizer, animations, and navigation", "Appearance"),
+        new("Per-view settings", "Sort, density, cover size, quick filter, and columns", "Views"),
+        new("Diagnostics", "Decoder check, safe mode, and private diagnostic bundle", "Diagnostics"),
+        new("Import, backup, reset", "Portable settings and user-data recovery", "Data"),
+        new("Keyboard shortcuts", "Global hotkeys, media keys, presets, and conflicts", "Shortcuts"),
+        new("Version and privacy", "Build, runtime, local paths, licenses, and project link", "About")
+    ];
 
     public SettingsWindow() => InitializeComponent();
 
@@ -25,6 +57,10 @@ public partial class SettingsWindow : Window
         MouseButtonEventArgs e)
     {
         if (e.ChangedButton != MouseButton.Left) return;
+        if (e.OriginalSource is DependencyObject source
+            && (FindAncestor<TextBoxBase>(source) is not null
+                || FindAncestor<ButtonBase>(source) is not null))
+            return;
         if (e.ClickCount == 2)
         {
             WindowState = WindowState == WindowState.Maximized
@@ -52,7 +88,89 @@ public partial class SettingsWindow : Window
         if (_decoderCheckStarted || DataContext is not MainViewModel viewModel)
             return;
         _decoderCheckStarted = true;
+        viewModel.SettingsWorkspace.Reload();
         await RunAsync(() => viewModel.RefreshDecoderCapabilitiesAsync());
+    }
+
+    private async void SettingsWindow_Closing(object? sender, CancelEventArgs e)
+    {
+        if (_allowClose
+            || Application.Current.Dispatcher.HasShutdownStarted)
+            return;
+        if (DataContext is not MainViewModel viewModel)
+        {
+            _allowClose = true;
+            return;
+        }
+        e.Cancel = true;
+        if (_closeInProgress) return;
+        if (viewModel.SettingsWorkspace.HasUnappliedChanges
+            && !ConfirmationDialog.Show(
+                this,
+                "Discard unapplied settings?",
+                "Playback, output, metadata, shortcut, or view edits are still drafts. Live appearance changes are already saved.",
+                "Discard"))
+            return;
+        _closeInProgress = true;
+        try
+        {
+            viewModel.SettingsWorkspace.RevertAllDrafts();
+            await viewModel.SettingsWorkspace.FlushLiveChangesAsync();
+            _allowClose = true;
+            Close();
+        }
+        catch (Exception exception)
+        {
+            _closeInProgress = false;
+            ErrorDialog.Show(this, exception, "", true, "Settings could not finish saving before close.");
+        }
+    }
+
+    private void SettingsWindow_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.F && Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+        {
+            SettingsSearchBox.Focus();
+            SettingsSearchBox.SelectAll();
+            e.Handled = true;
+        }
+    }
+
+    private void SettingsSearchBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (SettingsSearchResults is null || SettingsSearchPopup is null) return;
+        var query = SettingsSearchBox.Text.Trim();
+        if (query.Length < 2)
+        {
+            SettingsSearchPopup.IsOpen = false;
+            return;
+        }
+        var results = SearchIndex
+            .Where(entry => entry.Title.Contains(query, StringComparison.CurrentCultureIgnoreCase)
+                || entry.Description.Contains(query, StringComparison.CurrentCultureIgnoreCase)
+                || entry.TabHeader.Contains(query, StringComparison.CurrentCultureIgnoreCase))
+            .Take(16)
+            .ToArray();
+        SettingsSearchResults.ItemsSource = results;
+        SettingsSearchPopup.IsOpen = results.Length > 0;
+    }
+
+    private void SettingsSearchResult_Click(object sender, RoutedEventArgs e)
+    {
+        var result = sender switch
+        {
+            FrameworkElement { DataContext: SettingsSearchEntry entry } => entry,
+            _ => SettingsSearchResults.SelectedItem as SettingsSearchEntry
+        };
+        if (result is null) return;
+        var tab = SettingsTabs.Items.OfType<TabItem>().FirstOrDefault(item =>
+            string.Equals(item.Header?.ToString(), result.TabHeader, StringComparison.Ordinal));
+        if (tab is not null)
+        {
+            SettingsTabs.SelectedItem = tab;
+            tab.Focus();
+        }
+        SettingsSearchPopup.IsOpen = false;
     }
 
     private async void CheckDecoders_Click(
@@ -93,6 +211,167 @@ public partial class SettingsWindow : Window
             await RunAsync(viewModel.SaveOutputProfileAsync);
     }
 
+    private void RevertOutputProfile_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+            viewModel.RevertOutputProfileDraft();
+    }
+
+    private async void ApplyPlayback_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+            await RunAsync(() => viewModel.SettingsWorkspace.ApplyPlaybackAsync());
+    }
+
+    private void RevertPlayback_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+            viewModel.SettingsWorkspace.RevertPlayback();
+    }
+
+    private async void ApplyMetadataPreferences_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+            await RunAsync(() => viewModel.SettingsWorkspace.ApplyMetadataAsync());
+    }
+
+    private void RevertMetadataPreferences_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+            viewModel.SettingsWorkspace.RevertMetadata();
+    }
+
+    private void AccentSwatch_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel
+            && sender is Button { Tag: string accent })
+            viewModel.SettingsWorkspace.AccentColor = accent;
+    }
+
+    private async void ApplyViewProfile_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+            await RunAsync(() => viewModel.SettingsWorkspace.ApplySelectedViewAsync());
+    }
+
+    private void RevertViewProfiles_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+            viewModel.SettingsWorkspace.RevertViewDrafts();
+    }
+
+    private void ResetViewProfile_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+            viewModel.SettingsWorkspace.ResetSelectedViewDraft();
+    }
+
+    private async void ResetAllViews_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel viewModel
+            || !ConfirmationDialog.Show(
+                this,
+                "Reset every library view?",
+                "Sorting, density, cover size, filters, columns, order, and widths will return to defaults. Your library is not changed.",
+                "Reset views"))
+            return;
+        await RunAsync(() => viewModel.SettingsWorkspace.ResetAllViewsAsync());
+    }
+
+    private void MoveColumnUp_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel
+            && sender is FrameworkElement { DataContext: ViewColumnEditorViewModel column })
+            viewModel.SettingsWorkspace.MoveSelectedColumn(column, -1);
+    }
+
+    private void MoveColumnDown_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel
+            && sender is FrameworkElement { DataContext: ViewColumnEditorViewModel column })
+            viewModel.SettingsWorkspace.MoveSelectedColumn(column, 1);
+    }
+
+    private void AddShortcut_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+            viewModel.SettingsWorkspace.AddShortcut();
+    }
+
+    private void RemoveShortcut_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel
+            && sender is FrameworkElement { DataContext: ShortcutBindingEditorViewModel binding })
+            viewModel.SettingsWorkspace.RemoveShortcut(binding);
+    }
+
+    private async void ApplyShortcuts_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+            await RunAsync(() => viewModel.SettingsWorkspace.ApplyShortcutsAsync());
+    }
+
+    private void RevertShortcuts_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+            viewModel.SettingsWorkspace.RevertShortcuts();
+    }
+
+    private void ResetShortcuts_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+            viewModel.SettingsWorkspace.ResetShortcutDraft();
+    }
+
+    private async void ImportShortcuts_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel viewModel) return;
+        var dialog = new OpenFileDialog
+        {
+            Title = "Import shortcut preset",
+            Filter = "Dextromethorphan shortcuts|*.json|JSON files|*.json",
+            CheckFileExists = true
+        };
+        if (dialog.ShowDialog(this) == true)
+            await RunAsync(() => viewModel.SettingsWorkspace.ImportShortcutsAsync(dialog.FileName));
+    }
+
+    private async void ExportShortcuts_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel viewModel) return;
+        var dialog = new SaveFileDialog
+        {
+            Title = "Export shortcut preset",
+            Filter = "Dextromethorphan shortcuts|*.json",
+            AddExtension = true,
+            DefaultExt = ".json",
+            FileName = "Dextromethorphan-shortcuts.json"
+        };
+        if (dialog.ShowDialog(this) == true)
+            await RunAsync(() => viewModel.SettingsWorkspace.ExportShortcutsAsync(dialog.FileName));
+    }
+
+    private void ShortcutGesture_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (sender is not TextBox { DataContext: ShortcutBindingEditorViewModel binding }) return;
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (key is Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt
+            or Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin)
+        {
+            e.Handled = true;
+            return;
+        }
+        var virtualKey = KeyInterop.VirtualKeyFromKey(key);
+        if (virtualKey <= 0) return;
+        var modifiers = ShortcutModifiers.None;
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) modifiers |= ShortcutModifiers.Control;
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Alt)) modifiers |= ShortcutModifiers.Alt;
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)) modifiers |= ShortcutModifiers.Shift;
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Windows)) modifiers |= ShortcutModifiers.Windows;
+        binding.Gesture = new ShortcutGesture(modifiers, virtualKey).ToString();
+        e.Handled = true;
+    }
+
     private async void ExportDiagnostics_Click(
         object sender,
         RoutedEventArgs e)
@@ -108,7 +387,7 @@ public partial class SettingsWindow : Window
                 $"Dextromethorphan-diagnostics-{DateTime.Now:yyyyMMdd-HHmmss}.zip"
         };
         if (dialog.ShowDialog(this) == true)
-            await viewModel.ExportDiagnosticsAsync(dialog.FileName);
+            await RunAsync(() => viewModel.ExportDiagnosticsAsync(dialog.FileName));
     }
 
     private async void ExportSettings_Click(
@@ -276,6 +555,57 @@ public partial class SettingsWindow : Window
             viewModel.CancelReplayGainAnalysis();
     }
 
+    private void OpenAppData_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+            OpenLocation(viewModel.SettingsWorkspace.AppDataPath);
+    }
+
+    private void OpenLogs_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+            OpenLocation(viewModel.SettingsWorkspace.LogsPath);
+    }
+
+    private void OpenLicenses_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel viewModel) return;
+        var requested = viewModel.SettingsWorkspace.LicensesPath;
+        OpenLocation(Directory.Exists(requested) ? requested : AppContext.BaseDirectory);
+    }
+
+    private void OpenProject_Click(object sender, RoutedEventArgs e) =>
+        OpenLocation("https://github.com/moonnomi/Dextromethorphan");
+
+    private void OpenLocation(string location)
+    {
+        try
+        {
+            if (!Uri.TryCreate(location, UriKind.Absolute, out var uri)
+                || uri.IsFile)
+                Directory.CreateDirectory(location);
+            Process.Start(new ProcessStartInfo(location)
+            {
+                UseShellExecute = true
+            });
+        }
+        catch (Exception exception)
+        {
+            ErrorDialog.Show(this, exception, "", true, "The requested location could not be opened.");
+        }
+    }
+
+    private static T? FindAncestor<T>(DependencyObject? current)
+        where T : DependencyObject
+    {
+        while (current is not null)
+        {
+            if (current is T match) return match;
+            current = VisualTreeHelper.GetParent(current);
+        }
+        return null;
+    }
+
     private async Task RunAsync(Func<Task> operation)
     {
         try
@@ -292,4 +622,9 @@ public partial class SettingsWindow : Window
                 "No files were intentionally deleted. Review the error details and try again.");
         }
     }
+
+    private sealed record SettingsSearchEntry(
+        string Title,
+        string Description,
+        string TabHeader);
 }

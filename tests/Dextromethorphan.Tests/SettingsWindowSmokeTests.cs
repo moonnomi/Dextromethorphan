@@ -6,7 +6,7 @@ namespace Dextromethorphan.Tests;
 public sealed class SettingsWindowSmokeTests
 {
     [Fact]
-    public async Task AudioProfileEditorParsesOnStaThread()
+    public async Task EverySettingsSectionMaterializesOnStaThread()
     {
         var completion =
             new TaskCompletionSource<Exception?>(
@@ -41,16 +41,39 @@ public sealed class SettingsWindowSmokeTests
                     System.Windows.Controls.Grid>(frame.Child);
                 var tabs = Assert.Single(layout.Children.OfType<
                     System.Windows.Controls.TabControl>());
-                Assert.True(tabs.Items.Count >= 2);
-                var audio = Assert.IsType<
-                    System.Windows.Controls.TabItem>(
-                    tabs.Items[0]);
-                Assert.Equal("Audio", audio.Header);
-                Assert.NotNull(audio.Content);
+                var expectedHeaders = new[]
+                {
+                    "Audio", "Playback", "Library", "Metadata", "Lyrics",
+                    "Appearance", "Views", "Diagnostics", "Data", "Shortcuts",
+                    "About"
+                };
+                Assert.Equal(expectedHeaders.Length, tabs.Items.Count);
+                Assert.Equal(
+                    expectedHeaders,
+                    tabs.Items.OfType<System.Windows.Controls.TabItem>()
+                        .Select(item => item.Header?.ToString()));
                 window.Show();
-                window.Dispatcher.Invoke(
-                    () => { },
-                    System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+                tabs.ApplyTemplate();
+                var selectedContentHost = Assert.IsType<
+                    System.Windows.Controls.ContentPresenter>(
+                    tabs.Template.FindName(
+                        "PART_SelectedContentHost",
+                        tabs));
+                foreach (var tab in tabs.Items.OfType<System.Windows.Controls.TabItem>())
+                {
+                    Assert.NotNull(tab.Content);
+                    tabs.SelectedItem = tab;
+                    window.UpdateLayout();
+                    window.Dispatcher.Invoke(
+                        () => { },
+                        System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+                    Assert.True(tab.IsSelected);
+                    Assert.Same(tab.Content, selectedContentHost.Content);
+                    Assert.True(selectedContentHost.IsVisible);
+                    Assert.True(
+                        System.Windows.Media.VisualTreeHelper.GetChildrenCount(
+                            selectedContentHost) > 0);
+                }
                 completion.SetResult(null);
             }
             catch (Exception exception)

@@ -33,8 +33,9 @@ Open any album, artist, genre, or folder in its own tab, then play individual tr
 - **Windows-native audio** — event-driven WASAPI shared and exclusive modes, per-device profiles, gapless playback, crossfade, ReplayGain, speed control, and DSD over PCM (DoP).
 - **Offline library** — local folders, mounted drives, and SMB/UNC paths are scanned into a fast SQLite library with per-source controls, guarded scheduled scans, file watching, and cached artwork.
 - **Flexible browsing** — albums, artists, genres, songs, a hierarchical folder tree, playlists, favorites, and fast full-library search.
-- **Modern playback flow** — temporary queue, drag reordering, undo/redo, shuffle, repeat, bookmarks, sleep timer, and Spotify-style previous-track behavior.
+- **Modern playback flow** — temporary queue, visible drag reordering, history-aware Previous, undo/redo, shuffle, repeat, bookmarks, and persistent stop-after controls.
 - **Lyrics that belong in the player** — static, LRC, and enhanced-LRC lyrics with line/word timing, smooth centered scrolling, click-to-seek, editing, per-track offsets, and an optional manual LRCLIB lookup.
+- **Settings without JSON editing** — live Dark, Light, and AMOLED themes, accessible accents, staged playback and metadata changes, per-view layouts, shortcut editing, import/export, diagnostics, and local-data recovery.
 - **Desktop integration** — rebindable shortcuts, media keys, Windows media controls, session restore, and an audio diagnostics panel.
 
 ## Run it from source
@@ -77,6 +78,9 @@ Add `-Installer` when [Inno Setup 6](https://jrsoftware.org/isinfo.php) is insta
 - [Lyrics, timing, local files, and optional lookup](docs/LYRICS.md)
 - [Portable mode](docs/PORTABLE-MODE.md)
 - [Interface and navigation](docs/UI.md)
+- [Settings and customization](docs/SETTINGS.md)
+- [Milestone 6 settings status](docs/MILESTONE-6-STATUS-2026-08-24.md)
+- [Third-party notices](docs/THIRD-PARTY-NOTICES.md)
 - [Windows shortcuts and media controls](docs/WINDOWS-INTEGRATION.md)
 - [Project architecture](docs/ARCHITECTURE.md)
 - [Consumer-readiness roadmap](docs/ROADMAP.md)
@@ -87,7 +91,7 @@ Add `-Installer` when [Inno Setup 6](https://jrsoftware.org/isinfo.php) is insta
 
 ## Project status
 
-The current focus is playback reliability, audio diagnostics, and interaction polish. Bug reports and focused pull requests are welcome through [GitHub Issues](https://github.com/moonnomi/Dextromethorphan/issues).
+The settings and customization milestone is complete. The current focus is interface consistency, accessibility, Windows integration, and the remaining hardware-gated audio qualification. Bug reports and focused pull requests are welcome through [GitHub Issues](https://github.com/moonnomi/Dextromethorphan/issues).
 
 <details>
 <summary>Third-party software and licenses</summary>

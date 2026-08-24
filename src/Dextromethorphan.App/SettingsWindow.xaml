@@ -3,8 +3,10 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:ui="clr-namespace:Dextromethorphan.App.UI"
-        Title="Dextromethorphan settings" Width="820" Height="640" MinWidth="700" MinHeight="520"
-        WindowStartupLocation="CenterOwner" WindowStyle="None" ResizeMode="CanResize">
+        Title="Dextromethorphan settings" Width="980" Height="720" MinWidth="820" MinHeight="600"
+        WindowStartupLocation="CenterOwner" WindowStyle="None" ResizeMode="CanResize"
+        PreviewKeyDown="SettingsWindow_PreviewKeyDown"
+        Closing="SettingsWindow_Closing">
     <Window.Resources>
         <ResourceDictionary>
             <!-- Settings can also be opened during recovery/safe-mode startup,
@@ -13,7 +15,7 @@
                 <ResourceDictionary Source="UI/Styles/Theme.xaml"/>
             </ResourceDictionary.MergedDictionaries>
             <Style TargetType="TabItem">
-            <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}"/>
             <Setter Property="FontSize" Value="13"/>
             <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
             <Setter Property="Template">
@@ -23,23 +25,23 @@
                             <ContentPresenter ContentSource="Header"/>
                         </Border>
                         <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Item" Property="Background" Value="{StaticResource SurfaceHoverBrush}"/><Setter Property="Foreground" Value="{StaticResource TextBrush}"/></Trigger>
-                            <Trigger Property="IsSelected" Value="True"><Setter TargetName="Item" Property="Background" Value="{StaticResource AccentSoftBrush}"/><Setter Property="Foreground" Value="{StaticResource TextBrush}"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Item" Property="Background" Value="{DynamicResource SurfaceHoverBrush}"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/></Trigger>
+                            <Trigger Property="IsSelected" Value="True"><Setter TargetName="Item" Property="Background" Value="{DynamicResource AccentSoftBrush}"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
             </Style>
             <Style TargetType="TabControl">
-            <Setter Property="Background" Value="{StaticResource BackgroundBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource BackgroundBrush}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="TabControl">
                         <Grid Background="{TemplateBinding Background}"><Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                            <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0">
-                                <StackPanel><TextBlock Text="SETTINGS" FontSize="11" Foreground="{StaticResource TextMutedBrush}" Margin="22,22,0,12"/><StackPanel IsItemsHost="True"/></StackPanel>
+                            <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0">
+                                <StackPanel><TextBlock Text="SETTINGS" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" Margin="22,22,0,12"/><StackPanel IsItemsHost="True"/></StackPanel>
                             </Border>
-                            <ContentPresenter Grid.Column="1" ContentSource="SelectedContent"/>
+                            <ContentPresenter x:Name="PART_SelectedContentHost" Grid.Column="1" ContentSource="SelectedContent"/>
                         </Grid>
                     </ControlTemplate>
                 </Setter.Value>
@@ -56,24 +58,45 @@
                             UseAeroCaptionButtons="False"/>
     </shell:WindowChrome.WindowChrome>
 
-    <Border Background="{StaticResource BackgroundBrush}"
-            BorderBrush="{StaticResource BorderBrush}"
+    <Border Background="{DynamicResource BackgroundBrush}"
+            BorderBrush="{DynamicResource BorderBrush}"
             BorderThickness="1">
         <Grid>
             <Grid.RowDefinitions><RowDefinition Height="48"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-            <Border Background="#FA0E1015"
-                    BorderBrush="{StaticResource BorderBrush}"
+            <Border Background="{DynamicResource SurfaceBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}"
                     BorderThickness="0,0,0,1"
                     MouseLeftButtonDown="SettingsTitleBar_MouseLeftButtonDown">
                 <Grid>
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="138"/></Grid.ColumnDefinitions>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="320"/><ColumnDefinition Width="138"/></Grid.ColumnDefinitions>
                     <StackPanel Orientation="Horizontal" Margin="14,0" VerticalAlignment="Center">
                         <Image Source="Assets/Brand/dextromethorphan-symbol-compact.png"
                                Width="25" Height="25" Margin="0,0,10,0"
                                RenderOptions.BitmapScalingMode="HighQuality"/>
                         <TextBlock Text="Settings" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"/>
                     </StackPanel>
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Grid Grid.Column="1" Margin="12,7">
+                        <TextBox x:Name="SettingsSearchBox"
+                                 TextChanged="SettingsSearchBox_TextChanged"
+                                 Padding="34,7,10,7"
+                                 ToolTip="Search settings (Ctrl+F)"
+                                 AutomationProperties.Name="Search settings"/>
+                        <TextBlock FontFamily="Segoe Fluent Icons" Text="&#xE721;" Foreground="{DynamicResource TextMutedBrush}" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="11,0,0,0" IsHitTestVisible="False"/>
+                        <Popup x:Name="SettingsSearchPopup" Placement="Bottom" PlacementTarget="{Binding ElementName=SettingsSearchBox}" StaysOpen="False" AllowsTransparency="True">
+                            <Border Width="320" MaxHeight="360" Background="{DynamicResource SurfaceRaisedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="9" Padding="6">
+                                <ListBox x:Name="SettingsSearchResults" Background="Transparent" BorderThickness="0" MouseDoubleClick="SettingsSearchResult_Click">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button Click="SettingsSearchResult_Click" HorizontalContentAlignment="Stretch" Padding="10,8">
+                                                <StackPanel><TextBlock Text="{Binding Title}" FontWeight="SemiBold"/><TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextMutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,3,0,0"/></StackPanel>
+                                            </Button>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </Border>
+                        </Popup>
+                    </Grid>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
                         <Button Style="{StaticResource WindowButton}" Height="46" Click="SettingsMinimize_Click" Content="&#xE921;" ToolTip="Minimize" AutomationProperties.Name="Minimize settings"/>
                         <Button Style="{StaticResource WindowButton}" Height="46" Click="SettingsMaximize_Click" Content="&#xE922;" ToolTip="Maximize" AutomationProperties.Name="Maximize or restore settings"/>
                         <Button Style="{StaticResource CloseWindowButton}" Height="46" Click="SettingsClose_Click" Content="&#xE8BB;" ToolTip="Close" AutomationProperties.Name="Close settings"/>
@@ -81,12 +104,12 @@
                 </Grid>
             </Border>
 
-    <TabControl Grid.Row="1">
+    <TabControl x:Name="SettingsTabs" Grid.Row="1">
         <TabItem Header="Audio">
             <ScrollViewer VerticalScrollBarVisibility="Auto" ui:SmoothScrollBehavior.Enabled="True">
                 <StackPanel Margin="34,28">
                     <TextBlock Text="Audio output" FontSize="25" FontWeight="SemiBold"/>
-                    <TextBlock Text="A separate signal-path profile is saved for every Windows endpoint." Foreground="{StaticResource TextMutedBrush}" Margin="0,4,0,22"/>
+                    <TextBlock Text="A separate signal-path profile is saved for every Windows endpoint." Foreground="{DynamicResource TextMutedBrush}" Margin="0,4,0,22"/>
 
                     <Border Style="{StaticResource Card}" Padding="18">
                         <StackPanel>
@@ -102,14 +125,14 @@
                                 </ComboBox>
                                 <Button Grid.Column="1" Content="Refresh" Click="RefreshOutputs_Click" Margin="8,0,0,0"/>
                             </Grid>
-                            <TextBlock Text="{Binding OutputProfileStatus}" Foreground="{StaticResource AccentBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                            <TextBlock Text="{Binding OutputProfileStatus}" Foreground="{DynamicResource AccentBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,8,0,0"/>
                         </StackPanel>
                     </Border>
 
                     <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
                         <StackPanel>
                             <TextBlock Text="Endpoint profile" FontWeight="SemiBold"/>
-                            <TextBlock Text="Changes are applied only after Save profile." Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,4,0,14"/>
+                            <TextBlock Text="Changes are applied only after Save profile." Foreground="{DynamicResource TextMutedBrush}" FontSize="10" Margin="0,4,0,14"/>
                             <Grid>
                                 <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="18"/><ColumnDefinition/></Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions>
@@ -117,48 +140,51 @@
                                     <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
 
-                                <StackPanel Grid.Row="0"><TextBlock Text="WASAPI mode" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding WasapiModes}" SelectedItem="{Binding OutputProfile.Mode}" Margin="0,5,0,10"/></StackPanel>
-                                <StackPanel Grid.Row="0" Grid.Column="2"><TextBlock Text="Event buffer (ms)" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><TextBox Text="{Binding OutputProfile.BufferMilliseconds, UpdateSourceTrigger=PropertyChanged}" Margin="0,5,0,10"/></StackPanel>
+                                <StackPanel Grid.Row="0"><TextBlock Text="WASAPI mode" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding WasapiModes}" SelectedItem="{Binding OutputProfile.Mode}" Margin="0,5,0,10"/></StackPanel>
+                                <StackPanel Grid.Row="0" Grid.Column="2"><TextBlock Text="Event buffer (ms)" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><TextBox Text="{Binding OutputProfile.BufferMilliseconds, UpdateSourceTrigger=PropertyChanged}" Margin="0,5,0,10"/></StackPanel>
 
-                                <StackPanel Grid.Row="1"><TextBlock Text="Sample-rate policy" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding SampleRatePolicies}" SelectedItem="{Binding OutputProfile.SampleRatePolicy}" Margin="0,5,0,10"/></StackPanel>
-                                <StackPanel Grid.Row="1" Grid.Column="2"><TextBlock Text="Fixed sample rate" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding SampleRates}" SelectedItem="{Binding OutputProfile.PreferredSampleRate}" Margin="0,5,0,10"/></StackPanel>
+                                <StackPanel Grid.Row="1"><TextBlock Text="Sample-rate policy" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding SampleRatePolicies}" SelectedItem="{Binding OutputProfile.SampleRatePolicy}" Margin="0,5,0,10"/></StackPanel>
+                                <StackPanel Grid.Row="1" Grid.Column="2"><TextBlock Text="Fixed sample rate" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding SampleRates}" SelectedItem="{Binding OutputProfile.PreferredSampleRate}" Margin="0,5,0,10"/></StackPanel>
 
-                                <StackPanel Grid.Row="2"><TextBlock Text="Bit-depth policy" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding BitDepthPolicies}" SelectedItem="{Binding OutputProfile.BitDepthPolicy}" Margin="0,5,0,10"/></StackPanel>
-                                <StackPanel Grid.Row="2" Grid.Column="2"><TextBlock Text="Fixed bit depth" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding BitDepths}" SelectedItem="{Binding OutputProfile.PreferredBitDepth}" Margin="0,5,0,10"/></StackPanel>
+                                <StackPanel Grid.Row="2"><TextBlock Text="Bit-depth policy" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding BitDepthPolicies}" SelectedItem="{Binding OutputProfile.BitDepthPolicy}" Margin="0,5,0,10"/></StackPanel>
+                                <StackPanel Grid.Row="2" Grid.Column="2"><TextBlock Text="Fixed bit depth" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding BitDepths}" SelectedItem="{Binding OutputProfile.PreferredBitDepth}" Margin="0,5,0,10"/></StackPanel>
 
-                                <StackPanel Grid.Row="3"><TextBlock Text="Channel policy" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding ChannelPolicies}" SelectedItem="{Binding OutputProfile.ChannelPolicy}" Margin="0,5,0,10"/></StackPanel>
-                                <StackPanel Grid.Row="3" Grid.Column="2"><TextBlock Text="Failure fallback" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding OutputFallbackPolicies}" SelectedItem="{Binding OutputProfile.FallbackPolicy}" Margin="0,5,0,10"/></StackPanel>
+                                <StackPanel Grid.Row="3"><TextBlock Text="Channel policy" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding ChannelPolicies}" SelectedItem="{Binding OutputProfile.ChannelPolicy}" Margin="0,5,0,10"/></StackPanel>
+                                <StackPanel Grid.Row="3" Grid.Column="2"><TextBlock Text="Failure fallback" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding OutputFallbackPolicies}" SelectedItem="{Binding OutputProfile.FallbackPolicy}" Margin="0,5,0,10"/></StackPanel>
 
-                                <StackPanel Grid.Row="4"><TextBlock Text="Volume control" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding VolumeControlModes}" SelectedItem="{Binding OutputProfile.VolumeControl}" Margin="0,5,0,10"/></StackPanel>
-                                <StackPanel Grid.Row="4" Grid.Column="2"><TextBlock Text="DSD mode" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding DsdModes}" SelectedItem="{Binding OutputProfile.DsdMode}" Margin="0,5,0,10"/></StackPanel>
+                                <StackPanel Grid.Row="4"><TextBlock Text="Volume control" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding VolumeControlModes}" SelectedItem="{Binding OutputProfile.VolumeControl}" Margin="0,5,0,10"/></StackPanel>
+                                <StackPanel Grid.Row="4" Grid.Column="2"><TextBlock Text="DSD mode" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding DsdModes}" SelectedItem="{Binding OutputProfile.DsdMode}" Margin="0,5,0,10"/></StackPanel>
 
-                                <StackPanel Grid.Row="5"><TextBlock Text="Recovery attempts" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><TextBox Text="{Binding OutputProfile.RecoveryMaximumAttempts, UpdateSourceTrigger=PropertyChanged}" Margin="0,5,0,10"/></StackPanel>
-                                <StackPanel Grid.Row="5" Grid.Column="2"><TextBlock Text="Initial retry delay (ms)" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><TextBox Text="{Binding OutputProfile.RecoveryInitialDelayMilliseconds, UpdateSourceTrigger=PropertyChanged}" Margin="0,5,0,10"/></StackPanel>
+                                <StackPanel Grid.Row="5"><TextBlock Text="Recovery attempts" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><TextBox Text="{Binding OutputProfile.RecoveryMaximumAttempts, UpdateSourceTrigger=PropertyChanged}" Margin="0,5,0,10"/></StackPanel>
+                                <StackPanel Grid.Row="5" Grid.Column="2"><TextBlock Text="Initial retry delay (ms)" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><TextBox Text="{Binding OutputProfile.RecoveryInitialDelayMilliseconds, UpdateSourceTrigger=PropertyChanged}" Margin="0,5,0,10"/></StackPanel>
 
                                 <StackPanel Grid.Row="6">
                                     <CheckBox Content="Prefer direct bit-perfect path" IsChecked="{Binding OutputProfile.PreferBitPerfect}"/>
-                                    <TextBlock Text="Software volume, ReplayGain, fades, crossfade, and tempo processing require DSP." Foreground="{StaticResource TextMutedBrush}" FontSize="9" TextWrapping="Wrap" Margin="24,4,0,0"/>
+                                    <TextBlock Text="Software volume, ReplayGain, fades, crossfade, and tempo processing require DSP." Foreground="{DynamicResource TextMutedBrush}" FontSize="9" TextWrapping="Wrap" Margin="24,4,0,0"/>
                                 </StackPanel>
-                                <StackPanel Grid.Row="6" Grid.Column="2"><TextBlock Text="Per-output crossfade (seconds)" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><Slider Minimum="0" Maximum="10" Value="{Binding OutputProfile.CrossfadeSeconds}" Margin="0,5,0,0"/></StackPanel>
+                                <StackPanel Grid.Row="6" Grid.Column="2"><TextBlock Text="Per-output crossfade (seconds)" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><Slider Minimum="0" Maximum="10" Value="{Binding OutputProfile.CrossfadeSeconds}" Margin="0,5,0,0"/></StackPanel>
                             </Grid>
-                            <Button Style="{StaticResource PrimaryButton}" Content="Save profile" Click="SaveOutputProfile_Click" HorizontalAlignment="Left" Margin="0,16,0,0"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                                <Button Style="{StaticResource PrimaryButton}" Content="Apply profile" Click="SaveOutputProfile_Click" Margin="0,0,8,0"/>
+                                <Button Content="Revert" Click="RevertOutputProfile_Click"/>
+                            </StackPanel>
                         </StackPanel>
                     </Border>
 
                     <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
                         <StackPanel>
                             <TextBlock Text="Reported capabilities" FontWeight="SemiBold"/>
-                            <TextBlock Text="{Binding OutputMixFormat, StringFormat=Shared mix: {0}}" Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,5,0,2"/>
-                            <TextBlock Text="{Binding SupportsEventDrivenExclusive, StringFormat=Event-driven exclusive: {0}}" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/>
+                            <TextBlock Text="{Binding OutputMixFormat, StringFormat=Shared mix: {0}}" Foreground="{DynamicResource TextMutedBrush}" FontSize="10" Margin="0,5,0,2"/>
+                            <TextBlock Text="{Binding SupportsEventDrivenExclusive, StringFormat=Event-driven exclusive: {0}}" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/>
                             <TextBlock Text="Accepted exclusive PCM formats" FontWeight="SemiBold" Margin="0,14,0,8"/>
                             <ItemsControl ItemsSource="{Binding SupportedExclusiveFormats}">
                                 <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
-                                <ItemsControl.ItemTemplate><DataTemplate><Border Background="{StaticResource AccentSoftBrush}" CornerRadius="7" Padding="8,5" Margin="0,0,6,6"><TextBlock Text="{Binding}" FontSize="9" Foreground="{StaticResource AccentBrush}"/></Border></DataTemplate></ItemsControl.ItemTemplate>
+                                <ItemsControl.ItemTemplate><DataTemplate><Border Background="{DynamicResource AccentSoftBrush}" CornerRadius="7" Padding="8,5" Margin="0,0,6,6"><TextBlock Text="{Binding}" FontSize="9" Foreground="{DynamicResource AccentBrush}"/></Border></DataTemplate></ItemsControl.ItemTemplate>
                             </ItemsControl>
                         </StackPanel>
                     </Border>
 
-                    <Border Style="{StaticResource Card}" Padding="16" Margin="0,12,0,0"><StackPanel><TextBlock Text="Current volume" FontWeight="SemiBold"/><TextBlock Text="Software mode never changes the Windows endpoint volume. Hardware mode does so only when explicitly selected for this output." Foreground="{StaticResource TextMutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,12"/><Slider Minimum="0" Maximum="1" Value="{Binding Volume, Mode=TwoWay}"/></StackPanel></Border>
+                    <Border Style="{StaticResource Card}" Padding="16" Margin="0,12,0,0"><StackPanel><TextBlock Text="Current volume" FontWeight="SemiBold"/><TextBlock Text="Software mode never changes the Windows endpoint volume. Hardware mode does so only when explicitly selected for this output." Foreground="{DynamicResource TextMutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,12"/><Slider Minimum="0" Maximum="1" Value="{Binding Volume, Mode=TwoWay}"/></StackPanel></Border>
                 </StackPanel>
             </ScrollViewer>
         </TabItem>
@@ -166,70 +192,94 @@
             <ScrollViewer VerticalScrollBarVisibility="Auto" ui:SmoothScrollBehavior.Enabled="True">
                 <StackPanel Margin="34,28">
                     <TextBlock Text="Playback" FontSize="25" FontWeight="SemiBold"/>
-                    <TextBlock Text="Transition and signal-path behavior" Foreground="{StaticResource TextMutedBrush}" Margin="0,4,0,22"/>
+                    <TextBlock Text="Transition and signal-path behavior" Foreground="{DynamicResource TextMutedBrush}" Margin="0,4,0,22"/>
+                    <Border Style="{StaticResource Card}" Padding="18" Margin="0,0,0,12">
+                        <StackPanel>
+                            <TextBlock Text="Session and queue" FontWeight="SemiBold"/>
+                            <CheckBox Content="Resume the previous session at startup" IsChecked="{Binding SettingsWorkspace.ResumeOnStartup}" Margin="0,12,0,0"/>
+                            <CheckBox Content="Resume saved per-track bookmarks" IsChecked="{Binding SettingsWorkspace.ResumeTrackBookmarks}" Margin="0,9,0,0"/>
+                            <CheckBox Content="Stop after the current track" IsChecked="{Binding SettingsWorkspace.StopAfterCurrent}" Margin="0,9,0,0"/>
+                            <CheckBox Content="Stop at the end of the queue" IsChecked="{Binding SettingsWorkspace.StopAfterQueue}" Margin="0,9,0,0"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource Card}" Padding="18" Margin="0,0,0,12">
+                        <StackPanel>
+                            <TextBlock Text="Transitions" FontWeight="SemiBold"/>
+                            <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="18"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                <StackPanel><TextBlock Text="Default mode" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding SettingsWorkspace.TransitionModes}" SelectedItem="{Binding SettingsWorkspace.TransitionMode}" Margin="0,5,0,0"/></StackPanel>
+                                <StackPanel Grid.Column="2"><TextBlock Text="Crossfade seconds" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><Slider Minimum="0" Maximum="10" TickFrequency="0.25" Value="{Binding SettingsWorkspace.CrossfadeSeconds}" Margin="0,5,0,0"/></StackPanel>
+                            </Grid>
+                            <Grid Margin="0,14,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="18"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                <StackPanel><TextBlock Text="Fade in seconds" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><Slider Minimum="0" Maximum="10" TickFrequency="0.25" Value="{Binding SettingsWorkspace.FadeInSeconds}"/></StackPanel>
+                                <StackPanel Grid.Column="2"><TextBlock Text="Fade out seconds" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><Slider Minimum="0" Maximum="10" TickFrequency="0.25" Value="{Binding SettingsWorkspace.FadeOutSeconds}"/></StackPanel>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
                     <Border Style="{StaticResource Card}" Padding="18">
                         <StackPanel>
                             <TextBlock Text="Bit-perfect mode" FontWeight="SemiBold"/>
-                            <TextBlock Text="Exclusive WASAPI with no DSP bypasses the shared Windows mixer. ReplayGain, crossfade, speed, pitch, fades, and software volume deliberately use the DSP path." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" Margin="0,6,0,0"/>
+                            <TextBlock Text="Exclusive WASAPI with no DSP bypasses the shared Windows mixer. ReplayGain, crossfade, speed, pitch, fades, and software volume deliberately use the DSP path." TextWrapping="Wrap" Foreground="{DynamicResource TextMutedBrush}" Margin="0,6,0,0"/>
                         </StackPanel>
                     </Border>
                     <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
                         <StackPanel>
                             <TextBlock Text="ReplayGain processing" FontWeight="SemiBold"/>
-                            <TextBlock Text="Choose track or album normalization. The preamp is applied after the stored gain value." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,5,0,14"/>
+                            <TextBlock Text="Choose track or album normalization. The preamp is applied after the stored gain value." TextWrapping="Wrap" Foreground="{DynamicResource TextMutedBrush}" FontSize="10" Margin="0,5,0,14"/>
                             <Grid>
                                 <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="18"/><ColumnDefinition/></Grid.ColumnDefinitions>
                                 <StackPanel>
-                                    <TextBlock Text="Mode" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/>
-                                    <ComboBox ItemsSource="{Binding ReplayGainModes}" SelectedItem="{Binding ReplayGainMode}" Margin="0,5,0,0"/>
+                                    <TextBlock Text="Mode" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/>
+                                    <ComboBox ItemsSource="{Binding SettingsWorkspace.ReplayGainModes}" SelectedItem="{Binding SettingsWorkspace.ReplayGainMode}" Margin="0,5,0,0"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="2">
                                     <Grid>
                                         <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                        <TextBlock Text="Preamp" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/>
-                                        <TextBlock Grid.Column="1" Text="{Binding ReplayGainPreampDb, StringFormat={}{0:+0.0;-0.0;0.0} dB}" Foreground="{StaticResource AccentBrush}" FontSize="10"/>
+                                        <TextBlock Text="Preamp" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding SettingsWorkspace.ReplayGainPreampDb, StringFormat={}{0:+0.0;-0.0;0.0} dB}" Foreground="{DynamicResource AccentBrush}" FontSize="10"/>
                                     </Grid>
-                                    <Slider Minimum="-20" Maximum="20" TickFrequency="0.5" Value="{Binding ReplayGainPreampDb}" Margin="0,5,0,0"/>
+                                    <Slider Minimum="-20" Maximum="20" TickFrequency="0.5" Value="{Binding SettingsWorkspace.ReplayGainPreampDb}" Margin="0,5,0,0"/>
                                 </StackPanel>
                             </Grid>
-                            <CheckBox Content="Prevent digital clipping with the sample-peak guard" IsChecked="{Binding PreventClipping}" Margin="0,14,0,0"/>
-                            <TextBlock Text="This is a sample-peak safety guard, not an oversampled true-peak limiter. DoP playback bypasses all ReplayGain processing." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" FontSize="9" Margin="24,4,0,0"/>
+                            <CheckBox Content="Prevent digital clipping with the sample-peak guard" IsChecked="{Binding SettingsWorkspace.PreventClipping}" Margin="0,14,0,0"/>
+                            <TextBlock Text="This is a sample-peak safety guard, not an oversampled true-peak limiter. DoP playback bypasses all ReplayGain processing." TextWrapping="Wrap" Foreground="{DynamicResource TextMutedBrush}" FontSize="9" Margin="24,4,0,0"/>
                         </StackPanel>
                     </Border>
                     <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
                         <StackPanel>
                             <TextBlock Text="Tempo and pitch" FontWeight="SemiBold"/>
-                            <TextBlock Text="High-quality SoundTouch processing replaces the old linear/FFT path. Changes rebuild the stream at the current media position." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,5,0,14"/>
+                            <TextBlock Text="High-quality SoundTouch processing replaces the old linear/FFT path. Changes rebuild the stream at the current media position." TextWrapping="Wrap" Foreground="{DynamicResource TextMutedBrush}" FontSize="10" Margin="0,5,0,14"/>
                             <Grid>
                                 <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="18"/><ColumnDefinition/></Grid.ColumnDefinitions>
                                 <StackPanel>
                                     <Grid>
                                         <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                        <TextBlock Text="Speed" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/>
-                                        <TextBlock Grid.Column="1" Text="{Binding PlaybackSpeed, StringFormat={}{0:0.00}×}" Foreground="{StaticResource AccentBrush}" FontSize="10"/>
+                                        <TextBlock Text="Speed" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding SettingsWorkspace.PlaybackSpeed, StringFormat={}{0:0.00}×}" Foreground="{DynamicResource AccentBrush}" FontSize="10"/>
                                     </Grid>
-                                    <Slider Minimum="0.5" Maximum="1.5" TickFrequency="0.05" Value="{Binding PlaybackSpeed}" Margin="0,5,0,0"/>
+                                    <Slider Minimum="0.5" Maximum="1.5" TickFrequency="0.05" Value="{Binding SettingsWorkspace.PlaybackSpeed}" Margin="0,5,0,0"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="2">
                                     <Grid>
                                         <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                                        <TextBlock Text="Pitch" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/>
-                                        <TextBlock Grid.Column="1" Text="{Binding PitchSemitones, StringFormat={}{0:+0.0;-0.0;0.0} st}" Foreground="{StaticResource AccentBrush}" FontSize="10"/>
+                                        <TextBlock Text="Pitch" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding SettingsWorkspace.PitchSemitones, StringFormat={}{0:+0.0;-0.0;0.0} st}" Foreground="{DynamicResource AccentBrush}" FontSize="10"/>
                                     </Grid>
-                                    <Slider Minimum="-12" Maximum="12" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding PitchSemitones}" Margin="0,5,0,0"/>
+                                    <Slider Minimum="-12" Maximum="12" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding SettingsWorkspace.PitchSemitones}" Margin="0,5,0,0"/>
                                 </StackPanel>
                             </Grid>
-                            <CheckBox Content="Preserve pitch when changing speed" IsChecked="{Binding PreservePitch}" Margin="0,14,0,0"/>
-                            <TextBlock Text="SoundTouch is used only when speed or pitch differs from normal. Mono and stereo are supported; DoP remains unprocessed." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" FontSize="9" Margin="24,4,0,0"/>
-                            <Button Style="{StaticResource PrimaryButton}" Content="Save playback processing" Click="SaveReplayGain_Click" HorizontalAlignment="Left" Margin="0,16,0,0"/>
+                            <CheckBox Content="Preserve pitch when changing speed" IsChecked="{Binding SettingsWorkspace.PreservePitch}" Margin="0,14,0,0"/>
+                            <TextBlock Text="SoundTouch is used only when speed or pitch differs from normal. Mono and stereo are supported; DoP remains unprocessed." TextWrapping="Wrap" Foreground="{DynamicResource TextMutedBrush}" FontSize="9" Margin="24,4,0,0"/>
+                            <Grid Margin="0,16,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="18"/><ColumnDefinition/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Seek step (seconds)" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><Slider Minimum="1" Maximum="60" TickFrequency="1" Value="{Binding SettingsWorkspace.SeekStepSeconds}"/></StackPanel><StackPanel Grid.Column="2"><TextBlock Text="Volume step (percent)" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><Slider Minimum="1" Maximum="25" TickFrequency="1" Value="{Binding SettingsWorkspace.VolumeStepPercent}"/></StackPanel></Grid>
+                            <TextBlock Text="{Binding SettingsWorkspace.PlaybackStatus}" Foreground="{DynamicResource TextMutedBrush}" FontSize="10" Margin="0,12,0,0"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0"><Button Style="{StaticResource PrimaryButton}" Content="Apply playback" Click="ApplyPlayback_Click" Margin="0,0,8,0"/><Button Content="Revert" Click="RevertPlayback_Click"/></StackPanel>
                         </StackPanel>
                     </Border>
                     <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
                         <StackPanel>
                             <TextBlock Text="Analyze missing loudness data" FontWeight="SemiBold"/>
-                            <TextBlock Text="Measures mono/stereo tracks with EBU R128 gating and stores ReplayGain 2.0 track gain, album gain, and sample peak in the local database. Music files are read-only. Analysis automatically waits while playback is active." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,5,0,12"/>
+                            <TextBlock Text="Measures mono/stereo tracks with EBU R128 gating and stores ReplayGain 2.0 track gain, album gain, and sample peak in the local database. Music files are read-only. Analysis automatically waits while playback is active." TextWrapping="Wrap" Foreground="{DynamicResource TextMutedBrush}" FontSize="10" Margin="0,5,0,12"/>
                             <ProgressBar Minimum="0" Maximum="100" Value="{Binding ReplayGainAnalysisProgress, Mode=OneWay}" Height="4"/>
-                            <TextBlock Text="{Binding ReplayGainAnalysisStatus}" TextWrapping="Wrap" Foreground="{StaticResource AccentBrush}" FontSize="10" Margin="0,8,0,0"/>
+                            <TextBlock Text="{Binding ReplayGainAnalysisStatus}" TextWrapping="Wrap" Foreground="{DynamicResource AccentBrush}" FontSize="10" Margin="0,8,0,0"/>
                             <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
                                 <Button Style="{StaticResource PrimaryButton}" Content="Analyze missing" Click="AnalyzeReplayGain_Click" Margin="0,0,8,0"/>
                                 <Button Content="Cancel" Click="CancelReplayGain_Click"/>
@@ -243,11 +293,11 @@
             <ScrollViewer VerticalScrollBarVisibility="Auto" ui:SmoothScrollBehavior.Enabled="True">
                 <StackPanel Margin="34,28">
                     <TextBlock Text="Library" FontSize="25" FontWeight="SemiBold"/>
-                    <TextBlock Text="Local, mounted, and SMB music sources" Foreground="{StaticResource TextMutedBrush}" Margin="0,4,0,22"/>
+                    <TextBlock Text="Local, mounted, and SMB music sources" Foreground="{DynamicResource TextMutedBrush}" Margin="0,4,0,22"/>
                     <Border Style="{StaticResource Card}" Padding="18">
                         <StackPanel>
                             <TextBlock Text="Music sources" FontWeight="SemiBold"/>
-                            <TextBlock Text="Enable, watch, or rescan each source independently. Removing a source only removes its entries from this app; music files are never changed." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" Margin="0,5,0,14"/>
+                            <TextBlock Text="Enable, watch, or rescan each source independently. Removing a source only removes its entries from this app; music files are never changed." TextWrapping="Wrap" Foreground="{DynamicResource TextMutedBrush}" Margin="0,5,0,14"/>
                             <StackPanel Orientation="Horizontal">
                                 <Button Style="{StaticResource PrimaryButton}" Content="Add source" Click="AddLibrarySource_Click" Margin="0,0,8,0"/>
                                 <Button Command="{Binding ScanCommand}" Content="Rescan enabled"/>
@@ -265,9 +315,9 @@
                                         </Ellipse>
                                         <StackPanel Grid.Column="1" Margin="8,0,12,0">
                                             <TextBlock Text="{Binding Root}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                                            <TextBlock Text="{Binding StateText}" Foreground="{StaticResource AccentBrush}" FontSize="10" Margin="0,4,0,0"/>
+                                            <TextBlock Text="{Binding StateText}" Foreground="{DynamicResource AccentBrush}" FontSize="10" Margin="0,4,0,0"/>
                                             <TextBlock Text="{Binding Error}" Foreground="#FFFF8F8F" FontSize="10" Margin="0,4,0,0" TextWrapping="Wrap"/>
-                                            <TextBlock Text="{Binding LastSuccessfulScan, StringFormat={}{0:g}}" Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,4,0,0">
+                                            <TextBlock Text="{Binding LastSuccessfulScan, StringFormat={}{0:g}}" Foreground="{DynamicResource TextMutedBrush}" FontSize="10" Margin="0,4,0,0">
                                                 <TextBlock.Style>
                                                     <Style TargetType="TextBlock">
                                                         <Style.Triggers>
@@ -280,8 +330,8 @@
                                             </TextBlock>
                                         </StackPanel>
                                         <StackPanel Grid.Column="2" HorizontalAlignment="Right">
-                                            <TextBlock Text="{Binding Kind}" Foreground="{StaticResource TextMutedBrush}" FontSize="10" HorizontalAlignment="Right"/>
-                                            <TextBlock Text="{Binding TrackCount, StringFormat={}{0:N0} tracks}" Foreground="{StaticResource AccentBrush}" FontSize="10" Margin="0,4,0,8" HorizontalAlignment="Right"/>
+                                            <TextBlock Text="{Binding Kind}" Foreground="{DynamicResource TextMutedBrush}" FontSize="10" HorizontalAlignment="Right"/>
+                                            <TextBlock Text="{Binding TrackCount, StringFormat={}{0:N0} tracks}" Foreground="{DynamicResource AccentBrush}" FontSize="10" Margin="0,4,0,8" HorizontalAlignment="Right"/>
                                             <StackPanel Orientation="Horizontal" Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}">
                                                 <Button Content="{Binding EnabledActionText}" Command="{Binding Tag.ToggleLibrarySourceCommand, RelativeSource={RelativeSource AncestorType=StackPanel}}" CommandParameter="{Binding}" Margin="0,0,5,0" Padding="9,4"/>
                                                 <Button Content="{Binding WatcherActionText}" Command="{Binding Tag.ToggleSourceWatcherCommand, RelativeSource={RelativeSource AncestorType=StackPanel}}" CommandParameter="{Binding}" Margin="0,0,5,0" Padding="9,4"/>
@@ -296,13 +346,13 @@
                     </ItemsControl>
                     <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
                         <StackPanel>
-                            <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Excluded folders" FontWeight="SemiBold"/><TextBlock Text="Excluded paths and everything beneath them are skipped during scans." Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,4,0,0"/></StackPanel><Button Grid.Column="1" Content="Add exclusion" Click="AddExclusion_Click"/></Grid>
+                            <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Excluded folders" FontWeight="SemiBold"/><TextBlock Text="Excluded paths and everything beneath them are skipped during scans." Foreground="{DynamicResource TextMutedBrush}" FontSize="10" Margin="0,4,0,0"/></StackPanel><Button Grid.Column="1" Content="Add exclusion" Click="AddExclusion_Click"/></Grid>
                             <ItemsControl ItemsSource="{Binding LibraryExclusions}" Margin="0,10,0,0"><ItemsControl.ItemTemplate><DataTemplate><Grid Margin="0,3"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="{Binding}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/><Button Grid.Column="1" Content="Remove" Command="{Binding DataContext.RemoveExclusionCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" Padding="9,4"/></Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
                         </StackPanel>
                     </Border>
                     <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
                         <StackPanel>
-                            <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Scan activity" FontWeight="SemiBold"/><TextBlock Text="{Binding ScanCurrentSource, StringFormat={}Source: {0}}" Foreground="{StaticResource AccentBrush}" FontSize="10" TextTrimming="CharacterEllipsis" Margin="0,4,0,0"/><TextBlock Text="{Binding ScanCurrentPath}" Foreground="{StaticResource TextMutedBrush}" FontSize="10" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"/></StackPanel><StackPanel Grid.Column="1" Orientation="Horizontal"><Button Content="{Binding ScanPauseText}" Command="{Binding ToggleScanPauseCommand}" Margin="0,0,6,0"/><Button Content="Cancel" Command="{Binding CancelScanCommand}"/></StackPanel></Grid>
+                            <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Scan activity" FontWeight="SemiBold"/><TextBlock Text="{Binding ScanCurrentSource, StringFormat={}Source: {0}}" Foreground="{DynamicResource AccentBrush}" FontSize="10" TextTrimming="CharacterEllipsis" Margin="0,4,0,0"/><TextBlock Text="{Binding ScanCurrentPath}" Foreground="{DynamicResource TextMutedBrush}" FontSize="10" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"/></StackPanel><StackPanel Grid.Column="1" Orientation="Horizontal"><Button Content="{Binding ScanPauseText}" Command="{Binding ToggleScanPauseCommand}" Margin="0,0,6,0"/><Button Content="Cancel" Command="{Binding CancelScanCommand}"/></StackPanel></Grid>
                             <ProgressBar Minimum="0" Maximum="{Binding ScanProgressMaximum, Mode=OneWay}" Value="{Binding ScanProgressValue, Mode=OneWay}" Height="5" Margin="0,14,0,8"/>
                             <UniformGrid Columns="5"><TextBlock Text="{Binding ScanDiscovered, StringFormat={}Found {0:N0}}"/><TextBlock Text="{Binding ScanProcessed, StringFormat={}Read {0:N0}}"/><TextBlock Text="{Binding ScanAdded, StringFormat={}Added {0:N0}}"/><TextBlock Text="{Binding ScanUpdated, StringFormat={}Updated {0:N0}}"/><TextBlock Text="{Binding ScanFailed, StringFormat={}Failed {0:N0}}"/></UniformGrid>
                             <Expander Header="Failure details" IsExpanded="False" Visibility="{Binding HasScanFailures, Converter={StaticResource BoolToVisibility}}" Margin="0,12,0,0"><ItemsControl ItemsSource="{Binding ScanFailures}"><ItemsControl.ItemTemplate><DataTemplate><StackPanel Margin="0,5"><TextBlock Text="{Binding Path}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock Text="{Binding Message}" Foreground="#FFFF8F8F" FontSize="10" TextWrapping="Wrap"/></StackPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></Expander>
@@ -311,24 +361,24 @@
                     <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
                         <StackPanel>
                             <TextBlock Text="Background scanning" FontWeight="SemiBold"/>
-                            <TextBlock Text="Checks for library changes on a conservative schedule. By default it waits for AC power and an unmetered connection." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,5,0,12"/>
+                            <TextBlock Text="Checks for library changes on a conservative schedule. By default it waits for AC power and an unmetered connection." TextWrapping="Wrap" Foreground="{DynamicResource TextMutedBrush}" FontSize="10" Margin="0,5,0,12"/>
                             <CheckBox Content="Enable scheduled scans" IsChecked="{Binding ScheduledScanEnabled}"/>
                             <Grid Margin="24,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="180"/><ColumnDefinition Width="100"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="Interval in minutes (15–1440)" VerticalAlignment="Center"/><TextBox Grid.Column="1" Text="{Binding ScheduledScanIntervalMinutes, UpdateSourceTrigger=LostFocus}"/></Grid>
                             <CheckBox Content="Allow scheduled scans on battery" IsChecked="{Binding AllowScheduledScanOnBattery}" Margin="24,10,0,0"/>
                             <CheckBox Content="Allow scheduled scans on metered networks" IsChecked="{Binding AllowScheduledScanOnMeteredNetwork}" Margin="24,8,0,0"/>
-                            <TextBlock Text="{Binding ScheduledScanStatus}" Foreground="{StaticResource AccentBrush}" FontSize="10" Margin="0,12,0,0"/>
+                            <TextBlock Text="{Binding ScheduledScanStatus}" Foreground="{DynamicResource AccentBrush}" FontSize="10" Margin="0,12,0,0"/>
                         </StackPanel>
                     </Border>
                     <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
                         <StackPanel>
                             <TextBlock Text="Artwork cache" FontWeight="SemiBold"/>
-                            <TextBlock Text="{Binding ArtworkCacheStatus}" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,5,0,14"/>
+                            <TextBlock Text="{Binding ArtworkCacheStatus}" Foreground="{DynamicResource TextMutedBrush}" FontSize="11" Margin="0,5,0,14"/>
                             <Grid>
                                 <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                                 <Slider Minimum="64" Maximum="4096" TickFrequency="64" IsSnapToTickEnabled="True" Value="{Binding ArtworkCacheMegabytes}"/>
-                                <TextBlock Grid.Column="1" Text="{Binding ArtworkCacheLimitText}" Foreground="{StaticResource TextMutedBrush}" Margin="14,0,0,0" VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="1" Text="{Binding ArtworkCacheLimitText}" Foreground="{DynamicResource TextMutedBrush}" Margin="14,0,0,0" VerticalAlignment="Center"/>
                             </Grid>
-                            <TextBlock Text="Clearing removes originals and thumbnails. Rebuild reads embedded covers from every available library file." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,9,0,12"/>
+                            <TextBlock Text="Clearing removes originals and thumbnails. Rebuild reads embedded covers from every available library file." TextWrapping="Wrap" Foreground="{DynamicResource TextMutedBrush}" FontSize="10" Margin="0,9,0,12"/>
                             <StackPanel Orientation="Horizontal">
                                 <Button Style="{StaticResource PrimaryButton}" Command="{Binding RebuildArtworkCacheCommand}" Content="Rebuild cache" Margin="0,0,8,0"/>
                                 <Button Command="{Binding ClearArtworkCacheCommand}" Content="Clear cache" Margin="0,0,8,0"/>
@@ -339,8 +389,8 @@
                     <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
                         <StackPanel>
                             <TextBlock Text="Duplicate analysis" FontWeight="SemiBold"/>
-                            <TextBlock Text="A read-only, cancellable SHA-256 comparison runs only for same-size available files. Nothing is removed automatically." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,5,0,10"/>
-                            <TextBlock Text="{Binding DuplicateScanStatus}" Foreground="{StaticResource AccentBrush}" FontSize="10" Margin="0,0,0,12"/>
+                            <TextBlock Text="A read-only, cancellable SHA-256 comparison runs only for same-size available files. Nothing is removed automatically." TextWrapping="Wrap" Foreground="{DynamicResource TextMutedBrush}" FontSize="11" Margin="0,5,0,10"/>
+                            <TextBlock Text="{Binding DuplicateScanStatus}" Foreground="{DynamicResource AccentBrush}" FontSize="10" Margin="0,0,0,12"/>
                             <Button Content="Find content duplicates" Click="FindDuplicates_Click" HorizontalAlignment="Left"/>
                             <ItemsControl ItemsSource="{Binding DuplicateGroups}" Margin="0,12,0,0">
                                 <ItemsControl.ItemTemplate>
@@ -349,7 +399,7 @@
                                             <StackPanel>
                                                 <TextBlock Text="{Binding Tracks.Count, StringFormat={}{0} identical files}" FontWeight="SemiBold"/>
                                                 <ItemsControl ItemsSource="{Binding Tracks}" Margin="0,5,0,0">
-                                                    <ItemsControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding Path}" Foreground="{StaticResource TextMutedBrush}" FontSize="9" TextTrimming="CharacterEllipsis"/></DataTemplate></ItemsControl.ItemTemplate>
+                                                    <ItemsControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding Path}" Foreground="{DynamicResource TextMutedBrush}" FontSize="9" TextTrimming="CharacterEllipsis"/></DataTemplate></ItemsControl.ItemTemplate>
                                                 </ItemsControl>
                                             </StackPanel>
                                         </Border>
@@ -364,18 +414,33 @@
         <TabItem Header="Metadata">
             <ScrollViewer VerticalScrollBarVisibility="Auto" ui:SmoothScrollBehavior.Enabled="True">
                 <StackPanel Margin="34,28">
-                    <TextBlock Text="Metadata lookup" FontSize="25" FontWeight="SemiBold"/>
-                    <TextBlock Text="Online matching is opt-in, cached locally, and never writes tags without your confirmation." Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap" Margin="0,4,0,22"/>
+                    <TextBlock Text="Metadata" FontSize="25" FontWeight="SemiBold"/>
+                    <TextBlock Text="Tag parsing, edit safety, and opt-in online matching" Foreground="{DynamicResource TextMutedBrush}" TextWrapping="Wrap" Margin="0,4,0,22"/>
                     <Border Style="{StaticResource Card}" Padding="18">
                         <StackPanel>
-                            <CheckBox Content="Enable online metadata lookup" IsChecked="{Binding MetadataLookupEnabled}"/>
-                            <CheckBox Content="MusicBrainz and Cover Art Archive" IsChecked="{Binding MusicBrainzLookupEnabled}" Margin="0,10,0,0"/>
-                            <CheckBox Content="Discogs" IsChecked="{Binding DiscogsLookupEnabled}" Margin="0,10,0,0"/>
-                            <TextBlock Text="Discogs user token (optional)" Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,16,0,4"/>
-                            <TextBox Text="{Binding DiscogsUserToken, UpdateSourceTrigger=PropertyChanged}"/>
-                            <TextBlock Text="MusicBrainz is rate-limited; requests are serialized and cached. Results are shown for review before any edit is applied." Foreground="{StaticResource TextMutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,12,0,0"/>
+                            <TextBlock Text="Tag behavior" FontWeight="SemiBold"/>
+                            <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="18"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                <StackPanel><TextBlock Text="Multi-value separators" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><TextBox Text="{Binding SettingsWorkspace.MultiValueSeparators, UpdateSourceTrigger=PropertyChanged}" Margin="0,5,0,0" ToolTip="Characters used to split artist and genre values"/></StackPanel>
+                                <StackPanel Grid.Column="2"><TextBlock Text="Default edit destination" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding SettingsWorkspace.MetadataWriteModes}" SelectedItem="{Binding SettingsWorkspace.DefaultMetadataWriteMode}" Margin="0,5,0,0"/></StackPanel>
+                            </Grid>
+                            <TextBlock Text="Database-only is safest. Writing tags to files is always confirmed in the editor." Foreground="{DynamicResource TextMutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,10,0,0"/>
                         </StackPanel>
                     </Border>
+                    <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Online lookup" FontWeight="SemiBold"/>
+                            <CheckBox Content="Enable online metadata lookup" IsChecked="{Binding SettingsWorkspace.MetadataLookupEnabled}" Margin="0,12,0,0"/>
+                            <CheckBox Content="MusicBrainz and Cover Art Archive" IsChecked="{Binding SettingsWorkspace.MusicBrainzLookupEnabled}" Margin="0,10,0,0"/>
+                            <CheckBox Content="Discogs" IsChecked="{Binding SettingsWorkspace.DiscogsLookupEnabled}" Margin="0,10,0,0"/>
+                            <Grid Margin="0,14,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="18"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                <StackPanel><TextBlock Text="Discogs user token (optional)" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><TextBox Text="{Binding SettingsWorkspace.DiscogsUserToken, UpdateSourceTrigger=PropertyChanged}" Margin="0,5,0,0"/></StackPanel>
+                                <StackPanel Grid.Column="2"><TextBlock Text="Cache lifetime (days)" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><TextBox Text="{Binding SettingsWorkspace.MetadataCacheDays, UpdateSourceTrigger=LostFocus}" Margin="0,5,0,0"/></StackPanel>
+                            </Grid>
+                            <TextBlock Text="Provider requests are serialized, cached locally, and shown for review before any edit." Foreground="{DynamicResource TextMutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,12,0,0"/>
+                        </StackPanel>
+                    </Border>
+                    <TextBlock Text="{Binding SettingsWorkspace.MetadataStatus}" Foreground="{DynamicResource TextMutedBrush}" FontSize="10" Margin="2,12,0,0"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0"><Button Style="{StaticResource PrimaryButton}" Content="Apply metadata" Click="ApplyMetadataPreferences_Click" Margin="0,0,8,0"/><Button Content="Revert" Click="RevertMetadataPreferences_Click"/></StackPanel>
                 </StackPanel>
             </ScrollViewer>
         </TabItem>
@@ -383,35 +448,106 @@
             <ScrollViewer VerticalScrollBarVisibility="Auto" ui:SmoothScrollBehavior.Enabled="True">
                 <StackPanel Margin="34,28">
                     <TextBlock Text="Lyrics" FontSize="25" FontWeight="SemiBold"/>
-                    <TextBlock Text="Timing, typography, and local lyric behavior" Foreground="{StaticResource TextMutedBrush}" Margin="0,4,0,22"/>
+                    <TextBlock Text="Timing, typography, and local lyric behavior" Foreground="{DynamicResource TextMutedBrush}" Margin="0,4,0,22"/>
                     <Border Style="{StaticResource Card}" Padding="18">
                         <StackPanel>
                             <TextBlock Text="Display" FontWeight="SemiBold"/>
-                            <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="18"/><ColumnDefinition/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Mode" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding LyricsDisplayModes}" SelectedItem="{Binding LyricsDisplayMode}" Margin="0,5,0,0"/></StackPanel><StackPanel Grid.Column="2"><TextBlock Text="Alignment" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding LyricsAlignments}" SelectedItem="{Binding LyricsAlignment}" Margin="0,5,0,0"/></StackPanel></Grid>
-                            <TextBlock Text="Font size" Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,14,0,0"/><Slider Minimum="14" Maximum="52" TickFrequency="1" Value="{Binding LyricsFontSize}" Margin="0,5,0,0"/>
-                            <TextBlock Text="Line spacing" Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,14,0,0"/><Slider Minimum="0.8" Maximum="2" TickFrequency="0.05" Value="{Binding LyricsLineSpacing}" Margin="0,5,0,0"/>
-                            <TextBlock Text="Artwork blur" Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="0,14,0,0"/><Slider Minimum="0" Maximum="20" TickFrequency="1" Value="{Binding LyricsBlurStrength}" Margin="0,5,0,0"/>
+                            <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="18"/><ColumnDefinition/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Mode" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding LyricsDisplayModes}" SelectedItem="{Binding LyricsDisplayMode}" Margin="0,5,0,0"/></StackPanel><StackPanel Grid.Column="2"><TextBlock Text="Alignment" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding LyricsAlignments}" SelectedItem="{Binding LyricsAlignment}" Margin="0,5,0,0"/></StackPanel></Grid>
+                            <TextBlock Text="Font size" Foreground="{DynamicResource TextMutedBrush}" FontSize="10" Margin="0,14,0,0"/><Slider Minimum="14" Maximum="52" TickFrequency="1" Value="{Binding LyricsFontSize}" Margin="0,5,0,0"/>
+                            <TextBlock Text="Line spacing" Foreground="{DynamicResource TextMutedBrush}" FontSize="10" Margin="0,14,0,0"/><Slider Minimum="0.8" Maximum="2" TickFrequency="0.05" Value="{Binding LyricsLineSpacing}" Margin="0,5,0,0"/>
+                            <TextBlock Text="Artwork blur" Foreground="{DynamicResource TextMutedBrush}" FontSize="10" Margin="0,14,0,0"/><Slider Minimum="0" Maximum="20" TickFrequency="1" Value="{Binding LyricsBlurStrength}" Margin="0,5,0,0"/>
                             <CheckBox Content="Animate karaoke words" IsChecked="{Binding KaraokeWordAnimation}" Margin="0,14,0,0"/>
-                            <TextBlock Text="Word animation follows the playback timeline and automatically snaps instead when interface animations are disabled." Foreground="{StaticResource TextMutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="24,5,0,0"/>
+                            <TextBlock Text="Word animation follows the playback timeline and automatically snaps instead when interface animations are disabled." Foreground="{DynamicResource TextMutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="24,5,0,0"/>
                         </StackPanel>
                     </Border>
-                    <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0"><StackPanel><TextBlock Text="Local lyric files" FontWeight="SemiBold"/><TextBlock Text="The Now Playing panel discovers exact-name LRC/TXT files first, then language variants, title matches, and embedded metadata. Alternate choices and per-track timing offsets are remembered." Foreground="{StaticResource TextMutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel></Border>
-                    <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0"><StackPanel><TextBlock Text="Online lookup" FontWeight="SemiBold"/><CheckBox Content="Enable manual LRCLIB searches" IsChecked="{Binding OnlineLyricsEnabled}" Margin="0,12,0,0"/><TextBlock Text="Off by default. When you press the globe in Now Playing, the track title, artist, album, and duration are sent to LRCLIB. Results are cached locally for 30 days and are never applied until you select and confirm one. LRCLIB is credited beside the selected source." Foreground="{StaticResource TextMutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="24,5,0,0"/></StackPanel></Border>
+                    <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0"><StackPanel><TextBlock Text="Local lyric files" FontWeight="SemiBold"/><TextBlock Text="The Now Playing panel discovers exact-name LRC/TXT files first, then language variants, title matches, and embedded metadata. Alternate choices and per-track timing offsets are remembered." Foreground="{DynamicResource TextMutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel></Border>
+                    <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0"><StackPanel><TextBlock Text="Online lookup" FontWeight="SemiBold"/><CheckBox Content="Enable manual LRCLIB searches" IsChecked="{Binding OnlineLyricsEnabled}" Margin="0,12,0,0"/><TextBlock Text="Off by default. When you press the globe in Now Playing, the track title, artist, album, and duration are sent to LRCLIB. Results are cached locally for 30 days and are never applied until you select and confirm one. LRCLIB is credited beside the selected source." Foreground="{DynamicResource TextMutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="24,5,0,0"/></StackPanel></Border>
                 </StackPanel>
             </ScrollViewer>
         </TabItem>
         <TabItem Header="Appearance">
-            <ScrollViewer VerticalScrollBarVisibility="Auto" ui:SmoothScrollBehavior.Enabled="True"><StackPanel Margin="34,28"><TextBlock Text="Appearance" FontSize="25" FontWeight="SemiBold"/><TextBlock Text="Library density and panel behavior" Foreground="{StaticResource TextMutedBrush}" Margin="0,4,0,22"/><Border Style="{StaticResource Card}" Padding="18"><StackPanel><TextBlock Text="Collection cover size" FontWeight="SemiBold"/><Slider Minimum="110" Maximum="210" Value="{Binding AlbumTileSize}" Margin="0,12,0,6"/><CheckBox Content="Show queue panel" IsChecked="{Binding QueueVisible}" Margin="0,14,0,0"/><CheckBox Content="Use interface animations" IsChecked="{Binding AnimationsEnabled}" Margin="0,12,0,0"/><TextBlock Text="Animations use WPF composition transforms only and can be disabled instantly." Foreground="{StaticResource TextMutedBrush}" FontSize="10" Margin="24,5,0,0"/></StackPanel></Border></StackPanel></ScrollViewer>
+            <ScrollViewer VerticalScrollBarVisibility="Auto" ui:SmoothScrollBehavior.Enabled="True">
+                <StackPanel Margin="34,28">
+                    <TextBlock Text="Appearance" FontSize="25" FontWeight="SemiBold"/>
+                    <TextBlock Text="Theme changes preview immediately and save automatically" Foreground="{DynamicResource TextMutedBrush}" Margin="0,4,0,22"/>
+                    <Border Style="{StaticResource Card}" Padding="18">
+                        <StackPanel>
+                            <TextBlock Text="Theme and accent" FontWeight="SemiBold"/>
+                            <Grid Margin="0,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="18"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                <StackPanel><TextBlock Text="Theme" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding SettingsWorkspace.ThemeOptions}" SelectedItem="{Binding SettingsWorkspace.Theme}" Margin="0,5,0,0"/></StackPanel>
+                                <StackPanel Grid.Column="2"><TextBlock Text="Accent (#RRGGBB)" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><TextBox Text="{Binding SettingsWorkspace.AccentColor, UpdateSourceTrigger=LostFocus}" Margin="0,5,0,0"/></StackPanel>
+                            </Grid>
+                            <WrapPanel Margin="0,12,0,0">
+                                <Button Width="30" Height="30" Margin="0,0,8,0" Tag="#8290FF" Click="AccentSwatch_Click" Background="#8290FF" ToolTip="Periwinkle"/>
+                                <Button Width="30" Height="30" Margin="0,0,8,0" Tag="#55C2FF" Click="AccentSwatch_Click" Background="#55C2FF" ToolTip="Sky"/>
+                                <Button Width="30" Height="30" Margin="0,0,8,0" Tag="#69D39B" Click="AccentSwatch_Click" Background="#69D39B" ToolTip="Mint"/>
+                                <Button Width="30" Height="30" Margin="0,0,8,0" Tag="#FF8A67" Click="AccentSwatch_Click" Background="#FF8A67" ToolTip="Coral"/>
+                                <Button Width="30" Height="30" Tag="#D18CFF" Click="AccentSwatch_Click" Background="#D18CFF" ToolTip="Violet"/>
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Typography and surfaces" FontWeight="SemiBold"/>
+                            <TextBlock Text="Interface font" Foreground="{DynamicResource TextMutedBrush}" FontSize="10" Margin="0,12,0,0"/><ComboBox ItemsSource="{Binding SettingsWorkspace.FontFamilies}" SelectedItem="{Binding SettingsWorkspace.FontFamily}" IsEditable="True" IsTextSearchEnabled="True" MaxDropDownHeight="300" Margin="0,5,0,0"/>
+                            <TextBlock Text="Interface font size" Foreground="{DynamicResource TextMutedBrush}" FontSize="10" Margin="0,14,0,0"/><Slider Minimum="11" Maximum="20" TickFrequency="0.5" Value="{Binding SettingsWorkspace.InterfaceFontSize}"/>
+                            <TextBlock Text="Window surface opacity" Foreground="{DynamicResource TextMutedBrush}" FontSize="10" Margin="0,14,0,0"/><Slider Minimum="0.72" Maximum="1" TickFrequency="0.02" Value="{Binding SettingsWorkspace.BackgroundOpacity}"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Shell behavior" FontWeight="SemiBold"/>
+                            <TextBlock Text="Queue panel width" Foreground="{DynamicResource TextMutedBrush}" FontSize="10" Margin="0,12,0,0"/><Slider Minimum="280" Maximum="520" TickFrequency="10" Value="{Binding SettingsWorkspace.QueuePanelWidth}"/><TextBlock Text="{Binding SettingsWorkspace.QueuePanelWidthText}" Foreground="{DynamicResource AccentBrush}" FontSize="10"/>
+                            <CheckBox Content="Show queue panel" IsChecked="{Binding QueueVisible}" Margin="0,12,0,0"/>
+                            <CheckBox Content="Use interface animations" IsChecked="{Binding AnimationsEnabled}" Margin="0,10,0,0"/>
+                            <CheckBox Content="Enable visualizer" IsChecked="{Binding VisualizerEnabled}" Margin="0,10,0,0"/>
+                            <CheckBox Content="Hide navigation bar in full screen" IsChecked="{Binding SettingsWorkspace.FullscreenHideNavigation}" Margin="0,10,0,0"/>
+                        </StackPanel>
+                    </Border>
+                    <TextBlock Text="{Binding SettingsWorkspace.AppearanceStatus}" Foreground="{DynamicResource TextMutedBrush}" FontSize="10" Margin="2,12,0,0"/>
+                </StackPanel>
+            </ScrollViewer>
+        </TabItem>
+        <TabItem Header="Views">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" ui:SmoothScrollBehavior.Enabled="True">
+                <StackPanel Margin="34,28">
+                    <TextBlock Text="Library views" FontSize="25" FontWeight="SemiBold"/>
+                    <TextBlock Text="Independent sorting, density, filters, and columns for every view" Foreground="{DynamicResource TextMutedBrush}" Margin="0,4,0,22"/>
+                    <Border Style="{StaticResource Card}" Padding="18">
+                        <StackPanel>
+                            <TextBlock Text="Editing view" FontWeight="SemiBold"/>
+                            <ComboBox ItemsSource="{Binding SettingsWorkspace.ViewProfiles}" SelectedItem="{Binding SettingsWorkspace.SelectedViewProfile}" DisplayMemberPath="ViewName" Margin="0,10,0,0"/>
+                            <Grid Margin="0,14,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="18"/><ColumnDefinition/></Grid.ColumnDefinitions>
+                                <StackPanel><TextBlock Text="Sort by" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding SettingsWorkspace.SortOptions}" SelectedItem="{Binding SettingsWorkspace.SelectedViewProfile.SortBy}" Margin="0,5,0,0"/></StackPanel>
+                                <StackPanel Grid.Column="2"><TextBlock Text="Density" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/><ComboBox ItemsSource="{Binding SettingsWorkspace.DensityOptions}" SelectedItem="{Binding SettingsWorkspace.SelectedViewProfile.Density}" Margin="0,5,0,0"/></StackPanel>
+                            </Grid>
+                            <CheckBox Content="Sort descending" IsChecked="{Binding SettingsWorkspace.SelectedViewProfile.SortDescending}" Margin="0,12,0,0"/>
+                            <TextBlock Text="Cover size" Foreground="{DynamicResource TextMutedBrush}" FontSize="10" Margin="0,14,0,0"/><Slider Minimum="80" Maximum="400" TickFrequency="4" Value="{Binding SettingsWorkspace.SelectedViewProfile.CoverSize}"/>
+                            <TextBlock Text="Persistent quick filter" Foreground="{DynamicResource TextMutedBrush}" FontSize="10" Margin="0,14,0,0"/><TextBox Text="{Binding SettingsWorkspace.SelectedViewProfile.QuickFilter, UpdateSourceTrigger=PropertyChanged}" Margin="0,5,0,0"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
+                        <StackPanel>
+                            <TextBlock Text="Track columns" FontWeight="SemiBold"/>
+                            <TextBlock Text="Choose visibility, order, and width. Column options are used by list-based views." Foreground="{DynamicResource TextMutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,5,0,12"/>
+                            <ItemsControl ItemsSource="{Binding SettingsWorkspace.SelectedViewProfile.Columns}">
+                                <ItemsControl.ItemTemplate><DataTemplate><Grid Margin="0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="28"/><ColumnDefinition Width="*"/><ColumnDefinition Width="90"/><ColumnDefinition Width="36"/><ColumnDefinition Width="36"/></Grid.ColumnDefinitions><CheckBox IsChecked="{Binding IsVisible}" VerticalAlignment="Center"/><TextBlock Grid.Column="1" Text="{Binding Name}" VerticalAlignment="Center"/><TextBox Grid.Column="2" Text="{Binding Width, UpdateSourceTrigger=LostFocus}" Margin="6,0" ToolTip="Width in pixels"/><Button Grid.Column="3" Content="↑" Click="MoveColumnUp_Click" Padding="0" ToolTip="Move left"/><Button Grid.Column="4" Content="↓" Click="MoveColumnDown_Click" Padding="0" ToolTip="Move right"/></Grid></DataTemplate></ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
+                    <StackPanel Orientation="Horizontal" Margin="0,12,0,0"><Button Style="{StaticResource PrimaryButton}" Content="Apply this view" Click="ApplyViewProfile_Click" Margin="0,0,8,0"/><Button Content="Revert all drafts" Click="RevertViewProfiles_Click" Margin="0,0,8,0"/><Button Content="Reset this view" Click="ResetViewProfile_Click" Margin="0,0,8,0"/><Button Content="Reset all views" Click="ResetAllViews_Click"/></StackPanel>
+                </StackPanel>
+            </ScrollViewer>
         </TabItem>
         <TabItem Header="Diagnostics">
             <ScrollViewer VerticalScrollBarVisibility="Auto" ui:SmoothScrollBehavior.Enabled="True">
                 <StackPanel Margin="34,28">
                     <TextBlock Text="Diagnostics" FontSize="25" FontWeight="SemiBold"/>
-                    <TextBlock Text="Private, local troubleshooting tools" Foreground="{StaticResource TextMutedBrush}" Margin="0,4,0,22"/>
+                    <TextBlock Text="Private, local troubleshooting tools" Foreground="{DynamicResource TextMutedBrush}" Margin="0,4,0,22"/>
                     <Border Style="{StaticResource Card}" Padding="18">
                         <StackPanel>
                             <TextBlock Text="Export diagnostics bundle" FontWeight="SemiBold"/>
-                            <TextBlock Text="Includes redacted settings, rotating logs, device summaries, version, and database integrity/schema information. It never includes the music database or media files." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,5,0,14"/>
+                            <TextBlock Text="Includes redacted settings, rotating logs, device summaries, version, and database integrity/schema information. It never includes the music database or media files." TextWrapping="Wrap" Foreground="{DynamicResource TextMutedBrush}" FontSize="11" Margin="0,5,0,14"/>
                             <Button Style="{StaticResource PrimaryButton}" Content="Export bundle…" Click="ExportDiagnostics_Click" HorizontalAlignment="Left"/>
                         </StackPanel>
                     </Border>
@@ -421,10 +557,10 @@
                                 <Button DockPanel.Dock="Right" Content="Run check" Click="CheckDecoders_Click" Margin="12,0,0,0"/>
                                 <StackPanel>
                                     <TextBlock Text="Decoder availability" FontWeight="SemiBold"/>
-                                    <TextBlock Text="Uses embedded synthetic audio only. Your library and music files are not opened or changed." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,5,0,0"/>
+                                    <TextBlock Text="Uses embedded synthetic audio only. Your library and music files are not opened or changed." TextWrapping="Wrap" Foreground="{DynamicResource TextMutedBrush}" FontSize="11" Margin="0,5,0,0"/>
                                 </StackPanel>
                             </DockPanel>
-                            <TextBlock Text="{Binding DecoderCapabilityStatus}" Foreground="{StaticResource AccentBrush}" FontSize="10" Margin="0,12,0,8"/>
+                            <TextBlock Text="{Binding DecoderCapabilityStatus}" Foreground="{DynamicResource AccentBrush}" FontSize="10" Margin="0,12,0,8"/>
                             <ItemsControl ItemsSource="{Binding DecoderCapabilities}">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate>
@@ -436,9 +572,9 @@
                                                 <ColumnDefinition Width="85"/>
                                             </Grid.ColumnDefinitions>
                                             <TextBlock Text="{Binding Format}" FontWeight="SemiBold"/>
-                                            <TextBlock Grid.Column="1" Text="{Binding Extensions}" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/>
-                                            <TextBlock Grid.Column="2" Text="{Binding Detail}" TextTrimming="CharacterEllipsis" Foreground="{StaticResource TextMutedBrush}" FontSize="10"/>
-                                            <TextBlock Grid.Column="3" Text="{Binding State}" HorizontalAlignment="Right" Foreground="{StaticResource AccentBrush}" FontSize="10"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding Extensions}" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/>
+                                            <TextBlock Grid.Column="2" Text="{Binding Detail}" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextMutedBrush}" FontSize="10"/>
+                                            <TextBlock Grid.Column="3" Text="{Binding State}" HorizontalAlignment="Right" Foreground="{DynamicResource AccentBrush}" FontSize="10"/>
                                         </Grid>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
@@ -448,7 +584,7 @@
                     <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
                         <StackPanel>
                             <TextBlock Text="Safe mode" FontWeight="SemiBold"/>
-                            <TextBlock Text="Start with --safe-mode to skip session resume and disable animations/effects. Safe mode is also selected automatically after repeated incomplete startups." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,5,0,0"/>
+                            <TextBlock Text="Start with --safe-mode to skip session resume and disable animations/effects. Safe mode is also selected automatically after repeated incomplete startups." TextWrapping="Wrap" Foreground="{DynamicResource TextMutedBrush}" FontSize="11" Margin="0,5,0,0"/>
                         </StackPanel>
                     </Border>
                 </StackPanel>
@@ -458,11 +594,11 @@
             <ScrollViewer VerticalScrollBarVisibility="Auto" ui:SmoothScrollBehavior.Enabled="True">
                 <StackPanel Margin="34,28">
                     <TextBlock Text="Data and recovery" FontSize="25" FontWeight="SemiBold"/>
-                    <TextBlock Text="Portable settings and explicit local backups" Foreground="{StaticResource TextMutedBrush}" Margin="0,4,0,22"/>
+                    <TextBlock Text="Portable settings and explicit local backups" Foreground="{DynamicResource TextMutedBrush}" Margin="0,4,0,22"/>
                     <Border Style="{StaticResource Card}" Padding="18">
                         <StackPanel>
                             <TextBlock Text="Settings" FontWeight="SemiBold"/>
-                            <TextBlock Text="Export or import validated JSON settings. Import never edits the library database or music files." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,5,0,14"/>
+                            <TextBlock Text="Export or import validated JSON settings. Import never edits the library database or music files." TextWrapping="Wrap" Foreground="{DynamicResource TextMutedBrush}" FontSize="11" Margin="0,5,0,14"/>
                             <StackPanel Orientation="Horizontal">
                                 <Button Style="{StaticResource PrimaryButton}" Content="Export settings…" Click="ExportSettings_Click" Margin="0,0,8,0"/>
                                 <Button Content="Import settings…" Click="ImportSettings_Click"/>
@@ -472,7 +608,7 @@
                     <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
                         <StackPanel>
                             <TextBlock Text="User-data backup" FontWeight="SemiBold"/>
-                            <TextBlock Text="Includes settings, playlists, ratings, love state, play history, bookmarks, and the local library index. It does not include or modify audio files." TextWrapping="Wrap" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,5,0,14"/>
+                            <TextBlock Text="Includes settings, playlists, ratings, love state, play history, bookmarks, and the local library index. It does not include or modify audio files." TextWrapping="Wrap" Foreground="{DynamicResource TextMutedBrush}" FontSize="11" Margin="0,5,0,14"/>
                             <StackPanel Orientation="Horizontal">
                                 <Button Style="{StaticResource PrimaryButton}" Content="Create backup…" Click="ExportBackup_Click" Margin="0,0,8,0"/>
                                 <Button Content="Restore backup…" Click="RestoreBackup_Click"/>
@@ -482,11 +618,12 @@
                     <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0">
                         <StackPanel>
                             <TextBlock Text="Reset sections" FontWeight="SemiBold"/>
-                            <TextBlock Text="Reset one area without deleting the library database." Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,5,0,14"/>
+                            <TextBlock Text="Reset one area without deleting the library database." Foreground="{DynamicResource TextMutedBrush}" FontSize="11" Margin="0,5,0,14"/>
                             <WrapPanel>
                                 <Button Content="Appearance" Tag="Appearance" Click="ResetSettings_Click" Margin="0,0,8,8"/>
                                 <Button Content="Playback" Tag="Playback" Click="ResetSettings_Click" Margin="0,0,8,8"/>
                                 <Button Content="Library sources" Tag="Library" Click="ResetSettings_Click" Margin="0,0,8,8"/>
+                                <Button Content="Metadata" Tag="Metadata" Click="ResetSettings_Click" Margin="0,0,8,8"/>
                                 <Button Content="Shortcuts" Tag="Shortcuts" Click="ResetSettings_Click" Margin="0,0,8,8"/>
                                 <Button Content="Session" Tag="Session" Click="ResetSettings_Click" Margin="0,0,8,8"/>
                                 <Button Content="Lyrics" Tag="Lyrics" Click="ResetSettings_Click" Margin="0,0,8,8"/>
@@ -498,7 +635,57 @@
             </ScrollViewer>
         </TabItem>
         <TabItem Header="Shortcuts">
-            <ScrollViewer VerticalScrollBarVisibility="Auto" ui:SmoothScrollBehavior.Enabled="True"><StackPanel Margin="34,28"><TextBlock Text="Shortcuts" FontSize="25" FontWeight="SemiBold"/><TextBlock Text="Keyboard, media-key, and mouse navigation" Foreground="{StaticResource TextMutedBrush}" Margin="0,4,0,22"/><Border Style="{StaticResource Card}" Padding="18"><StackPanel><TextBlock Text="Mouse4" FontWeight="SemiBold"/><TextBlock Text="Go back through view and collection history" Foreground="{StaticResource TextMutedBrush}" Margin="0,3,0,12"/><TextBlock Text="Mouse5" FontWeight="SemiBold"/><TextBlock Text="Go forward through view and collection history" Foreground="{StaticResource TextMutedBrush}" Margin="0,3,0,0"/></StackPanel></Border></StackPanel></ScrollViewer>
+            <ScrollViewer VerticalScrollBarVisibility="Auto" ui:SmoothScrollBehavior.Enabled="True">
+                <StackPanel Margin="34,28">
+                    <TextBlock Text="Shortcuts" FontSize="25" FontWeight="SemiBold"/>
+                    <TextBlock Text="Rebind in-app and global Windows shortcuts" Foreground="{DynamicResource TextMutedBrush}" Margin="0,4,0,22"/>
+                    <Border Style="{StaticResource Card}" Padding="18">
+                        <StackPanel>
+                            <TextBlock Text="Bindings" FontWeight="SemiBold"/>
+                            <TextBlock Text="Click a gesture field and press the desired combination. Global shortcuts require a modifier unless they are media keys." Foreground="{DynamicResource TextMutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,5,0,12"/>
+                            <ItemsControl ItemsSource="{Binding SettingsWorkspace.ShortcutBindings}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Background="{DynamicResource SurfaceRaisedBrush}" CornerRadius="8" Padding="10" Margin="0,0,0,7">
+                                            <StackPanel>
+                                                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="1.35*"/><ColumnDefinition Width="1*"/><ColumnDefinition Width="74"/><ColumnDefinition Width="74"/><ColumnDefinition Width="34"/></Grid.ColumnDefinitions>
+                                                    <ComboBox ItemsSource="{Binding DataContext.SettingsWorkspace.ShortcutActions, RelativeSource={RelativeSource AncestorType=Window}}" SelectedValuePath="Action" DisplayMemberPath="Label" SelectedValue="{Binding Action}" Margin="0,0,8,0"/>
+                                                    <TextBox Grid.Column="1" Text="{Binding Gesture}" PreviewKeyDown="ShortcutGesture_PreviewKeyDown" Margin="0,0,8,0" ToolTip="Focus and press a shortcut"/>
+                                                    <CheckBox Grid.Column="2" Content="Global" IsChecked="{Binding Global}" VerticalAlignment="Center"/>
+                                                    <CheckBox Grid.Column="3" Content="Enabled" IsChecked="{Binding Enabled}" VerticalAlignment="Center"/>
+                                                    <Button Grid.Column="4" Content="×" Click="RemoveShortcut_Click" Padding="0" ToolTip="Remove binding"/>
+                                                </Grid>
+                                                <TextBlock Text="{Binding ValidationText}" Foreground="#FFFF8F8F" FontSize="10" Margin="0,5,0,0" TextWrapping="Wrap"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <Button Content="Add binding" Click="AddShortcut_Click" HorizontalAlignment="Left" Margin="0,5,0,0"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0"><StackPanel><TextBlock Text="Mouse navigation" FontWeight="SemiBold"/><TextBlock Text="Mouse4 goes back and Mouse5 goes forward through view and collection history." Foreground="{DynamicResource TextMutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel></Border>
+                    <TextBlock Text="{Binding SettingsWorkspace.ShortcutStatus}" Foreground="{DynamicResource TextMutedBrush}" FontSize="10" Margin="2,12,0,0"/>
+                    <WrapPanel Margin="0,12,0,0"><Button Style="{StaticResource PrimaryButton}" Content="Apply shortcuts" Click="ApplyShortcuts_Click" Margin="0,0,8,8"/><Button Content="Revert" Click="RevertShortcuts_Click" Margin="0,0,8,8"/><Button Content="Default preset" Click="ResetShortcuts_Click" Margin="0,0,8,8"/><Button Content="Import preset..." Click="ImportShortcuts_Click" Margin="0,0,8,8"/><Button Content="Export preset..." Click="ExportShortcuts_Click" Margin="0,0,8,8"/></WrapPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </TabItem>
+        <TabItem Header="About">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" ui:SmoothScrollBehavior.Enabled="True">
+                <StackPanel Margin="34,28">
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,24"><Image Source="Assets/Brand/dextromethorphan-symbol.png" Width="68" Height="68"/><StackPanel Margin="16,0,0,0" VerticalAlignment="Center"><TextBlock Text="dextromethorphan" FontSize="25" FontWeight="SemiBold"/><TextBlock Text="MUSIC PLAYER" Foreground="{DynamicResource TextMutedBrush}" FontSize="10" Margin="1,4,0,0"/></StackPanel></StackPanel>
+                    <Border Style="{StaticResource Card}" Padding="18">
+                        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="150"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                            <TextBlock Text="Version" Foreground="{DynamicResource TextMutedBrush}"/><TextBlock Grid.Column="1" Text="{Binding SettingsWorkspace.ApplicationVersion}"/>
+                            <TextBlock Grid.Row="1" Text="Build" Foreground="{DynamicResource TextMutedBrush}" Margin="0,8,0,0"/><TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding SettingsWorkspace.BuildCommit}" Margin="0,8,0,0"/>
+                            <TextBlock Grid.Row="2" Text="Runtime" Foreground="{DynamicResource TextMutedBrush}" Margin="0,8,0,0"/><TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding SettingsWorkspace.RuntimeDescription}" Margin="0,8,0,0"/>
+                            <TextBlock Grid.Row="3" Text="Updates" Foreground="{DynamicResource TextMutedBrush}" Margin="0,8,0,0"/><TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding SettingsWorkspace.UpdateStatus}" Margin="0,8,0,0"/>
+                        </Grid>
+                    </Border>
+                    <Border Style="{StaticResource Card}" Padding="18" Margin="0,12,0,0"><StackPanel><TextBlock Text="Privacy" FontWeight="SemiBold"/><TextBlock Text="{Binding SettingsWorkspace.PrivacySummary}" Foreground="{DynamicResource TextMutedBrush}" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel></Border>
+                    <WrapPanel Margin="0,12,0,0"><Button Content="Open app data" Click="OpenAppData_Click" Margin="0,0,8,8"/><Button Content="Open logs" Click="OpenLogs_Click" Margin="0,0,8,8"/><Button Content="Open licenses" Click="OpenLicenses_Click" Margin="0,0,8,8"/><Button Content="Project on GitHub" Click="OpenProject_Click" Margin="0,0,8,8"/></WrapPanel>
+                </StackPanel>
+            </ScrollViewer>
         </TabItem>
     </TabControl>
         </Grid>

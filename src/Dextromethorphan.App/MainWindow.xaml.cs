@@ -108,6 +108,7 @@ public partial class MainWindow : Window
         ViewModel.NavigationStarting += ViewModelOnNavigationStarting;
         ViewModel.MetadataEditRequested += ViewModel_MetadataEditRequested;
         ViewModel.PlaylistEditRequested += ViewModel_PlaylistEditRequested;
+        ViewModel.SearchFocusRequested += ViewModel_SearchFocusRequested;
         AddHandler(ContextMenuService.ContextMenuOpeningEvent, new ContextMenuEventHandler(ContextMenu_Opening));
         PreviewMouseMove += RecordUserInteraction;
         PreviewMouseWheel += RecordUserInteraction;
@@ -143,10 +144,23 @@ public partial class MainWindow : Window
 
     private async void ViewModel_MetadataEditRequested(object? sender, EventArgs e)
     {
-        var request = MetadataEditDialog.Show(this, ViewModel.SelectedTracks, _metadataMatcher);
+        var request = MetadataEditDialog.Show(
+            this,
+            ViewModel.SelectedTracks,
+            _metadataMatcher,
+            ViewModel.SettingsWorkspace.DefaultMetadataWriteMode);
         if (request is null) return;
         try { await ViewModel.ApplyMetadataAsync(ViewModel.SelectedTracks, request.Patch, request.Mode); }
         catch (Exception exception) { ErrorDialog.Show(this, exception, "", true, "Metadata could not be updated"); }
+    }
+
+    private void ViewModel_SearchFocusRequested(object? sender, EventArgs e)
+    {
+        if (WindowState == WindowState.Minimized)
+            WindowState = WindowState.Normal;
+        Activate();
+        SearchBox.Focus();
+        SearchBox.SelectAll();
     }
 
     private async void ViewModel_PlaylistEditRequested(object? sender, PlaylistEditContext context)
@@ -2046,6 +2060,9 @@ public partial class MainWindow : Window
     }
 
     private void Settings_Click(object sender, RoutedEventArgs e)
+        => OpenSettingsWindow();
+
+    internal void OpenSettingsWindow()
     {
         try
         {
@@ -2241,8 +2258,13 @@ public partial class MainWindow : Window
         if (WindowChrome.GetWindowChrome(this) is { } chrome)
             chrome.ResizeBorderThickness = new Thickness(0);
         RootBorder.BorderThickness = new Thickness(0);
-        TitleBarHost.Visibility = Visibility.Collapsed;
-        TitleBarRow.Height = new GridLength(0);
+        var hideNavigation = ViewModel.SettingsWorkspace.FullscreenHideNavigation;
+        TitleBarHost.Visibility = hideNavigation
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        TitleBarRow.Height = hideNavigation
+            ? new GridLength(0)
+            : new GridLength(63);
         Left = monitorBounds.Left;
         Top = monitorBounds.Top;
         Width = monitorBounds.Width;
@@ -2422,6 +2444,7 @@ public partial class MainWindow : Window
         ViewModel.Queue.CollectionChanged -= QueueCollectionChanged;
         ViewModel.PropertyChanged -= ViewModelOnPropertyChanged;
         ViewModel.NavigationStarting -= ViewModelOnNavigationStarting;
+        ViewModel.SearchFocusRequested -= ViewModel_SearchFocusRequested;
         _allowClose = true;
         Application.Current.Shutdown();
     }
@@ -2441,6 +2464,7 @@ public partial class MainWindow : Window
         ViewModel.Queue.CollectionChanged -= QueueCollectionChanged;
         ViewModel.PropertyChanged -= ViewModelOnPropertyChanged;
         ViewModel.NavigationStarting -= ViewModelOnNavigationStarting;
+        ViewModel.SearchFocusRequested -= ViewModel_SearchFocusRequested;
         _allowClose = true;
         Application.Current.Shutdown();
     }

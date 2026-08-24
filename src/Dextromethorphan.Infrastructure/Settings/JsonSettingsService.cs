@@ -240,14 +240,28 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
             "Amoled" or "AMOLED" => "Amoled",
             _ => "Dark"
         };
-        settings.AccentColor = NormalizeColor(settings.AccentColor, "#FF8A3D");
+        settings.AccentColor = NormalizeOpaqueColor(
+            previousSchema < 9
+            && string.Equals(
+                settings.AccentColor,
+                "#FF8A3D",
+                StringComparison.OrdinalIgnoreCase)
+                ? "#8290FF"
+                : settings.AccentColor,
+            "#8290FF");
         settings.FontFamily = NormalizeText(
             settings.FontFamily,
             "Segoe UI Variable Text",
             128);
         settings.Volume = FiniteClamp(settings.Volume, 0, 1, 0.82);
         settings.FontSize = FiniteClamp(settings.FontSize, 9, 32, 14);
+        settings.BackgroundOpacity = FiniteClamp(
+            settings.BackgroundOpacity,
+            0.72,
+            1,
+            1);
         settings.AlbumTileSize = Math.Clamp(settings.AlbumTileSize, 80, 400);
+        settings.QueuePanelWidth = Math.Clamp(settings.QueuePanelWidth, 280, 520);
         settings.ViewSettings ??= new Dictionary<string, ViewSettings>(StringComparer.OrdinalIgnoreCase);
         var normalizedViews = new Dictionary<string, ViewSettings>(StringComparer.OrdinalIgnoreCase);
         foreach (var pair in settings.ViewSettings.Take(32))
@@ -340,6 +354,8 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
             .ToList();
         settings.ScheduledLibraryScanIntervalMinutes = Math.Clamp(settings.ScheduledLibraryScanIntervalMinutes, 15, 1440);
         settings.MultiValueSeparators = NormalizeSeparators(settings.MultiValueSeparators);
+        if (!Enum.IsDefined(settings.DefaultMetadataWriteMode))
+            settings.DefaultMetadataWriteMode = MetadataWriteMode.DatabaseOnly;
         settings.DiscogsUserToken = NormalizeText(settings.DiscogsUserToken, "", 512);
         settings.MetadataCacheDays = Math.Clamp(settings.MetadataCacheDays, 1, 3650);
         if (!Enum.IsDefined(settings.LyricsDisplayMode)) settings.LyricsDisplayMode = LyricsDisplayMode.Automatic;
@@ -442,11 +458,16 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
                 target.AccentColor = defaults.AccentColor;
                 target.FontFamily = defaults.FontFamily;
                 target.FontSize = defaults.FontSize;
+                target.BackgroundOpacity = defaults.BackgroundOpacity;
                 target.AnimationsEnabled = defaults.AnimationsEnabled;
+                target.VisualizerEnabled = defaults.VisualizerEnabled;
                 target.AlbumTileSize = defaults.AlbumTileSize;
                 target.ViewSettings = defaults.ViewSettings;
                 target.DashboardModules = defaults.DashboardModules;
                 target.QueuePanelVisible = defaults.QueuePanelVisible;
+                target.QueuePanelWidth = defaults.QueuePanelWidth;
+                target.FullscreenHideNavigation =
+                    defaults.FullscreenHideNavigation;
                 target.ArtworkCacheMegabytes =
                     defaults.ArtworkCacheMegabytes;
                 break;
@@ -481,9 +502,21 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
                 target.ScheduledLibraryScanIntervalMinutes = defaults.ScheduledLibraryScanIntervalMinutes;
                 target.AllowScheduledScanOnBattery = defaults.AllowScheduledScanOnBattery;
                 target.AllowScheduledScanOnMeteredNetwork = defaults.AllowScheduledScanOnMeteredNetwork;
-                target.MultiValueSeparators = defaults.MultiValueSeparators;
                 target.ArtworkCacheMegabytes =
                     defaults.ArtworkCacheMegabytes;
+                break;
+            case SettingsResetScope.Metadata:
+                target.MultiValueSeparators = defaults.MultiValueSeparators;
+                target.DefaultMetadataWriteMode =
+                    defaults.DefaultMetadataWriteMode;
+                target.MetadataLookupEnabled =
+                    defaults.MetadataLookupEnabled;
+                target.MusicBrainzLookupEnabled =
+                    defaults.MusicBrainzLookupEnabled;
+                target.DiscogsLookupEnabled =
+                    defaults.DiscogsLookupEnabled;
+                target.DiscogsUserToken = defaults.DiscogsUserToken;
+                target.MetadataCacheDays = defaults.MetadataCacheDays;
                 break;
             case SettingsResetScope.Shortcuts:
                 target.Shortcuts = defaults.Shortcuts;
@@ -729,6 +762,16 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
                     or >= 'A' and <= 'F')
             ? color.ToUpperInvariant()
             : fallback;
+    }
+
+    private static string NormalizeOpaqueColor(
+        string? value,
+        string fallback)
+    {
+        var normalized = NormalizeColor(value, fallback);
+        return normalized.Length == 9
+            ? "#" + normalized[3..]
+            : normalized;
     }
 
     private sealed class ShortcutIdentityComparer

@@ -1,5 +1,4 @@
 using System.Runtime.InteropServices;
-using System.Windows;
 using System.Windows.Interop;
 using Dextromethorphan.Core.Abstractions;
 using Dextromethorphan.Core.Models;
@@ -14,6 +13,7 @@ public sealed class WindowsShortcutService : IShortcutService
     private readonly Dictionary<int, string> _globalActions = [];
     private readonly Dictionary<ShortcutGesture, string> _inAppActions = [];
     private readonly List<ShortcutRegistrationResult> _registrations = [];
+    private ShortcutBindingSnapshot[] _bindingSnapshot;
     private HwndSource? _source;
     private nint _windowHandle;
     private int _nextId = 0x4000;
@@ -22,11 +22,13 @@ public sealed class WindowsShortcutService : IShortcutService
     public WindowsShortcutService(ISettingsService settings)
     {
         _settings = settings;
+        _bindingSnapshot = CaptureBindings(settings.Current.Shortcuts);
         _settings.Changed += SettingsOnChanged;
     }
 
     public event EventHandler<string>? ActionInvoked;
     public IReadOnlyList<ShortcutRegistrationResult> Registrations => _registrations;
+    internal int RegistrationGeneration { get; private set; }
 
     public void Attach(nint windowHandle)
     {
@@ -43,6 +45,13 @@ public sealed class WindowsShortcutService : IShortcutService
     public void Refresh(IEnumerable<ShortcutBinding> bindings)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        RefreshCore(CaptureBindings(bindings));
+    }
+
+    private void RefreshCore(IReadOnlyList<ShortcutBindingSnapshot> bindings)
+    {
+        _bindingSnapshot = bindings.ToArray();
+        RegistrationGeneration++;
         UnregisterAll();
         _inAppActions.Clear();
         _registrations.Clear();
@@ -100,11 +109,40 @@ public sealed class WindowsShortcutService : IShortcutService
 
     private void SettingsOnChanged(object? sender, AppSettings settings)
     {
-        if (Application.Current?.Dispatcher is { } dispatcher && !dispatcher.CheckAccess())
-            dispatcher.BeginInvoke(() => Refresh(settings.Shortcuts));
-        else
-            Refresh(settings.Shortcuts);
+        var snapshot = CaptureBindings(settings.Shortcuts);
+        if (_source?.Dispatcher is { } dispatcher && !dispatcher.CheckAccess())
+        {
+            dispatcher.BeginInvoke(() => RefreshIfChanged(snapshot));
+            return;
+        }
+
+        RefreshIfChanged(snapshot);
     }
+
+    private void RefreshIfChanged(ShortcutBindingSnapshot[] snapshot)
+    {
+        if (_disposed || BindingsMatch(snapshot, _bindingSnapshot)) return;
+        RefreshCore(snapshot);
+    }
+
+    private static ShortcutBindingSnapshot[] CaptureBindings(
+        IEnumerable<ShortcutBinding> bindings)
+    {
+        ArgumentNullException.ThrowIfNull(bindings);
+        return bindings
+            .Select(binding => new ShortcutBindingSnapshot(
+                binding.Action,
+                binding.Gesture,
+                binding.Global,
+                binding.Enabled))
+            .ToArray();
+    }
+
+    private static bool BindingsMatch(
+        IReadOnlyList<ShortcutBindingSnapshot> left,
+        IReadOnlyList<ShortcutBindingSnapshot> right) =>
+        left.Count == right.Count
+        && left.SequenceEqual(right);
 
     private void UnregisterAll()
     {
@@ -137,4 +175,10 @@ public sealed class WindowsShortcutService : IShortcutService
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool UnregisterHotKey(nint windowHandle, int id);
+
+    private readonly record struct ShortcutBindingSnapshot(
+        string Action,
+        string Gesture,
+        bool Global,
+        bool Enabled);
 }

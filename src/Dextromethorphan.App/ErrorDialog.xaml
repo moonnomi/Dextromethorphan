@@ -10,11 +10,11 @@
         WindowStyle="None"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
-        Background="{StaticResource AppBackgroundBrush}">
+        Background="{DynamicResource AppBackgroundBrush}">
     <shell:WindowChrome.WindowChrome>
         <shell:WindowChrome CaptionHeight="46" ResizeBorderThickness="0" GlassFrameThickness="0" CornerRadius="12"/>
     </shell:WindowChrome.WindowChrome>
-    <Border BorderBrush="{StaticResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="24">
+    <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="24">
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
@@ -29,13 +29,13 @@
                 </Grid.ColumnDefinitions>
                 <StackPanel>
                     <TextBlock Text="Dextromethorphan encountered a problem" FontSize="20" FontWeight="SemiBold"/>
-                    <TextBlock Text="{Binding ContextText}" Foreground="{StaticResource TextMutedBrush}" FontSize="11" Margin="0,4,0,0"/>
+                    <TextBlock Text="{Binding ContextText}" Foreground="{DynamicResource TextMutedBrush}" FontSize="11" Margin="0,4,0,0"/>
                 </StackPanel>
                 <Button Grid.Column="1" Style="{StaticResource IconButton}" Content="&#xE711;" Click="Exit_Click" ToolTip="Close"/>
             </Grid>
             <TextBlock Grid.Row="1" Text="{Binding MessageText}" TextWrapping="Wrap" FontSize="14" Margin="0,22,0,0"/>
             <Expander Grid.Row="2" Header="Technical details" Margin="0,18,0,0">
-                <Border Background="{StaticResource SurfaceRaisedBrush}" CornerRadius="8" Padding="12" Margin="0,8,0,0" MaxHeight="320">
+                <Border Background="{DynamicResource SurfaceRaisedBrush}" CornerRadius="8" Padding="12" Margin="0,8,0,0" MaxHeight="320">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <TextBox Text="{Binding DetailsText, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0" Background="Transparent" FontFamily="Cascadia Mono" FontSize="10"/>
                     </ScrollViewer>

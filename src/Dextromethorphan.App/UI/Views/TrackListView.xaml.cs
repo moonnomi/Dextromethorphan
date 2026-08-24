@@ -50,45 +50,30 @@ public partial class TrackListView : UserControl
 
     private void ApplyRowLayout(Grid? row)
     {
-        if (row is null || DataContext is not MainViewModel viewModel || row.ColumnDefinitions.Count < 6) return;
-        var defaults = new[] { "Track", "Title", "Album", "Quality", "Rating", "Duration" };
-        var order = viewModel.TrackColumnOrder
-            .Where(column => defaults.Contains(column, StringComparer.OrdinalIgnoreCase))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Concat(defaults)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(defaults.Length)
-            .ToArray();
-        var children = row.Children.Cast<UIElement>().ToArray();
-        var semanticIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+        if (row is null
+            || DataContext is not MainViewModel viewModel
+            || row.ColumnDefinitions.Count < TrackListColumnLayout.ColumnNames.Count)
+            return;
+        var children = row.Children
+            .OfType<FrameworkElement>()
+            .Where(child => child.Tag is string)
+            .ToDictionary(
+                child => (string)child.Tag,
+                StringComparer.OrdinalIgnoreCase);
+        var layout = TrackListColumnLayout.Resolve(
+            viewModel.TrackColumnOrder,
+            viewModel.VisibleTrackColumns,
+            viewModel.TrackColumnWidths);
+        foreach (var column in layout)
         {
-            ["Track"] = 0, ["Title"] = 1, ["Album"] = 2, ["Quality"] = 3, ["Rating"] = 4, ["Duration"] = 5
-        };
-        var defaultWidths = new GridLength[]
-        {
-            new(36), new(1.8, GridUnitType.Star), new(1.05, GridUnitType.Star), new(146), new(112), new(58)
-        };
-        for (var position = 0; position < order.Length; position++)
-        {
-            var key = order[position];
-            var child = children[semanticIndex[key]];
-            Grid.SetColumn(child, position);
-            var definition = row.ColumnDefinitions[position];
-            definition.Width = !IsColumnVisible(viewModel, key)
-                ? new GridLength(0)
-                : viewModel.TrackColumnWidths.TryGetValue(key, out var width)
-                    ? new GridLength(width)
-                    : defaultWidths[semanticIndex[key]];
+            row.ColumnDefinitions[column.DisplayIndex].Width = column.Width;
+            if (!children.TryGetValue(column.Name, out var child)) continue;
+            Grid.SetColumn(child, column.DisplayIndex);
+            child.Visibility = column.IsVisible
+                ? Visibility.Visible
+                : Visibility.Collapsed;
         }
     }
-
-    private static bool IsColumnVisible(MainViewModel viewModel, string key) => key switch
-    {
-        "Title" => viewModel.VisibleTrackColumns.Contains("Title", StringComparer.OrdinalIgnoreCase) || viewModel.VisibleTrackColumns.Contains("Artist", StringComparer.OrdinalIgnoreCase),
-        "Album" => viewModel.VisibleTrackColumns.Contains("Album", StringComparer.OrdinalIgnoreCase) || viewModel.VisibleTrackColumns.Contains("Year", StringComparer.OrdinalIgnoreCase),
-        "Quality" => viewModel.VisibleTrackColumns.Contains("Quality", StringComparer.OrdinalIgnoreCase) || viewModel.VisibleTrackColumns.Contains("Codec", StringComparer.OrdinalIgnoreCase) || viewModel.VisibleTrackColumns.Contains("Source", StringComparer.OrdinalIgnoreCase),
-        _ => viewModel.VisibleTrackColumns.Contains(key, StringComparer.OrdinalIgnoreCase)
-    };
 
     private static T? FindVisualChild<T>(DependencyObject root) where T : DependencyObject
     {

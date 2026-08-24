@@ -18,6 +18,16 @@
     <Resource Include="Assets\Brand\dextromethorphan-128.png" />
     <Resource Include="Assets\Brand\dextromethorphan-256.png" />
     <Resource Include="Assets\Brand\dextromethorphan.ico" />
+    <Content Include="..\..\docs\THIRD-PARTY-NOTICES.md">
+      <Link>licenses\THIRD-PARTY-NOTICES.md</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+    <Content Include="..\..\native\Dextromethorphan.DstDecoder\licenses\dst-decoder-Apache-2.0.txt">
+      <Link>licenses\dst-decoder-Apache-2.0.txt</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../Dextromethorphan.Core/Dextromethorphan.Core.csproj" />

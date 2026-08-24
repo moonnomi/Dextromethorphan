@@ -87,7 +87,7 @@ public sealed class UserDataBackupServiceTests : IDisposable
         var restored = Assert.Single(
             await library.GetAllAsync(cancellationToken));
         Assert.Equal("Amoled", settings.Current.Theme);
-        Assert.Equal("#FF123456", settings.Current.AccentColor);
+        Assert.Equal("#123456", settings.Current.AccentColor);
         Assert.Equal(5, restored.Rating);
         Assert.True(restored.IsLoved);
         Assert.Equal(

@@ -2,12 +2,13 @@ namespace Dextromethorphan.Core.Models;
 
 public sealed class AppSettings
 {
-    public const int CurrentSchemaVersion = 8;
+    public const int CurrentSchemaVersion = 9;
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public string Theme { get; set; } = "Dark";
-    public string AccentColor { get; set; } = "#FF8A3D";
+    public string AccentColor { get; set; } = "#8290FF";
     public string FontFamily { get; set; } = "Segoe UI Variable Text";
     public double FontSize { get; set; } = 14;
+    public double BackgroundOpacity { get; set; } = 1;
     public bool AnimationsEnabled { get; set; } = true;
     public bool VisualizerEnabled { get; set; }
     public bool ResumeOnStartup { get; set; } = true;
@@ -37,6 +38,8 @@ public sealed class AppSettings
     public List<string> SearchHistory { get; set; } = [];
     public int ArtworkCacheMegabytes { get; set; } = 512;
     public bool QueuePanelVisible { get; set; } = true;
+    public int QueuePanelWidth { get; set; } = 320;
+    public bool FullscreenHideNavigation { get; set; } = true;
     public List<string> LibraryFolders { get; set; } = [];
     public List<string> ExcludedFolders { get; set; } = [];
     public List<LibrarySourceSettings> LibrarySources { get; set; } = [];
@@ -45,6 +48,7 @@ public sealed class AppSettings
     public bool AllowScheduledScanOnBattery { get; set; }
     public bool AllowScheduledScanOnMeteredNetwork { get; set; }
     public string MultiValueSeparators { get; set; } = ";/";
+    public MetadataWriteMode DefaultMetadataWriteMode { get; set; } = MetadataWriteMode.DatabaseOnly;
     public bool MetadataLookupEnabled { get; set; }
     public bool MusicBrainzLookupEnabled { get; set; }
     public bool DiscogsLookupEnabled { get; set; }
@@ -133,6 +137,7 @@ public enum SettingsResetScope
     Appearance,
     Playback,
     Library,
+    Metadata,
     Shortcuts,
     Session,
     Lyrics,

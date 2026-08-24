@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Dextromethorphan.App.WindowsIntegration;
 using Dextromethorphan.Core.Models;
 using Dextromethorphan.Infrastructure.Settings;
 using Dextromethorphan.Infrastructure.Storage;
@@ -83,6 +84,56 @@ public sealed class ShortcutTests : IDisposable
         Assert.Equal(3, settings.Current.Shortcuts.Count);
         Assert.Equal("Ctrl+P", settings.Current.Shortcuts[0].Gesture);
         Assert.Equal("NotAKey", settings.Current.Shortcuts[2].Gesture);
+    }
+
+    [Fact]
+    public async Task UnrelatedSettingsChangesDoNotRebuildShortcutRegistrations()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var settings = new JsonSettingsService(new AppPaths(_root));
+        await settings.InitializeAsync(cancellationToken);
+        using var shortcuts = new WindowsShortcutService(settings);
+        shortcuts.Refresh(settings.Current.Shortcuts);
+        var generation = shortcuts.RegistrationGeneration;
+
+        await settings.UpdateAsync(value =>
+        {
+            value.Volume = 0.37;
+            value.Theme = "Amoled";
+            value.AnimationsEnabled = !value.AnimationsEnabled;
+        }, cancellationToken);
+
+        Assert.Equal(generation, shortcuts.RegistrationGeneration);
+        Assert.True(ShortcutGesture.TryParse("Space", out var gesture));
+        Assert.True(shortcuts.TryGetInAppAction(gesture, out var action));
+        Assert.Equal(ShortcutActions.TogglePlayback, action);
+    }
+
+    [Fact]
+    public async Task ShortcutValueChangesRebuildRegistrations()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var settings = new JsonSettingsService(new AppPaths(_root));
+        await settings.InitializeAsync(cancellationToken);
+        using var shortcuts = new WindowsShortcutService(settings);
+        shortcuts.Refresh(settings.Current.Shortcuts);
+        var generation = shortcuts.RegistrationGeneration;
+
+        await settings.UpdateAsync(
+            value => value.Shortcuts[0].Gesture = "Ctrl+P",
+            cancellationToken);
+
+        Assert.Equal(generation + 1, shortcuts.RegistrationGeneration);
+        Assert.True(ShortcutGesture.TryParse("Ctrl+P", out var gesture));
+        Assert.True(shortcuts.TryGetInAppAction(gesture, out var action));
+        Assert.Equal(ShortcutActions.TogglePlayback, action);
+
+        await settings.UpdateAsync(
+            value => value.Shortcuts[0].Enabled = false,
+            cancellationToken);
+
+        Assert.Equal(generation + 2, shortcuts.RegistrationGeneration);
+        Assert.False(shortcuts.TryGetInAppAction(gesture, out _));
     }
 
     public void Dispose()

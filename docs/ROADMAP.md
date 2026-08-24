@@ -279,16 +279,18 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 
 ## Milestone 6 — complete settings and customization
 
-- [ ] **P1 SET-001** Expose every existing `AppSettings` value in the UI; no important option should require JSON editing.
-- [ ] **P1 SET-002** Add live Dark, Light, and AMOLED themes with a working accent picker and contrast validation.
-- [ ] **P1 SET-003** Add font family/size, density, background opacity, animation, fullscreen, and queue-panel controls.
-- [ ] **P1 SET-004** Add complete playback transition, fade, resume, stop, ReplayGain, speed, pitch, and clipping controls.
-- [ ] **P1 SET-005** Add complete library source, exclusion, watcher, scan, cache, and tag-writing controls.
-- [ ] **P1 SET-006** Add a shortcut editor with capture, validation, conflicts, global/in-app scope, enable/disable, reset, and import/export.
-- [ ] **P1 SET-007** Add per-view sorting, filters, cover size, columns, density, and reset-to-default.
-- [ ] **P1 SET-008** Add Apply/Cancel semantics where changes are risky; keep safe visual changes live.
-- [ ] **P1 SET-009** Add search within Settings and link diagnostics/help from relevant controls.
-- [ ] **P1 SET-010** Add About with version, runtime, build commit, app-data paths, licenses, privacy, and update status.
+**Status (2026-08-24): complete.** See [Settings and customization](SETTINGS.md) and the [Milestone 6 status report](MILESTONE-6-STATUS-2026-08-24.md). Physical-DAC qualification remains tracked separately in Milestone 3.
+
+- [x] **P1 SET-001** Expose every existing `AppSettings` value in the UI; no important option should require JSON editing.
+- [x] **P1 SET-002** Add live Dark, Light, and AMOLED themes with a working accent picker and contrast validation.
+- [x] **P1 SET-003** Add font family/size, density, background opacity, animation, fullscreen, and queue-panel controls.
+- [x] **P1 SET-004** Add complete playback transition, fade, resume, stop, ReplayGain, speed, pitch, and clipping controls.
+- [x] **P1 SET-005** Add complete library source, exclusion, watcher, scan, cache, and tag-writing controls.
+- [x] **P1 SET-006** Add a shortcut editor with capture, validation, conflicts, global/in-app scope, enable/disable, reset, and import/export.
+- [x] **P1 SET-007** Add per-view sorting, filters, cover size, columns, density, and reset-to-default.
+- [x] **P1 SET-008** Add Apply/Cancel semantics where changes are risky; keep safe visual changes live.
+- [x] **P1 SET-009** Add search within Settings and link diagnostics/help from relevant controls.
+- [x] **P1 SET-010** Add About with version, runtime, build commit, app-data paths, licenses, privacy, and update status.
 
 ---
 

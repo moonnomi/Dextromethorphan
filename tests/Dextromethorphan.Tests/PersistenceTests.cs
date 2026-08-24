@@ -133,7 +133,7 @@ public sealed class PersistenceTests : IDisposable
         JsonSettingsService.Normalize(settings);
 
         Assert.Equal("Dark", settings.Theme);
-        Assert.Equal("#FF8A3D", settings.AccentColor);
+        Assert.Equal("#8290FF", settings.AccentColor);
         Assert.Equal("Segoe UI Variable Text", settings.FontFamily);
         Assert.Equal(14, settings.FontSize);
         Assert.Equal(0.82, settings.Volume);
