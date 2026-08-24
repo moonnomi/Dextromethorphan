@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -73,6 +74,10 @@ public partial class PlaylistEditDialog : Window
         var op = new ComboBox { Width = 130, ItemsSource = Operators, SelectedItem = condition?.Operator ?? SmartOperator.Contains, Margin = new Thickness(0, 0, 6, 0) };
         var value = new TextBox { Width = 165, Text = condition?.Value ?? string.Empty, Margin = new Thickness(0, 0, 6, 0) };
         var remove = new Button { Content = "×", Width = 28, Padding = new Thickness(0) };
+        AutomationProperties.SetName(field, "Smart rule field");
+        AutomationProperties.SetName(op, "Smart rule operator");
+        AutomationProperties.SetName(value, "Smart rule comparison value");
+        AutomationProperties.SetName(remove, "Remove smart playlist rule");
         remove.Click += (_, _) => { ConditionsHost.Children.Remove(row); _rows.RemoveAll(item => ReferenceEquals(item.Field, field)); };
         row.Children.Add(field); row.Children.Add(op); row.Children.Add(value); row.Children.Add(remove); ConditionsHost.Children.Add(row); _rows.Add((field, op, value));
     }

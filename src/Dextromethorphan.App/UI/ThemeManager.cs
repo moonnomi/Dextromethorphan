@@ -72,6 +72,8 @@ public sealed record ThemePalette(
 /// </summary>
 public static class ThemeManager
 {
+    private static readonly object RequestedThemeConfigurationKey = new();
+
     public const double MinimumAccentContrast = 4.5;
     public const string DefaultTheme = "Dark";
     public const string DefaultAccent = "#8290FF";
@@ -372,6 +374,81 @@ public static class ThemeManager
             return application.Dispatcher.Invoke(
                 () => ApplyToApplication(application, configuration));
 
+        // Keep the user's most recent selection even while Windows owns the
+        // palette. This lets High Contrast remain authoritative without losing
+        // live changes made in Settings, and gives the coordinator an exact
+        // theme to restore when High Contrast is turned off.
+        application.Properties[RequestedThemeConfigurationKey] = configuration;
+        if (SystemParameters.HighContrast)
+        {
+            var requestedPalette = CreatePalette(configuration);
+            ApplyHighContrastToApplication(application, configuration);
+            return requestedPalette;
+        }
+
+        return ApplyStandardToApplication(application, configuration);
+    }
+
+    internal static void ApplyHighContrastToApplication(
+        Application application)
+    {
+        ArgumentNullException.ThrowIfNull(application);
+        if (!application.Dispatcher.CheckAccess())
+        {
+            application.Dispatcher.Invoke(
+                () => ApplyHighContrastToApplication(application));
+            return;
+        }
+
+        var configuration = application.Properties[RequestedThemeConfigurationKey]
+            as ThemeConfiguration
+            ?? new ThemeConfiguration(
+                DefaultTheme,
+                DefaultAccent,
+                DefaultFontFamily,
+                DefaultFontSize);
+        ApplyHighContrastToApplication(application, configuration);
+    }
+
+    internal static void RestoreRequestedTheme(Application application)
+    {
+        ArgumentNullException.ThrowIfNull(application);
+        if (!application.Dispatcher.CheckAccess())
+        {
+            application.Dispatcher.Invoke(
+                () => RestoreRequestedTheme(application));
+            return;
+        }
+
+        if (SystemParameters.HighContrast) return;
+        var configuration = application.Properties[RequestedThemeConfigurationKey]
+            as ThemeConfiguration;
+        if (configuration is not null)
+            ApplyStandardToApplication(application, configuration);
+    }
+
+    internal static void ApplyHighContrast(
+        ResourceDictionary resources,
+        HighContrastThemePalette palette,
+        string? fontFamily = DefaultFontFamily,
+        double fontSize = DefaultFontSize)
+    {
+        ArgumentNullException.ThrowIfNull(resources);
+        ArgumentNullException.ThrowIfNull(palette);
+        ApplyHighContrastRecursive(
+            resources,
+            palette,
+            NormalizeFontFamily(fontFamily),
+            NormalizeFontSize(fontSize),
+            new HashSet<ResourceDictionary>(
+                ReferenceEqualityComparer.Instance),
+            ensureAllResources: true);
+    }
+
+    private static ThemePalette ApplyStandardToApplication(
+        Application application,
+        ThemeConfiguration configuration)
+    {
         var palette = Apply(application.Resources, configuration);
         var font = new FontFamily(NormalizeFontFamily(configuration.FontFamily));
         var size = NormalizeFontSize(configuration.FontSize);
@@ -385,6 +462,29 @@ public static class ThemeManager
             window.InvalidateVisual();
         }
         return palette;
+    }
+
+    private static void ApplyHighContrastToApplication(
+        Application application,
+        ThemeConfiguration configuration)
+    {
+        var palette = HighContrastThemePalette.FromSystemColors();
+        var font = new FontFamily(NormalizeFontFamily(configuration.FontFamily));
+        var size = NormalizeFontSize(configuration.FontSize);
+        ApplyHighContrast(
+            application.Resources,
+            palette,
+            font.Source,
+            size);
+        foreach (Window window in application.Windows)
+        {
+            ApplyHighContrast(window.Resources, palette, font.Source, size);
+            window.Background = SystemColors.WindowBrush;
+            window.Foreground = SystemColors.WindowTextBrush;
+            window.FontFamily = font;
+            window.FontSize = size;
+            window.InvalidateVisual();
+        }
     }
 
     public static ThemePalette ApplyToApplication(
@@ -451,6 +551,48 @@ public static class ThemeManager
             resources["PlayerGradient"] = CreatePlayerGradient(palette);
     }
 
+    private static void ApplyHighContrastRecursive(
+        ResourceDictionary resources,
+        HighContrastThemePalette palette,
+        string fontFamily,
+        double fontSize,
+        HashSet<ResourceDictionary> visited,
+        bool ensureAllResources)
+    {
+        if (!visited.Add(resources)) return;
+        foreach (var merged in resources.MergedDictionaries)
+            ApplyHighContrastRecursive(
+                merged,
+                palette,
+                fontFamily,
+                fontSize,
+                visited,
+                ensureAllResources: false);
+
+        foreach (var pair in HighContrastColorResources(palette))
+            if (ensureAllResources || resources.Contains(pair.Key))
+                resources[pair.Key] = pair.Value;
+
+        foreach (var pair in HighContrastBrushResources(palette))
+            if (ensureAllResources || resources.Contains(pair.Key))
+                resources[pair.Key] = new SolidColorBrush(pair.Value);
+
+        if (ensureAllResources || resources.Contains(FontFamilyResourceKey))
+            resources[FontFamilyResourceKey] = new FontFamily(fontFamily);
+        if (ensureAllResources || resources.Contains(FontSizeResourceKey))
+            resources[FontSizeResourceKey] = fontSize;
+        if (ensureAllResources || resources.Contains(BackgroundOpacityResourceKey))
+            resources[BackgroundOpacityResourceKey] = 1d;
+
+        // Decorative gradients can obscure system-selected foregrounds. A
+        // single system color keeps the same resource contract while leaving
+        // selection and player surfaces legible.
+        if (resources.Contains("AccentGradient"))
+            resources["AccentGradient"] = new SolidColorBrush(palette.Highlight);
+        if (resources.Contains("PlayerGradient"))
+            resources["PlayerGradient"] = new SolidColorBrush(palette.Window);
+    }
+
     private static IReadOnlyDictionary<string, Color> ColorResources(
         ThemePalette palette) => new Dictionary<string, Color>
         {
@@ -478,7 +620,51 @@ public static class ThemeManager
             ["TextMutedBrush"] = palette.TextMuted,
             ["AccentBrush"] = palette.Accent,
             ["AccentSoftBrush"] = palette.AccentSoft,
-            [AccentForegroundBrushResourceKey] = palette.AccentForeground
+            [AccentForegroundBrushResourceKey] = palette.AccentForeground,
+            ["WarningBrush"] = Color.FromRgb(95, 59, 0),
+            ["WarningSoftBrush"] = Color.FromRgb(255, 241, 194),
+            ["ErrorBrush"] = Color.FromRgb(123, 30, 43),
+            ["ErrorSoftBrush"] = Color.FromRgb(255, 228, 232),
+            ["SuccessBrush"] = Color.FromRgb(20, 91, 60),
+            ["SuccessSoftBrush"] = Color.FromRgb(221, 247, 234),
+            ["DangerBrush"] = Color.FromRgb(215, 53, 69)
+        };
+
+    private static IReadOnlyDictionary<string, Color> HighContrastColorResources(
+        HighContrastThemePalette palette) => new Dictionary<string, Color>
+        {
+            ["BackgroundColor"] = palette.Window,
+            ["SurfaceColor"] = palette.Window,
+            ["SurfaceRaisedColor"] = palette.Window,
+            ["SurfaceHoverColor"] = palette.Highlight,
+            ["BorderColor"] = palette.WindowText,
+            ["TextColor"] = palette.WindowText,
+            ["TextMutedColor"] = palette.GrayText,
+            ["AccentColor"] = palette.Highlight,
+            [AccentForegroundColorResourceKey] = palette.HighlightText
+        };
+
+    private static IReadOnlyDictionary<string, Color> HighContrastBrushResources(
+        HighContrastThemePalette palette) => new Dictionary<string, Color>
+        {
+            ["BackgroundBrush"] = palette.Window,
+            ["AppBackgroundBrush"] = palette.Window,
+            ["SurfaceBrush"] = palette.Window,
+            ["SurfaceRaisedBrush"] = palette.Window,
+            ["SurfaceHoverBrush"] = palette.Highlight,
+            ["BorderBrush"] = palette.WindowText,
+            ["TextBrush"] = palette.WindowText,
+            ["TextMutedBrush"] = palette.GrayText,
+            ["AccentBrush"] = palette.Highlight,
+            ["AccentSoftBrush"] = palette.Highlight,
+            [AccentForegroundBrushResourceKey] = palette.HighlightText,
+            ["WarningBrush"] = palette.WindowText,
+            ["WarningSoftBrush"] = palette.Window,
+            ["ErrorBrush"] = palette.WindowText,
+            ["ErrorSoftBrush"] = palette.Window,
+            ["SuccessBrush"] = palette.WindowText,
+            ["SuccessSoftBrush"] = palette.Window,
+            ["DangerBrush"] = palette.WindowText
         };
 
     private static void SetBrush(

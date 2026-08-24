@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 
@@ -9,6 +10,7 @@ internal static class TextPromptDialog
     public static string? Show(Window owner, string title, string label, string initialValue = "")
     {
         var input = new TextBox { Text = initialValue, MinWidth = 320, Margin = new Thickness(0, 8, 0, 18) };
+        AutomationProperties.SetName(input, label);
         var dialog = new Window
         {
             Owner = owner,
@@ -21,8 +23,12 @@ internal static class TextPromptDialog
             Background = owner.TryFindResource("BackgroundBrush") as System.Windows.Media.Brush,
             Foreground = owner.TryFindResource("TextBrush") as System.Windows.Media.Brush
         };
-        var ok = new Button { Content = "Save", MinWidth = 82, IsDefault = true };
-        var cancel = new Button { Content = "Cancel", MinWidth = 82, IsCancel = true, Margin = new Thickness(0, 0, 8, 0) };
+        var ok = new Button { Content = "_Save", MinWidth = 82, IsDefault = true };
+        var cancel = new Button { Content = "_Cancel", MinWidth = 82, IsCancel = true, Margin = new Thickness(0, 0, 8, 0) };
+        AutomationProperties.SetName(ok, "Save");
+        AutomationProperties.SetName(cancel, "Cancel");
+        AutomationProperties.SetName(dialog, title);
+        KeyboardNavigation.SetTabNavigation(dialog, KeyboardNavigationMode.Cycle);
         ok.Click += (_, _) => dialog.DialogResult = true;
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         buttons.Children.Add(cancel);

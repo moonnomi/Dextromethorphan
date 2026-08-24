@@ -73,11 +73,15 @@ public sealed class SingleInstanceCoordinatorTests : IDisposable
         await File.WriteAllBytesAsync(song, [0], cancellationToken);
         var diagnostics = Path.Combine(_root, "diagnostics");
         Directory.CreateDirectory(diagnostics);
+        var windowing = Path.Combine(_root, "windowing");
+        Directory.CreateDirectory(windowing);
 
         var result = LaunchTargetParser.Extract(
         [
             "--diagnostics-output",
             diagnostics,
+            "--windowing-smoke",
+            windowing,
             "--performance-overlay",
             song
         ]);

@@ -69,4 +69,32 @@ public sealed record Track
             return BitsPerSample > 0 ? $"{quality} · {BitsPerSample}-bit" : quality;
         }
     }
+
+    public string BitrateText => Bitrate > 0 ? $"{Bitrate:N0} kbps" : "Unknown";
+    public string ChannelText => Channels switch
+    {
+        1 => "Mono",
+        2 => "Stereo",
+        > 2 => $"{Channels} channels",
+        _ => "Unknown"
+    };
+    public string FileSizeText => FileSize switch
+    {
+        >= 1_073_741_824 => $"{FileSize / 1_073_741_824d:0.##} GB",
+        >= 1_048_576 => $"{FileSize / 1_048_576d:0.#} MB",
+        >= 1_024 => $"{FileSize / 1_024d:0.#} KB",
+        > 0 => $"{FileSize:N0} bytes",
+        _ => "Unknown"
+    };
+    public string YearText => Year > 0
+        ? Year.ToString(System.Globalization.CultureInfo.InvariantCulture)
+        : "Unknown";
+    public string GenreText => string.IsNullOrWhiteSpace(Genre) ? "Unknown" : Genre;
+    public string ReplayGainDisplayText => string.IsNullOrWhiteSpace(ReplayGainText)
+        ? "Not tagged"
+        : ReplayGainText;
+    public string PlayCountText => PlayCount.ToString("N0", System.Globalization.CultureInfo.CurrentCulture);
+    public string MetadataAutomationText =>
+        $"{Title} by {DisplayArtist}, album {DisplayAlbum}, {QualityText}, " +
+        $"{BitrateText}, {ChannelText}, duration {DurationText}, source {Path}";
 }

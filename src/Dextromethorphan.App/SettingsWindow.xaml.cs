@@ -208,7 +208,7 @@ public partial class SettingsWindow : Window
         RoutedEventArgs e)
     {
         if (DataContext is MainViewModel viewModel)
-            await RunAsync(viewModel.SaveOutputProfileAsync);
+            await RunAsync(viewModel.SaveOutputProfileAsync, "Audio output profile saved");
     }
 
     private void RevertOutputProfile_Click(object sender, RoutedEventArgs e)
@@ -220,7 +220,7 @@ public partial class SettingsWindow : Window
     private async void ApplyPlayback_Click(object sender, RoutedEventArgs e)
     {
         if (DataContext is MainViewModel viewModel)
-            await RunAsync(() => viewModel.SettingsWorkspace.ApplyPlaybackAsync());
+            await RunAsync(() => viewModel.SettingsWorkspace.ApplyPlaybackAsync(), "Playback settings applied");
     }
 
     private void RevertPlayback_Click(object sender, RoutedEventArgs e)
@@ -232,7 +232,7 @@ public partial class SettingsWindow : Window
     private async void ApplyMetadataPreferences_Click(object sender, RoutedEventArgs e)
     {
         if (DataContext is MainViewModel viewModel)
-            await RunAsync(() => viewModel.SettingsWorkspace.ApplyMetadataAsync());
+            await RunAsync(() => viewModel.SettingsWorkspace.ApplyMetadataAsync(), "Metadata settings applied");
     }
 
     private void RevertMetadataPreferences_Click(object sender, RoutedEventArgs e)
@@ -251,7 +251,7 @@ public partial class SettingsWindow : Window
     private async void ApplyViewProfile_Click(object sender, RoutedEventArgs e)
     {
         if (DataContext is MainViewModel viewModel)
-            await RunAsync(() => viewModel.SettingsWorkspace.ApplySelectedViewAsync());
+            await RunAsync(() => viewModel.SettingsWorkspace.ApplySelectedViewAsync(), "View settings applied");
     }
 
     private void RevertViewProfiles_Click(object sender, RoutedEventArgs e)
@@ -308,7 +308,7 @@ public partial class SettingsWindow : Window
     private async void ApplyShortcuts_Click(object sender, RoutedEventArgs e)
     {
         if (DataContext is MainViewModel viewModel)
-            await RunAsync(() => viewModel.SettingsWorkspace.ApplyShortcutsAsync());
+            await RunAsync(() => viewModel.SettingsWorkspace.ApplyShortcutsAsync(), "Keyboard shortcuts applied");
     }
 
     private void RevertShortcuts_Click(object sender, RoutedEventArgs e)
@@ -606,11 +606,14 @@ public partial class SettingsWindow : Window
         return null;
     }
 
-    private async Task RunAsync(Func<Task> operation)
+    private async Task RunAsync(Func<Task> operation, string? successMessage = null)
     {
         try
         {
             await operation();
+            if (!string.IsNullOrWhiteSpace(successMessage)
+                && DataContext is MainViewModel viewModel)
+                viewModel.ShowNotice(successMessage, ToastSeverity.Success);
         }
         catch (Exception exception)
         {

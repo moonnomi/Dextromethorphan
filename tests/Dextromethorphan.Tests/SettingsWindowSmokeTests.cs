@@ -51,7 +51,7 @@ public sealed class SettingsWindowSmokeTests
                 Assert.Equal(
                     expectedHeaders,
                     tabs.Items.OfType<System.Windows.Controls.TabItem>()
-                        .Select(item => item.Header?.ToString()));
+                        .Select(item => item.Header?.ToString()?.Replace("_", "")));
                 window.Show();
                 tabs.ApplyTemplate();
                 var selectedContentHost = Assert.IsType<

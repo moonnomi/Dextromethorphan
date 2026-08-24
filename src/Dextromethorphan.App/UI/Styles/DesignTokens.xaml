@@ -1,0 +1,78 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=System.Runtime">
+    <!--
+        Dextromethorphan's non-colour design primitives. Palette resources stay
+        in Theme.xaml because ThemeManager replaces them at runtime. These
+        values are deliberately compact and shared by controls throughout the
+        desktop shell so new surfaces inherit the same rhythm by default.
+    -->
+
+    <!-- Spacing scale (4 px base rhythm, with a 2 px optical adjustment). -->
+    <sys:Double x:Key="Space2">2</sys:Double>
+    <sys:Double x:Key="Space4">4</sys:Double>
+    <sys:Double x:Key="Space8">8</sys:Double>
+    <sys:Double x:Key="Space12">12</sys:Double>
+    <sys:Double x:Key="Space16">16</sys:Double>
+    <sys:Double x:Key="Space20">20</sys:Double>
+    <sys:Double x:Key="Space24">24</sys:Double>
+    <sys:Double x:Key="Space32">32</sys:Double>
+    <Thickness x:Key="ControlPadding">12,8</Thickness>
+    <Thickness x:Key="CompactControlPadding">10,6</Thickness>
+    <Thickness x:Key="MenuItemPadding">11,8</Thickness>
+    <Thickness x:Key="PopupPadding">6</Thickness>
+    <Thickness x:Key="DialogPadding">24</Thickness>
+    <Thickness x:Key="SectionSpacing">0,20,0,0</Thickness>
+
+    <!-- Shape scale. Surfaces remain restrained; pills are reserved for small controls. -->
+    <CornerRadius x:Key="RadiusSmall">4</CornerRadius>
+    <CornerRadius x:Key="RadiusCompact">7</CornerRadius>
+    <CornerRadius x:Key="RadiusControl">9</CornerRadius>
+    <CornerRadius x:Key="RadiusPopup">10</CornerRadius>
+    <CornerRadius x:Key="RadiusSurface">12</CornerRadius>
+    <CornerRadius x:Key="RadiusPill">999</CornerRadius>
+
+    <!-- Type scale. AppFontSize remains user-configurable and is the body size. -->
+    <sys:Double x:Key="TypeCaptionSize">11</sys:Double>
+    <sys:Double x:Key="TypeLabelSize">12</sys:Double>
+    <sys:Double x:Key="TypeBodySize">14</sys:Double>
+    <sys:Double x:Key="TypeSubtitleSize">18</sys:Double>
+    <sys:Double x:Key="TypeTitleSize">24</sys:Double>
+    <sys:Double x:Key="TypeDisplaySize">32</sys:Double>
+
+    <!-- Interaction metrics and state opacity. -->
+    <sys:Double x:Key="ControlMinHeight">36</sys:Double>
+    <sys:Double x:Key="CompactControlHeight">32</sys:Double>
+    <sys:Double x:Key="TouchTargetSize">40</sys:Double>
+    <sys:Double x:Key="StateHoverOpacity">0.08</sys:Double>
+    <sys:Double x:Key="StateDisabledOpacity">0.42</sys:Double>
+    <sys:Double x:Key="StatePressedOpacity">0.72</sys:Double>
+    <sys:Double x:Key="StateMutedOpacity">0.58</sys:Double>
+    <Thickness x:Key="FocusRingThickness">2</Thickness>
+
+    <!-- Purposeful motion: controls use the fast tier; surfaces use standard. -->
+    <Duration x:Key="MotionInstant">0:0:0.08</Duration>
+    <Duration x:Key="MotionFast">0:0:0.14</Duration>
+    <Duration x:Key="MotionStandard">0:0:0.22</Duration>
+    <Duration x:Key="MotionEmphasized">0:0:0.32</Duration>
+    <Duration x:Key="MotionProgressPulse">0:0:0.85</Duration>
+    <KeySpline x:Key="MotionEaseOut">0.16,1,0.3,1</KeySpline>
+    <KeySpline x:Key="MotionEaseInOut">0.65,0,0.35,1</KeySpline>
+
+    <!-- Elevation is reserved for detached surfaces and transient feedback. -->
+    <DropShadowEffect x:Key="ElevationSubtle"
+                      Color="#000000"
+                      BlurRadius="12"
+                      ShadowDepth="2"
+                      Opacity="0.22"/>
+    <DropShadowEffect x:Key="ElevationPopup"
+                      Color="#000000"
+                      BlurRadius="24"
+                      ShadowDepth="6"
+                      Opacity="0.46"/>
+    <DropShadowEffect x:Key="ElevationFloating"
+                      Color="#000000"
+                      BlurRadius="28"
+                      ShadowDepth="6"
+                      Opacity="0.35"/>
+</ResourceDictionary>

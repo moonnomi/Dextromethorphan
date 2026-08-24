@@ -10,6 +10,7 @@
             <ui:CollectionContainsToBoolConverter x:Key="CollectionContainsBool"/>
             <ui:InverseBooleanToVisibilityConverter x:Key="InverseBoolToVisibility"/>
             <ui:RatingAtLeastConverter x:Key="RatingAtLeast"/>
+            <ui:BooleanToGridLengthConverter x:Key="BoolToGridLength"/>
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="UI/Styles/Theme.xaml"/>
             </ResourceDictionary.MergedDictionaries>

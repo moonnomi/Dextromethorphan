@@ -6,7 +6,8 @@
              xmlns:ui="clr-namespace:Dextromethorphan.App.UI"
              mc:Ignorable="d"
              d:DesignHeight="420"
-             d:DesignWidth="900">
+             d:DesignWidth="900"
+             KeyboardNavigation.TabNavigation="Continue">
     <ListBox x:Name="TrackList"
              Style="{StaticResource TrackListStyle}"
              ItemsSource="{Binding BrowseTracks}"
@@ -19,22 +20,25 @@
              PreviewMouseMove="TrackList_PreviewMouseMove"
              DragOver="TrackList_DragOver"
              Drop="TrackList_Drop"
-             Loaded="TrackList_Loaded"
-             ScrollViewer.HorizontalScrollBarVisibility="Auto"
-             ScrollViewer.ScrollChanged="TrackList_ScrollChanged">
+              Loaded="TrackList_Loaded"
+              ScrollViewer.HorizontalScrollBarVisibility="Auto"
+              ScrollViewer.PanningMode="VerticalOnly"
+              ScrollViewer.ScrollChanged="TrackList_ScrollChanged"
+             AutomationProperties.Name="Track library"
+             AutomationProperties.HelpText="Use arrow keys to navigate, Shift or Control to select multiple tracks, Control plus A to select all, Enter to play, and Shift plus F10 for track actions.">
         <ListBox.ContextMenu>
             <ContextMenu>
-                <MenuItem Header="Play"
+                <MenuItem Header="_Play"
                           Command="{Binding PlacementTarget.DataContext.PlaySelectedCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-                <MenuItem Header="Play next"
+                <MenuItem Header="Play _next"
                           Command="{Binding PlacementTarget.DataContext.PlayNextCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                           CommandParameter="{Binding PlacementTarget.SelectedItem, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-                <MenuItem Header="Add to queue"
+                <MenuItem Header="Add to _queue"
                           Command="{Binding PlacementTarget.DataContext.AddToQueueCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                           CommandParameter="{Binding PlacementTarget.SelectedItem, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-                <MenuItem Header="Add selected to queue"
+                <MenuItem Header="Add _selected to queue"
                           Command="{Binding PlacementTarget.DataContext.AddSelectedToQueueCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-                <MenuItem Header="Select all" Click="SelectAll_Click"/>
+                <MenuItem Header="Select _all" InputGestureText="Ctrl+A" Click="SelectAll_Click"/>
                 <MenuItem Header="Columns">
                     <MenuItem Header="Track" IsCheckable="True" IsChecked="{Binding PlacementTarget.DataContext.VisibleTrackColumns, RelativeSource={RelativeSource AncestorType=ContextMenu}, Converter={StaticResource CollectionContainsBool}, ConverterParameter=Track, Mode=OneWay}" Command="{Binding PlacementTarget.DataContext.ToggleTrackColumnCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Track"/>
                     <MenuItem Header="Title" IsCheckable="True" IsChecked="{Binding PlacementTarget.DataContext.VisibleTrackColumns, RelativeSource={RelativeSource AncestorType=ContextMenu}, Converter={StaticResource CollectionContainsBool}, ConverterParameter=Title, Mode=OneWay}" Command="{Binding PlacementTarget.DataContext.ToggleTrackColumnCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}" CommandParameter="Title"/>
@@ -61,9 +65,9 @@
                     </MenuItem>
                 </MenuItem>
                 <Separator/>
-                <MenuItem Header="Edit metadata"
+                <MenuItem Header="_Edit metadata"
                           Command="{Binding PlacementTarget.DataContext.EditMetadataCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
-                <MenuItem Header="Undo metadata edit"
+                <MenuItem Header="_Undo metadata edit"
                           Command="{Binding PlacementTarget.DataContext.UndoMetadataCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
                 <Separator>
                     <Separator.Style>
@@ -111,6 +115,8 @@
                       Height="{Binding DataContext.TrackRowHeight, RelativeSource={RelativeSource AncestorType=Window}}"
                       Margin="6,0"
                       ClipToBounds="True"
+                      ToolTip="{Binding MetadataAutomationText}"
+                      ToolTipService.InitialShowDelay="500"
                       Loaded="TrackRow_Loaded">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="42"/>
@@ -169,12 +175,14 @@
                                 Orientation="Horizontal"
                                 HorizontalAlignment="Center"
                                 VerticalAlignment="Center"
+                                AutomationProperties.Name="Track rating"
+                                AutomationProperties.ItemStatus="{Binding Rating, StringFormat=Current rating {0} of 5}"
                                 ClipToBounds="True">
-                        <Button Tag="1" FontFamily="Segoe UI Symbol" Content="&#x2605;" Click="RatingStar_Click" ToolTip="1 star"><Button.Style><Style TargetType="Button" BasedOn="{StaticResource IconButton}"><Setter Property="Width" Value="21"/><Setter Property="Height" Value="28"/><Setter Property="Padding" Value="0"/><Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}"/><Style.Triggers><DataTrigger Binding="{Binding Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=1}" Value="True"><Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/></DataTrigger></Style.Triggers></Style></Button.Style></Button>
-                        <Button Tag="2" FontFamily="Segoe UI Symbol" Content="&#x2605;" Click="RatingStar_Click" ToolTip="2 stars"><Button.Style><Style TargetType="Button" BasedOn="{StaticResource IconButton}"><Setter Property="Width" Value="21"/><Setter Property="Height" Value="28"/><Setter Property="Padding" Value="0"/><Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}"/><Style.Triggers><DataTrigger Binding="{Binding Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=2}" Value="True"><Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/></DataTrigger></Style.Triggers></Style></Button.Style></Button>
-                        <Button Tag="3" FontFamily="Segoe UI Symbol" Content="&#x2605;" Click="RatingStar_Click" ToolTip="3 stars"><Button.Style><Style TargetType="Button" BasedOn="{StaticResource IconButton}"><Setter Property="Width" Value="21"/><Setter Property="Height" Value="28"/><Setter Property="Padding" Value="0"/><Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}"/><Style.Triggers><DataTrigger Binding="{Binding Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=3}" Value="True"><Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/></DataTrigger></Style.Triggers></Style></Button.Style></Button>
-                        <Button Tag="4" FontFamily="Segoe UI Symbol" Content="&#x2605;" Click="RatingStar_Click" ToolTip="4 stars"><Button.Style><Style TargetType="Button" BasedOn="{StaticResource IconButton}"><Setter Property="Width" Value="21"/><Setter Property="Height" Value="28"/><Setter Property="Padding" Value="0"/><Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}"/><Style.Triggers><DataTrigger Binding="{Binding Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=4}" Value="True"><Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/></DataTrigger></Style.Triggers></Style></Button.Style></Button>
-                        <Button Tag="5" FontFamily="Segoe UI Symbol" Content="&#x2605;" Click="RatingStar_Click" ToolTip="5 stars"><Button.Style><Style TargetType="Button" BasedOn="{StaticResource IconButton}"><Setter Property="Width" Value="21"/><Setter Property="Height" Value="28"/><Setter Property="Padding" Value="0"/><Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}"/><Style.Triggers><DataTrigger Binding="{Binding Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=5}" Value="True"><Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/></DataTrigger></Style.Triggers></Style></Button.Style></Button>
+                        <Button Tag="1" FontFamily="Segoe UI Symbol" Click="RatingStar_Click" ToolTip="1 star" AutomationProperties.Name="Rate 1 star"><Button.Style><Style TargetType="Button" BasedOn="{StaticResource IconButton}"><Setter Property="Content" Value="&#x2606;"/><Setter Property="Width" Value="21"/><Setter Property="Height" Value="28"/><Setter Property="Padding" Value="0"/><Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}"/><Style.Triggers><DataTrigger Binding="{Binding Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=1}" Value="True"><Setter Property="Content" Value="&#x2605;"/><Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/></DataTrigger></Style.Triggers></Style></Button.Style></Button>
+                        <Button Tag="2" FontFamily="Segoe UI Symbol" Click="RatingStar_Click" ToolTip="2 stars" AutomationProperties.Name="Rate 2 stars"><Button.Style><Style TargetType="Button" BasedOn="{StaticResource IconButton}"><Setter Property="Content" Value="&#x2606;"/><Setter Property="Width" Value="21"/><Setter Property="Height" Value="28"/><Setter Property="Padding" Value="0"/><Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}"/><Style.Triggers><DataTrigger Binding="{Binding Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=2}" Value="True"><Setter Property="Content" Value="&#x2605;"/><Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/></DataTrigger></Style.Triggers></Style></Button.Style></Button>
+                        <Button Tag="3" FontFamily="Segoe UI Symbol" Click="RatingStar_Click" ToolTip="3 stars" AutomationProperties.Name="Rate 3 stars"><Button.Style><Style TargetType="Button" BasedOn="{StaticResource IconButton}"><Setter Property="Content" Value="&#x2606;"/><Setter Property="Width" Value="21"/><Setter Property="Height" Value="28"/><Setter Property="Padding" Value="0"/><Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}"/><Style.Triggers><DataTrigger Binding="{Binding Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=3}" Value="True"><Setter Property="Content" Value="&#x2605;"/><Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/></DataTrigger></Style.Triggers></Style></Button.Style></Button>
+                        <Button Tag="4" FontFamily="Segoe UI Symbol" Click="RatingStar_Click" ToolTip="4 stars" AutomationProperties.Name="Rate 4 stars"><Button.Style><Style TargetType="Button" BasedOn="{StaticResource IconButton}"><Setter Property="Content" Value="&#x2606;"/><Setter Property="Width" Value="21"/><Setter Property="Height" Value="28"/><Setter Property="Padding" Value="0"/><Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}"/><Style.Triggers><DataTrigger Binding="{Binding Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=4}" Value="True"><Setter Property="Content" Value="&#x2605;"/><Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/></DataTrigger></Style.Triggers></Style></Button.Style></Button>
+                        <Button Tag="5" FontFamily="Segoe UI Symbol" Click="RatingStar_Click" ToolTip="5 stars" AutomationProperties.Name="Rate 5 stars"><Button.Style><Style TargetType="Button" BasedOn="{StaticResource IconButton}"><Setter Property="Content" Value="&#x2606;"/><Setter Property="Width" Value="21"/><Setter Property="Height" Value="28"/><Setter Property="Padding" Value="0"/><Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}"/><Style.Triggers><DataTrigger Binding="{Binding Rating, Converter={StaticResource RatingAtLeast}, ConverterParameter=5}" Value="True"><Setter Property="Content" Value="&#x2605;"/><Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/></DataTrigger></Style.Triggers></Style></Button.Style></Button>
                     </StackPanel>
                     <TextBlock Grid.Column="6"
                                Tag="Duration"

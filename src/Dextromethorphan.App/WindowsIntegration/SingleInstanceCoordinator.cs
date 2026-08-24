@@ -131,6 +131,7 @@ internal static class LaunchTargetParser
             "--benchmark-kind",
             "--benchmark-scan-files",
             "--gallery-capture-directory",
+            "--windowing-smoke",
             "--diagnostics-output",
             "--diagnostics-session"
         };

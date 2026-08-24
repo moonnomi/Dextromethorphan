@@ -56,6 +56,7 @@ public partial class MainWindow : Window
     private readonly ArtworkImageService _artworkImages;
     private readonly ArtworkPropertyUpdateBatcher _artworkUpdates;
     private readonly IMetadataMatchService _metadataMatcher;
+    private readonly WindowPlacementService _windowPlacement;
     private readonly NavigationViewStateStore _viewStates = new();
     private readonly Dictionary<RadioButton, int> _topTabAnimationVersions = [];
     private bool _scrollRestorePending;
@@ -74,6 +75,18 @@ public partial class MainWindow : Window
     private Rect _fullScreenRestoreBounds;
     private WindowState _fullScreenRestoreState;
     private ResizeMode _fullScreenRestoreResizeMode;
+    private Grid? _titleBarGrid;
+    private FrameworkElement? _titleSearchHost;
+    private StackPanel? _titleUtilityHost;
+    private UniformGrid? _topTabsHost;
+    private FrameworkElement? _collectionDetailTabHost;
+    private Button? _maximizeWindowButton;
+    private Button? _compactSearchButton;
+    private MenuItem? _overflowMissingFilesItem;
+    private Border? _queuePanel;
+    private Grid? _playerGrid;
+    private SpectrumVisualizer? _spectrumVisualizer;
+    private IReadOnlyList<Button> _secondaryTitleUtilities = [];
 
     public MainWindow(
         MainViewModel viewModel,
@@ -83,7 +96,8 @@ public partial class MainWindow : Window
         ArtworkImageService artworkImages,
         ArtworkPropertyUpdateBatcher artworkUpdates,
         PerformanceOverlayViewModel performanceOverlay,
-        IMetadataMatchService metadataMatcher)
+        IMetadataMatchService metadataMatcher,
+        WindowPlacementService windowPlacement)
     {
         InitializeComponent();
         ViewModel = viewModel;
@@ -93,6 +107,7 @@ public partial class MainWindow : Window
         _artworkImages = artworkImages;
         _artworkUpdates = artworkUpdates;
         _metadataMatcher = metadataMatcher;
+        _windowPlacement = windowPlacement;
         PerformanceOverlay = performanceOverlay;
         PerformanceOverlay.Attach(this);
         DataContext = viewModel;
@@ -103,6 +118,9 @@ public partial class MainWindow : Window
         QueueList.DragLeave += QueueList_DragLeave;
         ViewModel.Queue.CollectionChanged += QueueCollectionChanged;
         Loaded += ApplyAutomationNames;
+        Loaded += MainWindow_Loaded;
+        SizeChanged += MainWindow_SizeChanged;
+        StateChanged += MainWindow_StateChanged;
         InstallChapterMarkers();
         ViewModel.PropertyChanged += ViewModelOnPropertyChanged;
         ViewModel.NavigationStarting += ViewModelOnNavigationStarting;
@@ -140,6 +158,203 @@ public partial class MainWindow : Window
                 continue;
             AutomationProperties.SetName(button, tooltip);
         }
+    }
+
+    private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        ResolveResponsiveShellElements();
+        InstallCompactTitleBarActions();
+        ApplyResponsiveShellLayout();
+        UpdateMaximizePresentation();
+    }
+
+    private void MainWindow_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (e.WidthChanged) ApplyResponsiveShellLayout();
+    }
+
+    private void MainWindow_StateChanged(object? sender, EventArgs e) =>
+        UpdateMaximizePresentation();
+
+    private void ResolveResponsiveShellElements()
+    {
+        _titleBarGrid = TitleBarHost.Child as Grid;
+        if (_titleBarGrid is not null)
+        {
+            _titleSearchHost = _titleBarGrid.Children
+                .OfType<FrameworkElement>()
+                .FirstOrDefault(value => Grid.GetColumn(value) == 2);
+            _titleUtilityHost = _titleBarGrid.Children
+                .OfType<StackPanel>()
+                .FirstOrDefault(value => Grid.GetColumn(value) == 3);
+            var navigationHost = _titleBarGrid.Children
+                .OfType<Grid>()
+                .FirstOrDefault(value => Grid.GetColumn(value) == 1);
+            _topTabsHost = navigationHost?.Children.OfType<UniformGrid>().FirstOrDefault();
+            _collectionDetailTabHost = navigationHost?.Children
+                .OfType<Border>()
+                .FirstOrDefault(value => Grid.GetColumn(value) == 1);
+        }
+
+        _maximizeWindowButton ??= FindVisualChildren<Button>(this)
+            .FirstOrDefault(value =>
+            {
+                var name = AutomationProperties.GetName(value);
+                return name.Contains("Maximize", StringComparison.OrdinalIgnoreCase)
+                       || name.Contains("Restore window", StringComparison.OrdinalIgnoreCase);
+            });
+
+        _queuePanel = QueueInspectorPanel;
+
+        _playerGrid = ShellRoot.Children
+            .OfType<Border>()
+            .Where(value => Grid.GetRow(value) == 2)
+            .Select(value => value.Child as Grid)
+            .FirstOrDefault(value => value?.ColumnDefinitions.Count == 3);
+        _spectrumVisualizer = _playerGrid is null
+            ? null
+            : FindVisualChildren<SpectrumVisualizer>(_playerGrid).FirstOrDefault();
+    }
+
+    private void InstallCompactTitleBarActions()
+    {
+        if (_titleUtilityHost is null || _compactSearchButton is not null) return;
+
+        _compactSearchButton = new Button
+        {
+            Content = "\uE721",
+            ToolTip = "Search library (Ctrl+F)",
+            Style = TryFindResource("IconButton") as Style,
+            Visibility = Visibility.Collapsed
+        };
+        AutomationProperties.SetName(_compactSearchButton, "Search library");
+        _compactSearchButton.Click += (_, _) => FocusSearchBox();
+        _titleUtilityHost.Children.Insert(0, _compactSearchButton);
+
+        var buttons = _titleUtilityHost.Children.OfType<Button>().ToArray();
+        _secondaryTitleUtilities = buttons
+            .Where(value => value != _compactSearchButton
+                            && value.ToolTip is string tooltip
+                            && tooltip is "Favorites" or "Missing files" or "Audio diagnostics")
+            .ToArray();
+        var more = buttons.FirstOrDefault(value =>
+            string.Equals(value.ToolTip as string, "More library views", StringComparison.Ordinal));
+        if (more?.ContextMenu is null
+            || more.ContextMenu.Items.OfType<MenuItem>().Any(value =>
+                Equals(value.Tag, "responsive-title-actions")))
+            return;
+
+        more.ContextMenu.Items.Add(new Separator());
+        var search = new MenuItem
+        {
+            Header = "Search library",
+            InputGestureText = "Ctrl+F",
+            Tag = "responsive-title-actions"
+        };
+        search.Click += (_, _) => FocusSearchBox();
+        more.ContextMenu.Items.Add(search);
+        var favorites = new MenuItem { Header = "Favorites" };
+        favorites.Click += (_, _) => ViewModel.NavigateCommand.Execute("Favorites");
+        more.ContextMenu.Items.Add(favorites);
+        _overflowMissingFilesItem = new MenuItem
+        {
+            Header = "Missing files",
+            IsEnabled = ViewModel.HasMissingTracks
+        };
+        _overflowMissingFilesItem.Click += (_, _) =>
+            ViewModel.NavigateCommand.Execute("Missing");
+        more.ContextMenu.Items.Add(_overflowMissingFilesItem);
+        var diagnostics = new MenuItem { Header = "Audio diagnostics" };
+        diagnostics.Click += (_, _) => ViewModel.ToggleDiagnosticsCommand.Execute(null);
+        more.ContextMenu.Items.Add(diagnostics);
+    }
+
+    private void FocusSearchBox()
+    {
+        SearchBox.Focus();
+        SearchBox.SelectAll();
+    }
+
+    private void ApplyResponsiveShellLayout()
+    {
+        if (!IsLoaded || _titleBarGrid is null) return;
+        var metrics = ResponsiveShellMetrics.ForWidth(ActualWidth);
+        if (_titleSearchHost is not null)
+            _titleSearchHost.Visibility = metrics.ShowFullSearch
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        if (_titleBarGrid.ColumnDefinitions.Count > 2)
+            _titleBarGrid.ColumnDefinitions[2].Width = new GridLength(metrics.SearchWidth);
+        if (_compactSearchButton is not null)
+            _compactSearchButton.Visibility = metrics.ShowFullSearch
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+        foreach (var button in _secondaryTitleUtilities)
+        {
+            button.Visibility = metrics.ShowSecondaryUtilities
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+
+        if (_topTabsHost is not null)
+        {
+            _topTabsHost.Visibility = metrics.WidthClass == ShellWidthClass.Compact
+                                      && ViewModel.IsCollectionDetailOpen
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+            foreach (var tab in _topTabsHost.Children.OfType<RadioButton>())
+            {
+                if (metrics.WidthClass == ShellWidthClass.Compact)
+                {
+                    tab.SetCurrentValue(
+                        Control.PaddingProperty,
+                        new Thickness(3, 21, 3, 18));
+                    tab.SetCurrentValue(Control.FontSizeProperty, 11d);
+                }
+                else
+                {
+                    tab.ClearValue(Control.PaddingProperty);
+                    tab.ClearValue(Control.FontSizeProperty);
+                }
+            }
+        }
+        if (_collectionDetailTabHost is not null)
+            _collectionDetailTabHost.MaxWidth = metrics.WidthClass == ShellWidthClass.Compact
+                ? 210
+                : double.PositiveInfinity;
+        if (_queuePanel is not null)
+            _queuePanel.MaxWidth = metrics.QueueMaximumWidth;
+        if (_playerGrid?.ColumnDefinitions.Count >= 3)
+        {
+            _playerGrid.ColumnDefinitions[0].Width =
+                new GridLength(metrics.PlayerIdentityWidth);
+            _playerGrid.ColumnDefinitions[2].Width =
+                new GridLength(metrics.PlayerUtilitiesWidth);
+        }
+        if (_spectrumVisualizer is not null)
+        {
+            _spectrumVisualizer.Width = metrics.VisualizerWidth;
+            _spectrumVisualizer.Margin = metrics.VisualizerWidth > 0
+                ? new Thickness(5, 0, 5, 0)
+                : new Thickness(0);
+        }
+    }
+
+    private void UpdateMaximizePresentation()
+    {
+        if (_maximizeWindowButton is null) return;
+        var maximized = WindowState == WindowState.Maximized;
+        _maximizeWindowButton.Content = maximized ? "\uE923" : "\uE922";
+        _maximizeWindowButton.ToolTip = maximized ? "Restore" : "Maximize";
+        AutomationProperties.SetName(
+            _maximizeWindowButton,
+            maximized ? "Restore window" : "Maximize window");
+    }
+
+    private void HandleMonitorEnvironmentChanged()
+    {
+        _windowPlacement.EnsureVisible(this);
+        ApplyResponsiveShellLayout();
     }
 
     private async void ViewModel_MetadataEditRequested(object? sender, EventArgs e)
@@ -658,6 +873,9 @@ public partial class MainWindow : Window
             Dispatcher.BeginInvoke(
                 () => _ = FollowCurrentQueueEntryAsync(),
                 DispatcherPriority.Loaded);
+        if (e.PropertyName == nameof(MainViewModel.HasMissingTracks)
+            && _overflowMissingFilesItem is not null)
+            _overflowMissingFilesItem.IsEnabled = ViewModel.HasMissingTracks;
         if (e.PropertyName == nameof(MainViewModel.HasLyrics))
         {
             Dispatcher.BeginInvoke(ResetLyricsView, DispatcherPriority.Loaded);
@@ -670,6 +888,8 @@ public partial class MainWindow : Window
         }
         if (e.PropertyName is nameof(MainViewModel.CurrentView) or nameof(MainViewModel.IsCollectionDetailOpen))
         {
+            if (e.PropertyName == nameof(MainViewModel.IsCollectionDetailOpen))
+                ApplyResponsiveShellLayout();
             Dispatcher.BeginInvoke(AnimateViewTransition, DispatcherPriority.Render);
             if (_diagnostics.Enabled)
                 _ = RecordViewRenderAsync(Stopwatch.GetTimestamp(), ViewModel.CurrentView, ViewModel.IsCollectionDetailOpen);
@@ -861,7 +1081,12 @@ public partial class MainWindow : Window
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
-        WindowMaximizeHelper.Install(this);
+        _windowPlacement.TryRestore(this);
+        WindowMaximizeHelper.Install(
+            this,
+            () => _maximizeWindowButton,
+            HandleMonitorEnvironmentChanged,
+            ToggleMaximize);
         var handle = new WindowInteropHelper(this).Handle;
         _shortcuts.Attach(handle);
         _systemMedia.Attach(handle);
@@ -932,6 +1157,14 @@ public partial class MainWindow : Window
         if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.A)
         {
             QueueList.SelectAll();
+            e.Handled = true;
+        }
+        else if (Keyboard.Modifiers == ModifierKeys.None
+                 && e.Key == Key.Enter
+                 && QueueList.SelectedItem is QueueEntryViewModel entry
+                 && ViewModel.PlayQueueEntryCommand.CanExecute(entry))
+        {
+            ViewModel.PlayQueueEntryCommand.Execute(entry);
             e.Handled = true;
         }
         else if (e.Key == Key.Delete)
@@ -1727,6 +1960,190 @@ public partial class MainWindow : Window
         encoder.Save(output);
     }
 
+    internal async Task<WindowingSmokeReport> CaptureWindowingSmokeAsync(
+        string outputDirectory,
+        CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(outputDirectory);
+        ResolveResponsiveShellElements();
+        InstallCompactTitleBarActions();
+        var originalWidth = Width;
+        var originalHeight = Height;
+        var originalLeft = Left;
+        var originalTop = Top;
+        var originalState = WindowState;
+        var originalQueue = ViewModel.QueueVisible;
+        var originalQueueCompact = ViewModel.QueuePanelCompact;
+        var results = new List<WindowingSmokeCase>();
+        var snapAvailable = WindowMaximizeHelper.IsNativeSnapLayoutAvailable;
+        var snapHitTest = default(SnapLayoutProbe);
+        var nativeMaximizeClickPassed = !snapAvailable;
+        var taskbarSafeFullScreenPassed = false;
+        var scenarios = new[]
+        {
+            (Name: "minimum-queue-hidden", Width: 800d, Height: 600d, Queue: false),
+            (Name: "minimum-queue-visible", Width: 800d, Height: 600d, Queue: true),
+            (Name: "laptop-1366x768", Width: 1366d, Height: 768d, Queue: true),
+            (Name: "laptop-1536x864", Width: 1536d, Height: 864d, Queue: false),
+            (Name: "desktop-1920x1080", Width: 1920d, Height: 1080d, Queue: true),
+            (Name: "ultrawide-3440x1440", Width: 3440d, Height: 1440d, Queue: true)
+        };
+
+        try
+        {
+            WindowState = WindowState.Normal;
+            Left = SystemParameters.WorkArea.Left;
+            Top = SystemParameters.WorkArea.Top;
+            await WaitForBackgroundIdleAsync(cancellationToken);
+            foreach (var scenario in scenarios)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Width = scenario.Width;
+                Height = scenario.Height;
+                ViewModel.QueueVisible = scenario.Queue;
+                ViewModel.QueuePanelCompact = false;
+                ApplyResponsiveShellLayout();
+                UpdateLayout();
+                await Dispatcher.InvokeAsync(
+                    () => { },
+                    DispatcherPriority.Render,
+                    cancellationToken);
+                await NextRenderedFrameTimestampAsync(cancellationToken);
+                UpdateLayout();
+
+                var metrics = ResponsiveShellMetrics.ForWidth(ActualWidth);
+                var requestedMetrics = ResponsiveShellMetrics.ForWidth(scenario.Width);
+                var searchAccess = metrics.ShowFullSearch
+                    ? SearchBox as FrameworkElement
+                    : _compactSearchButton;
+                var transportButtons = FindVisualChildren<Button>(_playerGrid ?? ShellRoot)
+                    .Where(button => button.Command == ViewModel.TogglePlaybackCommand
+                                     || button.ToolTip is string tooltip
+                                     && tooltip is "Previous" or "Next")
+                    .Cast<FrameworkElement>()
+                    .ToArray();
+                var critical = new List<FrameworkElement>
+                {
+                    SeekSlider,
+                    VolumeSlider,
+                    SettingsButton,
+                    FullScreenButton
+                };
+                critical.AddRange(transportButtons);
+                if (searchAccess is not null) critical.Add(searchAccess);
+                if (scenario.Queue && _queuePanel is not null) critical.Add(_queuePanel);
+                var controlsInside = critical.All(IsInsideShell)
+                                     && SeekSlider.ActualWidth >= 80
+                                     && transportButtons.Length >= 3
+                                     && (_topTabsHost?.ActualWidth ?? 0) >= 260
+                                     && metrics.WidthClass == requestedMetrics.WidthClass;
+                var screenshot = Path.Combine(outputDirectory, scenario.Name + ".png");
+                CaptureVisualPng(screenshot);
+                results.Add(new WindowingSmokeCase(
+                    scenario.Name,
+                    scenario.Width,
+                    scenario.Height,
+                    ActualWidth,
+                    ActualHeight,
+                    Math.Abs(ActualWidth - scenario.Width) <= 1
+                    && Math.Abs(ActualHeight - scenario.Height) <= 1,
+                    scenario.Queue,
+                    metrics.WidthClass,
+                    SeekSlider.ActualWidth,
+                    _queuePanel?.ActualWidth ?? 0,
+                    controlsInside,
+                    screenshot));
+            }
+            if (_maximizeWindowButton is not null)
+            {
+                snapHitTest = WindowMaximizeHelper.ProbeSnapLayoutHitTest(
+                    this,
+                    _maximizeWindowButton);
+                if (snapAvailable
+                    && WindowMaximizeHelper.InvokeSnapLayoutButtonForSmoke(
+                        this,
+                        _maximizeWindowButton))
+                {
+                    await Dispatcher.InvokeAsync(
+                        () => { },
+                        DispatcherPriority.Input,
+                        cancellationToken);
+                    nativeMaximizeClickPassed = WindowState == WindowState.Maximized;
+                    if (nativeMaximizeClickPassed)
+                    {
+                        WindowMaximizeHelper.InvokeSnapLayoutButtonForSmoke(
+                            this,
+                            _maximizeWindowButton);
+                        await Dispatcher.InvokeAsync(
+                            () => { },
+                            DispatcherPriority.Input,
+                            cancellationToken);
+                        nativeMaximizeClickPassed = WindowState == WindowState.Normal;
+                    }
+                }
+            }
+
+            var expectedWorkArea = WindowMaximizeHelper.GetMonitorWorkArea(this);
+            EnterFullScreen();
+            UpdateLayout();
+            taskbarSafeFullScreenPassed = _isFullScreen
+                                          && Math.Abs(Left - expectedWorkArea.Left) <= 1
+                                          && Math.Abs(Top - expectedWorkArea.Top) <= 1
+                                          && Math.Abs(ActualWidth - expectedWorkArea.Width) <= 1
+                                          && Math.Abs(ActualHeight - expectedWorkArea.Height) <= 1
+                                          && IsInsideShell(SeekSlider)
+                                          && IsInsideShell(FullScreenButton);
+            ExitFullScreen();
+        }
+        finally
+        {
+            if (_isFullScreen) ExitFullScreen();
+            ViewModel.QueueVisible = originalQueue;
+            ViewModel.QueuePanelCompact = originalQueueCompact;
+            Width = originalWidth;
+            Height = originalHeight;
+            Left = originalLeft;
+            Top = originalTop;
+            WindowState = originalState;
+            ApplyResponsiveShellLayout();
+        }
+
+        var dpi = VisualTreeHelper.GetDpi(this);
+        return new WindowingSmokeReport(
+            1,
+            DateTimeOffset.UtcNow,
+            dpi.DpiScaleX,
+            dpi.DpiScaleY,
+            snapAvailable,
+            snapHitTest,
+            nativeMaximizeClickPassed,
+            taskbarSafeFullScreenPassed,
+            results.All(value => value.CriticalControlsInsideWindow)
+            && (!snapAvailable || snapHitTest.Result == 9)
+            && nativeMaximizeClickPassed
+            && taskbarSafeFullScreenPassed,
+            results);
+
+        bool IsInsideShell(FrameworkElement element)
+        {
+            if (!element.IsVisible || element.ActualWidth <= 0 || element.ActualHeight <= 0)
+                return false;
+            try
+            {
+                var origin = element.TransformToAncestor(ShellRoot)
+                    .Transform(new Point(0, 0));
+                return origin.X >= -1
+                       && origin.Y >= -1
+                       && origin.X + element.ActualWidth <= ShellRoot.ActualWidth + 1
+                       && origin.Y + element.ActualHeight <= ShellRoot.ActualHeight + 1;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+        }
+    }
+
     private readonly record struct GalleryVisualInspection(
         int RealizedCards,
         int ExpectedArtwork,
@@ -2203,7 +2620,20 @@ public partial class MainWindow : Window
     private void Minimize_Click(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
     private void Maximize_Click(object sender, RoutedEventArgs e) => ToggleMaximize();
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
-    private void ToggleMaximize() => WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+    private void ToggleMaximize()
+    {
+        // When navigation remains visible in full-screen mode, the same title
+        // bar control should restore the saved window instead of combining a
+        // maximized WindowState with the private full-screen state.
+        if (_isFullScreen)
+        {
+            ExitFullScreen();
+            return;
+        }
+        WindowState = WindowState == WindowState.Maximized
+            ? WindowState.Normal
+            : WindowState.Maximized;
+    }
     private async void FullScreen_Click(object sender, RoutedEventArgs e) =>
         await ToggleFullScreenAsync();
 
@@ -2251,7 +2681,10 @@ public partial class MainWindow : Window
         _fullScreenRestoreBounds = WindowState == WindowState.Normal
             ? new Rect(Left, Top, Width, Height)
             : RestoreBounds;
-        var monitorBounds = WindowMaximizeHelper.GetMonitorBounds(this);
+        // Full screen intentionally uses the monitor work area. The app keeps
+        // its transport and seek controls above the taskbar while still
+        // removing its own chrome/navigation according to the user setting.
+        var monitorBounds = WindowMaximizeHelper.GetMonitorWorkArea(this);
 
         WindowState = WindowState.Normal;
         ResizeMode = ResizeMode.NoResize;
@@ -2373,15 +2806,9 @@ public partial class MainWindow : Window
         if (action == ListScrollAction.None
             || FindVisualChild<ScrollViewer>(list) is not { } viewer)
             return;
+        // Stop wheel/touch inertia, then let the ListBox perform its native
+        // focus, selection, scrolling, and UI Automation behavior.
         SmoothScrollBehavior.Cancel(viewer);
-        switch (action)
-        {
-            case ListScrollAction.Home: viewer.ScrollToTop(); break;
-            case ListScrollAction.End: viewer.ScrollToEnd(); break;
-            case ListScrollAction.PageUp: viewer.PageUp(); break;
-            case ListScrollAction.PageDown: viewer.PageDown(); break;
-        }
-        e.Handled = true;
     }
 
     private void Window_KeyDown(object sender, KeyEventArgs e)
@@ -2432,6 +2859,8 @@ public partial class MainWindow : Window
     {
         if (_allowClose) return;
         e.Cancel = true;
+        if (_isFullScreen) ExitFullScreen();
+        _windowPlacement.Save(this);
         await ViewModel.ShutdownAsync();
         await _diagnostics.CompleteAsync();
         _lyricScrollCancellation?.Cancel();
@@ -2445,6 +2874,9 @@ public partial class MainWindow : Window
         ViewModel.PropertyChanged -= ViewModelOnPropertyChanged;
         ViewModel.NavigationStarting -= ViewModelOnNavigationStarting;
         ViewModel.SearchFocusRequested -= ViewModel_SearchFocusRequested;
+        Loaded -= MainWindow_Loaded;
+        SizeChanged -= MainWindow_SizeChanged;
+        StateChanged -= MainWindow_StateChanged;
         _allowClose = true;
         Application.Current.Shutdown();
     }

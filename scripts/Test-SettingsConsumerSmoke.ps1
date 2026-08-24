@@ -131,7 +131,7 @@ try {
 
     $mainWindow = Wait-ProcessWindow `
         -ProcessId $process.Id `
-        -WindowName 'Dextromethorphan'
+        -WindowName 'Dextromethorphan music player'
 
     try {
         $settingsWindow = Wait-ProcessWindow `
@@ -162,19 +162,30 @@ try {
     # Leave Appearance selected for the live-theme checks below. Returning to
     # an unloaded ComboBox can expose a stale WPF item-container automation peer.
     $expected = @(
-        'Audio', 'Playback', 'Library', 'Metadata', 'Lyrics', 'Views',
-        'Diagnostics', 'Data', 'Shortcuts', 'About', 'Appearance')
-    foreach ($name in $expected) {
-        $tab = @($tabs | Where-Object { $_.Current.Name -eq $name })[0]
-        if ($null -eq $tab) { throw "Settings tab '$name' was not exposed." }
+        @{ Label = 'Audio'; Name = 'Audio settings' },
+        @{ Label = 'Playback'; Name = 'Playback settings' },
+        @{ Label = 'Library'; Name = 'Library settings' },
+        @{ Label = 'Metadata'; Name = 'Metadata settings' },
+        @{ Label = 'Lyrics'; Name = 'Lyrics settings' },
+        @{ Label = 'Views'; Name = 'View settings' },
+        @{ Label = 'Diagnostics'; Name = 'Diagnostics settings' },
+        @{ Label = 'Data'; Name = 'Data and recovery settings' },
+        @{ Label = 'Shortcuts'; Name = 'Shortcut settings' },
+        @{ Label = 'About'; Name = 'About Dextromethorphan' },
+        @{ Label = 'Appearance'; Name = 'Appearance settings' })
+    foreach ($expectedTab in $expected) {
+        $tab = @($tabs | Where-Object { $_.Current.Name -eq $expectedTab.Name })[0]
+        if ($null -eq $tab) {
+            throw "Settings tab '$($expectedTab.Label)' was not exposed."
+        }
         $tab.GetCurrentPattern(
             [System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
         Start-Sleep -Milliseconds 80
         if (-not $tab.GetCurrentPattern(
                 [System.Windows.Automation.SelectionItemPattern]::Pattern).Current.IsSelected) {
-            throw "Settings tab '$name' did not become selected."
+            throw "Settings tab '$($expectedTab.Label)' did not become selected."
         }
-        $result.tabsVisited += $name
+        $result.tabsVisited += $expectedTab.Label
     }
 
     $search = Wait-AutomationElement `
@@ -266,7 +277,7 @@ try {
         -WindowName 'Dextromethorphan settings'
     $mainWindow = Wait-ProcessWindow `
         -ProcessId $process.Id `
-        -WindowName 'Dextromethorphan'
+        -WindowName 'Dextromethorphan music player'
     $mainWindow.GetCurrentPattern(
         [System.Windows.Automation.WindowPattern]::Pattern).Close()
     if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {

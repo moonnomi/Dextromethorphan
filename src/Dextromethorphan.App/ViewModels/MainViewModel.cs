@@ -7,6 +7,7 @@ using Dextromethorphan.App.Diagnostics;
 using Dextromethorphan.App.Library;
 using Dextromethorphan.App.Lyrics;
 using Dextromethorphan.App.UI;
+using Dextromethorphan.App.UI.Controls;
 using Dextromethorphan.App.UI.Views;
 using Dextromethorphan.Core.Abstractions;
 using Dextromethorphan.Core.Lyrics;
@@ -122,6 +123,8 @@ public sealed class MainViewModel : ObservableObject
     private string _scanCurrentPath = "No scan running";
     private string _scanCurrentSource = "—";
     private bool _queueVisible = true;
+    private bool _queuePanelCompact;
+    private PanelDockSide _queuePanelDockSide = PanelDockSide.Right;
     private bool _isCollectionDetailOpen;
     private bool _isUserSeeking;
     private bool _animationsEnabled = true;
@@ -131,6 +134,7 @@ public sealed class MainViewModel : ObservableObject
     private bool _stopAfterCurrent;
     private bool _stopAfterQueue;
     private string _userNotice = "";
+    private ToastNotification? _activeToast;
     private bool _isUserNoticeVisible;
     private readonly DispatcherTimer _noticeTimer;
     private int _albumTileSize = 172;
@@ -138,7 +142,8 @@ public sealed class MainViewModel : ObservableObject
     private bool _sortDescending;
     private LibraryDensity _density = LibraryDensity.Comfortable;
     private string _quickFilter = "";
-    private IReadOnlyList<string> _dashboardModules = ["Artwork", "Lyrics", "Queue"];
+    private IReadOnlyList<string> _dashboardModules = ["Artwork", "Lyrics", "Metadata"];
+    private string _nowPlayingInspectorTab = "Lyrics";
     private int _galleryColumnCount = 1;
     private readonly ObservableRangeCollection<GalleryRowViewModel> _galleryRows = [];
     private string _activeLyric = "Lyrics will appear here when available.";
@@ -256,6 +261,7 @@ public sealed class MainViewModel : ObservableObject
             DispatcherPriority.Background,
             NoticeTimerOnTick,
             Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher);
+        DismissNoticeCommand = new RelayCommand(_ => DismissNotice());
         NavigateCommand = new RelayCommand(p => Navigate(p?.ToString()));
         SelectGroupCommand = new RelayCommand(p => SelectGroup(p as LibraryCardViewModel));
         CloseCollectionCommand = new RelayCommand(_ => CloseCollectionDetail());
@@ -267,7 +273,16 @@ public sealed class MainViewModel : ObservableObject
         AddToQueueCommand = new RelayCommand(p => { if (p is Track track) _queue.Add([track]); });
         AddSelectedToQueueCommand = new RelayCommand(_ => { if (SelectedTracks.Count > 0) _queue.Add(SelectedTracks); });
         PlayNextCommand = new RelayCommand(p => { if (p is Track track) _queue.PlayNext([track]); });
-        ToggleQueueCommand = new RelayCommand(_ => QueueVisible = !QueueVisible);
+        ToggleQueueCommand = new RelayCommand(_ => ToggleQueueVisibility());
+        ToggleQueueCompactCommand = new RelayCommand(_ =>
+            QueuePanelCompact = !QueuePanelCompact);
+        ExpandQueueCommand = new RelayCommand(_ =>
+        {
+            QueueVisible = true;
+            QueuePanelCompact = false;
+        });
+        SetQueueDockSideCommand = new RelayCommand(
+            parameter => SetQueueDockSide(parameter));
         ToggleVisualizerCommand = new RelayCommand(
             _ => VisualizerEnabled = !VisualizerEnabled);
         ToggleShuffleCommand = new RelayCommand(_ => { _queue.Shuffle = !_queue.Shuffle; Raise(nameof(IsShuffleEnabled)); Raise(nameof(ShuffleText)); ScheduleSessionSave(); });
@@ -303,17 +318,23 @@ public sealed class MainViewModel : ObservableObject
         RebuildArtworkCacheCommand = new AsyncRelayCommand(_ => RebuildArtworkCacheAsync(), _ => !IsArtworkCacheBusy && _allTracks.Count > 0);
         UndoQueueCommand = new RelayCommand(_ =>
         {
-            ShowNotice(_queue.Undo() ? "Queue change undone" : "Nothing to undo");
+            var changed = _queue.Undo();
+            ShowNotice(
+                changed ? "Queue change undone" : "Nothing to undo",
+                changed ? ToastSeverity.Success : ToastSeverity.Information);
         });
         RedoQueueCommand = new RelayCommand(_ =>
         {
-            ShowNotice(_queue.Redo() ? "Queue change restored" : "Nothing to redo");
+            var changed = _queue.Redo();
+            ShowNotice(
+                changed ? "Queue change restored" : "Nothing to redo",
+                changed ? ToastSeverity.Success : ToastSeverity.Information);
         });
         ClearQueueCommand = new RelayCommand(_ =>
         {
             if (_queue.Items.Count == 0) return;
             _queue.Replace([]);
-            ShowNotice("Queue cleared");
+            ShowNotice("Queue cleared", ToastSeverity.Success);
         });
         RemoveSelectedQueueCommand = new AsyncRelayCommand(_ => RemoveSelectedQueueAsync(), _ => SelectedQueueEntries.Count > 0);
         MoveSelectedQueueTopCommand = new RelayCommand(_ => MoveSelectedQueue(toTop: true), _ => SelectedQueueEntries.Any(entry => entry.CanReorder));
@@ -373,6 +394,7 @@ public sealed class MainViewModel : ObservableObject
         SetDensityCommand = new RelayCommand(parameter => SetDensity(parameter?.ToString()));
         SetAlbumTileSizeCommand = new RelayCommand(parameter => SetAlbumTileSize(parameter?.ToString()));
         ToggleDashboardModuleCommand = new RelayCommand(parameter => ToggleDashboardModule(parameter?.ToString()));
+        SelectNowPlayingInspectorCommand = new RelayCommand(parameter => SelectNowPlayingInspector(parameter?.ToString()));
         _audio.StateChanged += AudioOnStateChanged;
         _audio.TrackTransitioned += AudioOnTrackTransitioned;
         _audio.PlaybackEnded += AudioOnPlaybackEnded;
@@ -540,7 +562,7 @@ public sealed class MainViewModel : ObservableObject
             EditMetadataCommand.RaiseCanExecuteChanged();
         }
     }
-    public Track? CurrentTrack { get => _currentTrack; private set { if (Set(ref _currentTrack, value)) { Raise(nameof(HasCurrentTrack)); Raise(nameof(CurrentTitle)); Raise(nameof(CurrentArtist)); Raise(nameof(CurrentArtworkPath)); Raise(nameof(LoveGlyph)); Raise(nameof(LoveText)); Raise(nameof(CurrentRating)); Raise(nameof(CanEditLyrics)); Raise(nameof(CurrentTrackHasPlaybackOverride)); Raise(nameof(PlaybackProcessingText)); ReloadLyricsCommand.RaiseCanExecuteChanged(); FetchOnlineLyricsCommand.RaiseCanExecuteChanged(); ToggleLyricsEditorCommand.RaiseCanExecuteChanged(); SaveLyricsCommand.RaiseCanExecuteChanged(); SetCurrentRatingCommand.RaiseCanExecuteChanged(); SaveTrackPlaybackOverrideCommand.RaiseCanExecuteChanged(); ClearTrackPlaybackOverrideCommand.RaiseCanExecuteChanged(); AddBookmarkCommand.RaiseCanExecuteChanged(); } } }
+    public Track? CurrentTrack { get => _currentTrack; private set { if (Set(ref _currentTrack, value)) { Raise(nameof(HasCurrentTrack)); Raise(nameof(CurrentTitle)); Raise(nameof(CurrentArtist)); Raise(nameof(CurrentArtworkPath)); Raise(nameof(LoveGlyph)); Raise(nameof(LoveText)); Raise(nameof(CurrentRating)); Raise(nameof(CanEditLyrics)); Raise(nameof(CurrentTrackHasPlaybackOverride)); Raise(nameof(PlaybackProcessingText)); RaiseLyricsState(); ReloadLyricsCommand.RaiseCanExecuteChanged(); FetchOnlineLyricsCommand.RaiseCanExecuteChanged(); ToggleLyricsEditorCommand.RaiseCanExecuteChanged(); SaveLyricsCommand.RaiseCanExecuteChanged(); SetCurrentRatingCommand.RaiseCanExecuteChanged(); SaveTrackPlaybackOverrideCommand.RaiseCanExecuteChanged(); ClearTrackPlaybackOverrideCommand.RaiseCanExecuteChanged(); AddBookmarkCommand.RaiseCanExecuteChanged(); } } }
     public IReadOnlyList<QueueEntryViewModel> SelectedQueueEntries
     {
         get => _selectedQueueEntries;
@@ -568,6 +590,37 @@ public sealed class MainViewModel : ObservableObject
     public bool HasLibrary => _allTracks.Any(track => !track.IsMissing);
     public bool HasMissingTracks => _allTracks.Any(track => track.IsMissing);
     public bool HasBrowseTracks => BrowseTracks.Count > 0;
+    public bool HasGalleryResults => GalleryRows.Count > 0;
+    public bool HasOfflineSources => LibrarySources.Any(source => source.Enabled && !source.IsOnline);
+    public UiStateKind LibraryStateKind => !IsLibraryReady || IsScanning
+        ? UiStateKind.Loading
+        : HasScanFailures && !HasLibrary
+            ? UiStateKind.Error
+            : HasOfflineSources && !HasLibrary
+                ? UiStateKind.Offline
+                : UiStateKind.Empty;
+    public string LibraryStateTitle => LibraryStateKind switch
+    {
+        UiStateKind.Loading => IsScanning ? "Scanning your library" : "Loading your library",
+        UiStateKind.Error => "The library could not be loaded",
+        UiStateKind.Offline => "A music source is offline",
+        _ when !string.IsNullOrWhiteSpace(SearchText) || HasQuickFilter => "No matching music",
+        _ when LibrarySources.Count == 0 => "Your library is ready for music",
+        _ => "Nothing is available in this view"
+    };
+    public string LibraryStateDescription => LibraryStateKind switch
+    {
+        UiStateKind.Loading => "Dextromethorphan is preparing tracks and artwork.",
+        UiStateKind.Error => "Review the scan details in Settings, then try the scan again.",
+        UiStateKind.Offline => "Reconnect the drive or network share. Existing library records are kept safely.",
+        _ when !string.IsNullOrWhiteSpace(SearchText) || HasQuickFilter => "Try a different search or clear the current filter.",
+        _ when LibrarySources.Count == 0 => "Add a local folder or network source from Settings.",
+        _ => "Choose another library view or run a scan to refresh this source."
+    };
+    public string LibraryStateActionText =>
+        !IsScanning && LibrarySources.Any(source => source.Enabled)
+            ? "Scan library"
+            : string.Empty;
     public int BrowseTrackSourceCount => _activeTrackPresentation?.Source.Count ?? BrowseTracks.Count;
     public bool HasQueue => Queue.Count > 0;
     public bool HasQueueHistory => QueueHistory.Count > 0;
@@ -599,6 +652,7 @@ public sealed class MainViewModel : ObservableObject
         : "Love current track";
     public int CurrentRating => CurrentTrack?.Rating ?? 0;
     public string UserNotice { get => _userNotice; private set => Set(ref _userNotice, value); }
+    public ToastNotification? ActiveToast { get => _activeToast; private set => Set(ref _activeToast, value); }
     public bool IsUserNoticeVisible { get => _isUserNoticeVisible; private set => Set(ref _isUserNoticeVisible, value); }
     public bool StopAfterCurrent
     {
@@ -665,7 +719,7 @@ public sealed class MainViewModel : ObservableObject
     public string ArtistProfileText { get => _artistProfileText; private set => Set(ref _artistProfileText, value); }
     public string ArtistProfileAttribution { get => _artistProfileAttribution; private set => Set(ref _artistProfileAttribution, value); }
     public string ArtistDiscographyText { get => _artistDiscographyText; private set => Set(ref _artistDiscographyText, value); }
-    public string SearchText { get => _searchText; set { if (Set(ref _searchText, value)) { Raise(nameof(SearchSuggestions)); DebounceSearch(); } } }
+    public string SearchText { get => _searchText; set { if (Set(ref _searchText, value)) { Raise(nameof(SearchSuggestions)); RaiseLibraryState(); DebounceSearch(); } } }
     internal static IReadOnlyList<string> SupportedSortOptions { get; } =
     [
         "Title", "Artist", "Album", "Year", "Duration", "Date added",
@@ -724,6 +778,7 @@ public sealed class MainViewModel : ObservableObject
             Raise(nameof(HasQuickFilter));
             Raise(nameof(QuickFilterLabel));
             Raise(nameof(QuickFilterToolTip));
+            RaiseLibraryState();
             PersistViewSettings();
             DebounceQuickFilter();
         }
@@ -746,9 +801,21 @@ public sealed class MainViewModel : ObservableObject
     public IReadOnlyList<string> SearchSuggestions => string.IsNullOrWhiteSpace(SearchText)
         ? SearchHistory.Take(8).ToArray()
         : SearchHistory.Where(item => item.StartsWith(SearchText.Trim(), StringComparison.CurrentCultureIgnoreCase)).Take(8).ToArray();
-    public IReadOnlyList<string> DashboardModuleNames { get; } = ["Artwork", "Lyrics", "Queue"];
+    public IReadOnlyList<string> DashboardModuleNames { get; } = ["Artwork", "Lyrics", "Metadata"];
     public IReadOnlyList<string> DashboardModules => _dashboardModules;
     public bool IsDashboardModuleVisible(string module) => _dashboardModules.Contains(module, StringComparer.OrdinalIgnoreCase);
+    public bool IsArtworkDashboardAvailable => IsDashboardModuleVisible("Artwork");
+    public bool IsNowPlayingInspectorVisible =>
+        IsDashboardModuleVisible("Lyrics")
+        || IsDashboardModuleVisible("Metadata");
+    public bool IsLyricsInspectorAvailable => IsDashboardModuleVisible("Lyrics");
+    public bool IsMetadataInspectorAvailable => IsDashboardModuleVisible("Metadata");
+    public bool IsLyricsInspectorSelected =>
+        IsLyricsInspectorAvailable
+        && _nowPlayingInspectorTab.Equals("Lyrics", StringComparison.OrdinalIgnoreCase);
+    public bool IsMetadataInspectorSelected =>
+        IsMetadataInspectorAvailable
+        && _nowPlayingInspectorTab.Equals("Metadata", StringComparison.OrdinalIgnoreCase);
     public IReadOnlyList<string> TrackColumnNames { get; } =
         TrackListColumnLayout.ColumnNames;
     public IReadOnlyList<string> VisibleTrackColumns => GetViewSettings().VisibleColumns;
@@ -770,7 +837,7 @@ public sealed class MainViewModel : ObservableObject
     public double PositionSeconds { get => _positionSeconds; private set => Set(ref _positionSeconds, value); }
     public double DurationSeconds { get => _durationSeconds; private set => Set(ref _durationSeconds, Math.Max(1, value)); }
     public double Volume { get => _volume; set { if (Set(ref _volume, Math.Clamp(value, 0, 1))) QueueVolumeUpdate(_volume); } }
-    public bool IsScanning { get => _isScanning; private set => Set(ref _isScanning, value); }
+    public bool IsScanning { get => _isScanning; private set { if (Set(ref _isScanning, value)) RaiseLibraryState(); } }
     public int ScanDiscovered { get => _scanDiscovered; private set { if (Set(ref _scanDiscovered, value)) Raise(nameof(ScanProgressMaximum)); } }
     public int ScanProcessed { get => _scanProcessed; private set { if (Set(ref _scanProcessed, value)) Raise(nameof(ScanProgressValue)); } }
     public int ScanAdded { get => _scanAdded; private set => Set(ref _scanAdded, value); }
@@ -807,12 +874,53 @@ public sealed class MainViewModel : ObservableObject
         set { if (Set(ref _allowScheduledScanOnMeteredNetwork, value)) _ = _settings.UpdateAsync(settings => settings.AllowScheduledScanOnMeteredNetwork = value); }
     }
     public string ScheduledScanStatus { get => _scheduledScanStatus; private set => Set(ref _scheduledScanStatus, value); }
-    public bool IsLibraryReady { get => _isLibraryReady; private set => Set(ref _isLibraryReady, value); }
+    public bool IsLibraryReady { get => _isLibraryReady; private set { if (Set(ref _isLibraryReady, value)) RaiseLibraryState(); } }
     public bool IsSafeMode { get => _isSafeMode; private set => Set(ref _isSafeMode, value); }
     public bool IsScanPaused => _scanner.State == ScanLifecycleState.Paused;
     public string ScanPauseGlyph => IsScanPaused ? "\uE768" : "\uE769";
     public string ScanPauseText => IsScanPaused ? "Resume library scan" : "Pause library scan";
-    public bool QueueVisible { get => _queueVisible; set { if (Set(ref _queueVisible, value)) _ = _settings.UpdateAsync(x => x.QueuePanelVisible = value); } }
+    public bool QueueVisible
+    {
+        get => _queueVisible;
+        set
+        {
+            if (!Set(ref _queueVisible, value)) return;
+            RaiseQueuePanelState();
+            _ = _settings.UpdateAsync(settings => settings.QueuePanelVisible = value);
+        }
+    }
+    public bool QueuePanelCompact
+    {
+        get => _queuePanelCompact;
+        set
+        {
+            if (!Set(ref _queuePanelCompact, value)) return;
+            RaiseQueuePanelState();
+            _ = _settings.UpdateAsync(settings => settings.QueuePanelCompact = value);
+        }
+    }
+    public PanelDockSide QueuePanelDockSide
+    {
+        get => _queuePanelDockSide;
+        set
+        {
+            var normalized = Enum.IsDefined(value)
+                ? value
+                : PanelDockSide.Right;
+            if (!Set(ref _queuePanelDockSide, normalized)) return;
+            RaiseQueuePanelState();
+            _ = _settings.UpdateAsync(settings => settings.QueuePanelDockSide = normalized);
+        }
+    }
+    public bool QueuePanelExpanded => QueueVisible && !QueuePanelCompact;
+    public bool QueuePanelCollapsed => QueueVisible && QueuePanelCompact;
+    public int QueuePanelColumn => QueuePanelDockSide == PanelDockSide.Left ? 0 : 2;
+    public string QueuePanelDockText => QueuePanelDockSide == PanelDockSide.Left
+        ? "Docked left"
+        : "Docked right";
+    public string QueuePanelCollapseGlyph => QueuePanelDockSide == PanelDockSide.Left
+        ? "\uE76B"
+        : "\uE76C";
     public bool AnimationsEnabled { get => _animationsEnabled; set { if (Set(ref _animationsEnabled, value)) _ = _settings.UpdateAsync(x => x.AnimationsEnabled = value); } }
     public bool VisualizerEnabled
     {
@@ -965,6 +1073,32 @@ public sealed class MainViewModel : ObservableObject
     public string ActiveLyric { get => _activeLyric; private set => Set(ref _activeLyric, value); }
     public LyricLineViewModel? ActiveLyricLine { get => _activeLyricLine; private set => Set(ref _activeLyricLine, value); }
     public bool HasLyrics => Lyrics.Count > 0;
+    public UiStateKind LyricsStateKind => CurrentTrack is null
+        ? UiStateKind.Disabled
+        : IsOnlineLyricsBusy
+            ? UiStateKind.Loading
+            : LyricsStatus.Contains("failed", StringComparison.OrdinalIgnoreCase)
+              || LyricsStatus.Contains("could not", StringComparison.OrdinalIgnoreCase)
+                ? UiStateKind.Error
+                : UiStateKind.Empty;
+    public string LyricsStateTitle => LyricsStateKind switch
+    {
+        UiStateKind.Disabled => "Play a track to see lyrics",
+        UiStateKind.Loading => "Finding lyrics",
+        UiStateKind.Error => "Lyrics are unavailable",
+        _ => "No lyrics found"
+    };
+    public string LyricsStateDescription => LyricsStateKind switch
+    {
+        UiStateKind.Disabled => "Lyrics appear here when playback starts.",
+        UiStateKind.Loading => "Searching the enabled local and online sources.",
+        UiStateKind.Error => "Try reloading, choosing a local lyric file, or checking the online lookup setting.",
+        _ when OnlineLyricsEnabled => "Reload the track, choose a lyric file, or search the online provider.",
+        _ => "Choose a local lyric file, or enable online lookup in Lyrics settings."
+    };
+    public string LyricsStateActionText => CurrentTrack is not null && OnlineLyricsEnabled
+        ? "Search online"
+        : string.Empty;
     public bool HasSyncedLyrics { get => _hasSyncedLyrics; private set { if (Set(ref _hasSyncedLyrics, value)) { Raise(nameof(LyricsModeText)); Raise(nameof(LyricsHintText)); } } }
     public string LyricsModeText => HasSyncedLyrics ? "SYNCED" : "FULL LYRICS";
     public string LyricsHintText => HasSyncedLyrics ? "Click any line to jump to that moment" : "No timing data available";
@@ -1040,11 +1174,12 @@ public sealed class MainViewModel : ObservableObject
         {
             if (!Set(ref _isOnlineLyricsBusy, value)) return;
             FetchOnlineLyricsCommand.RaiseCanExecuteChanged();
+            RaiseLyricsState();
         }
     }
     public bool LyricsEditorVisible { get => _lyricsEditorVisible; private set { if (Set(ref _lyricsEditorVisible, value)) SaveLyricsCommand.RaiseCanExecuteChanged(); } }
     public string LyricsEditorText { get => _lyricsEditorText; set => Set(ref _lyricsEditorText, value); }
-    public string LyricsStatus { get => _lyricsStatus; private set => Set(ref _lyricsStatus, value); }
+    public string LyricsStatus { get => _lyricsStatus; private set { if (Set(ref _lyricsStatus, value)) RaiseLyricsState(); } }
 
     public RelayCommand NavigateCommand { get; }
     public RelayCommand SelectGroupCommand { get; }
@@ -1058,6 +1193,9 @@ public sealed class MainViewModel : ObservableObject
     public RelayCommand AddSelectedToQueueCommand { get; }
     public RelayCommand PlayNextCommand { get; }
     public RelayCommand ToggleQueueCommand { get; }
+    public RelayCommand ToggleQueueCompactCommand { get; }
+    public RelayCommand ExpandQueueCommand { get; }
+    public RelayCommand SetQueueDockSideCommand { get; }
     public RelayCommand ToggleVisualizerCommand { get; }
     public RelayCommand ToggleShuffleCommand { get; }
     public RelayCommand CycleRepeatCommand { get; }
@@ -1127,19 +1265,86 @@ public sealed class MainViewModel : ObservableObject
     public RelayCommand SetDensityCommand { get; }
     public RelayCommand SetAlbumTileSizeCommand { get; }
     public RelayCommand ToggleDashboardModuleCommand { get; }
+    public RelayCommand SelectNowPlayingInspectorCommand { get; }
+    public RelayCommand DismissNoticeCommand { get; }
 
     public void UpdateQueueSelection(IEnumerable<QueueEntryViewModel> entries) =>
         SelectedQueueEntries = entries.Distinct().ToArray();
 
-    public void ShowNotice(string message)
+    public void ShowNotice(
+        string message,
+        ToastSeverity severity = ToastSeverity.Information)
     {
-        UserNotice = message;
+        var notification = new ToastNotification(message, severity);
+        ActiveToast = notification;
+        UserNotice = notification.Message;
         IsUserNoticeVisible = true;
         _noticeTimer.Stop();
+        _noticeTimer.Interval = notification.DisplayDuration;
         _noticeTimer.Start();
     }
 
+    private void RaiseLibraryState()
+    {
+        Raise(nameof(HasGalleryResults));
+        Raise(nameof(HasOfflineSources));
+        Raise(nameof(LibraryStateKind));
+        Raise(nameof(LibraryStateTitle));
+        Raise(nameof(LibraryStateDescription));
+        Raise(nameof(LibraryStateActionText));
+    }
+
+    private void RaiseLyricsState()
+    {
+        Raise(nameof(LyricsStateKind));
+        Raise(nameof(LyricsStateTitle));
+        Raise(nameof(LyricsStateDescription));
+        Raise(nameof(LyricsStateActionText));
+    }
+
+    private void ToggleQueueVisibility()
+    {
+        if (QueueVisible)
+        {
+            QueueVisible = false;
+            return;
+        }
+
+        QueuePanelCompact = false;
+        QueueVisible = true;
+    }
+
+    private void SetQueueDockSide(object? parameter)
+    {
+        if (parameter is PanelDockSide side)
+        {
+            QueuePanelDockSide = side;
+            return;
+        }
+
+        if (Enum.TryParse<PanelDockSide>(
+                parameter?.ToString(),
+                ignoreCase: true,
+                out var parsed))
+            QueuePanelDockSide = parsed;
+    }
+
+    private void RaiseQueuePanelState()
+    {
+        Raise(nameof(QueueVisible));
+        Raise(nameof(QueuePanelExpanded));
+        Raise(nameof(QueuePanelCollapsed));
+        Raise(nameof(QueuePanelColumn));
+        Raise(nameof(QueuePanelDockText));
+        Raise(nameof(QueuePanelCollapseGlyph));
+    }
+
     private void NoticeTimerOnTick(object? sender, EventArgs e)
+    {
+        DismissNotice();
+    }
+
+    private void DismissNotice()
     {
         _noticeTimer.Stop();
         IsUserNoticeVisible = false;
@@ -1153,7 +1358,11 @@ public sealed class MainViewModel : ObservableObject
         var removed = _queue.RemoveMany(selected.Select(entry => entry.Entry.Id).ToArray());
         if (removed == 0) return;
         SelectedQueueEntries = [];
-        ShowNotice(removed == 1 ? "Removed 1 track from queue" : $"Removed {removed} tracks from queue");
+        ShowNotice(
+            removed == 1
+                ? "Removed 1 track from queue"
+                : $"Removed {removed} tracks from queue",
+            ToastSeverity.Success);
         if (!playingWasRemoved) return;
         if (_queue.Current is { } replacement) await ChangeTrackAsync(replacement);
         else await _audio.StopAsync(_lifetime.Token);
@@ -1167,7 +1376,9 @@ public sealed class MainViewModel : ObservableObject
             .ToArray();
         if (ids.Length == 0) return;
         _queue.MoveInPlaybackOrder(ids, toTop ? 1 : QueuePlaybackCount());
-        ShowNotice(toTop ? "Moved selection to top" : "Moved selection to bottom");
+        ShowNotice(
+            toTop ? "Moved selection to top" : "Moved selection to bottom",
+            ToastSeverity.Success);
     }
 
     private void ToggleStopMode(bool stopAfterCurrent)
@@ -1413,6 +1624,43 @@ public sealed class MainViewModel : ObservableObject
         _ = _settings.UpdateAsync(settings => settings.DashboardModules = modules.ToList());
         Raise(nameof(DashboardModules));
         Raise(nameof(IsDashboardModuleVisible));
+        Raise(nameof(IsArtworkDashboardAvailable));
+        NormalizeInspectorSelection();
+        RaiseInspectorState();
+    }
+
+    private void SelectNowPlayingInspector(string? tab)
+    {
+        if (tab is null
+            || tab.Equals("Artwork", StringComparison.OrdinalIgnoreCase)
+            || !DashboardModuleNames.Contains(tab, StringComparer.OrdinalIgnoreCase)
+            || !IsDashboardModuleVisible(tab))
+            return;
+
+        _nowPlayingInspectorTab = tab;
+        RaiseInspectorState();
+    }
+
+    private void NormalizeInspectorSelection()
+    {
+        if (_nowPlayingInspectorTab.Equals("Lyrics", StringComparison.OrdinalIgnoreCase)
+            && IsLyricsInspectorAvailable)
+            return;
+        if (_nowPlayingInspectorTab.Equals("Metadata", StringComparison.OrdinalIgnoreCase)
+            && IsMetadataInspectorAvailable)
+            return;
+        _nowPlayingInspectorTab = IsLyricsInspectorAvailable
+            ? "Lyrics"
+            : "Metadata";
+    }
+
+    private void RaiseInspectorState()
+    {
+        Raise(nameof(IsNowPlayingInspectorVisible));
+        Raise(nameof(IsLyricsInspectorAvailable));
+        Raise(nameof(IsMetadataInspectorAvailable));
+        Raise(nameof(IsLyricsInspectorSelected));
+        Raise(nameof(IsMetadataInspectorSelected));
     }
 
     private void RequestPlaylistEdit(Playlist? playlist) => PlaylistEditRequested?.Invoke(this, new PlaylistEditContext(playlist));
@@ -1445,6 +1693,7 @@ public sealed class MainViewModel : ObservableObject
                     if (initialTracks is { Count: > 0 }) await _playlists.AddTracksAsync(recreated, initialTracks.Select(track => track.Id).ToArray(), _lifetime.Token);
                 });
             StatusText = $"Playlist '{request.Name}' created";
+            ShowNotice(StatusText, ToastSeverity.Success);
         }
         else
         {
@@ -1466,6 +1715,7 @@ public sealed class MainViewModel : ObservableObject
                     if (before.Kind == PlaylistKind.Smart && request.Rules is not null) await _playlists.UpdateSmartRulesAsync(before.Id, request.Rules, _lifetime.Token);
                 });
             StatusText = $"Playlist '{request.Name}' updated";
+            ShowNotice(StatusText, ToastSeverity.Success);
         }
         _ = BackupPlaylistsAsync();
         await RefreshLibraryAsync(SearchText, _lifetime.Token);
@@ -1480,6 +1730,7 @@ public sealed class MainViewModel : ObservableObject
         await RefreshLibraryAsync(SearchText, _lifetime.Token);
         _ = BackupPlaylistsAsync();
         StatusText = "Playlist duplicated";
+        ShowNotice(StatusText, ToastSeverity.Success);
     }
 
     private async Task DeletePlaylistAsync(LibraryCardViewModel? card)
@@ -1503,6 +1754,7 @@ public sealed class MainViewModel : ObservableObject
         await RefreshLibraryAsync(SearchText, _lifetime.Token);
         _ = BackupPlaylistsAsync();
         StatusText = $"Playlist '{playlist.Name}' deleted";
+        ShowNotice(StatusText, ToastSeverity.Success);
     }
 
     private async Task AddSelectedToPlaylistAsync(LibraryCardViewModel? card)
@@ -1517,6 +1769,7 @@ public sealed class MainViewModel : ObservableObject
         await RefreshLibraryAsync(SearchText, _lifetime.Token);
         _ = BackupPlaylistsAsync();
         StatusText = $"Added {SelectedTracks.Count:N0} tracks to playlist";
+        ShowNotice(StatusText, ToastSeverity.Success);
     }
 
     public async Task AddPathsToPlaylistAsync(LibraryCardViewModel? card, IEnumerable<string> paths)
@@ -1533,6 +1786,7 @@ public sealed class MainViewModel : ObservableObject
         _ = BackupPlaylistsAsync();
         await RefreshLibraryAsync(SearchText, _lifetime.Token);
         StatusText = $"Added {tracks.Length:N0} tracks to playlist";
+        ShowNotice(StatusText, ToastSeverity.Success);
     }
 
     public async Task MoveTracksInPlaylistAsync(LibraryCardViewModel? card, IEnumerable<string> paths, int destinationIndex)
@@ -1644,7 +1898,7 @@ public sealed class MainViewModel : ObservableObject
         _audio.SetVisualizationEnabled(false);
         _queueVisible = false;
         Raise(nameof(AnimationsEnabled));
-        Raise(nameof(QueueVisible));
+        RaiseQueuePanelState();
     }
 
     public Task InitializeShellAsync() =>
@@ -1666,9 +1920,15 @@ public sealed class MainViewModel : ObservableObject
         ApplyWorkspaceTheme();
         LoadViewSettings();
         _volume = _settings.Current.Volume; Raise(nameof(Volume));
-        _queueVisible = !IsSafeMode && _settings.Current.QueuePanelVisible; Raise(nameof(QueueVisible));
+        _queueVisible = !IsSafeMode && _settings.Current.QueuePanelVisible;
+        _queuePanelCompact = _settings.Current.QueuePanelCompact;
+        _queuePanelDockSide = _settings.Current.QueuePanelDockSide;
+        RaiseQueuePanelState();
         _albumTileSize = _settings.Current.AlbumTileSize; Raise(nameof(AlbumTileSize)); Raise(nameof(GalleryItemWidth)); Raise(nameof(GalleryItemHeight));
-        _dashboardModules = NormalizeDashboardModules(_settings.Current.DashboardModules); Raise(nameof(DashboardModules));
+        _dashboardModules = NormalizeDashboardModules(_settings.Current.DashboardModules);
+        NormalizeInspectorSelection();
+        Raise(nameof(DashboardModules));
+        RaiseInspectorState();
         _animationsEnabled = !IsSafeMode && _settings.Current.AnimationsEnabled; Raise(nameof(AnimationsEnabled));
         _visualizerEnabled = !IsSafeMode && _settings.Current.VisualizerEnabled;
         _audio.SetVisualizationEnabled(_visualizerEnabled);
@@ -1786,6 +2046,7 @@ public sealed class MainViewModel : ObservableObject
         }
         Replace(LibrarySources, refreshed);
         Replace(LibraryExclusions, _settings.Current.ExcludedFolders);
+        RaiseLibraryState();
     }
 
     public async Task SaveReplayGainSettingsAsync()
@@ -2263,7 +2524,7 @@ public sealed class MainViewModel : ObservableObject
                 CurrentTrack = CurrentTrack with { ArtworkPath = null };
             await RefreshLibraryAsync(SearchText, _lifetime.Token);
             await RefreshArtworkCacheStatsAsync();
-            ShowNotice("Artwork cache cleared");
+            ShowNotice("Artwork cache cleared", ToastSeverity.Success);
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
         catch (Exception exception)
@@ -2607,6 +2868,7 @@ public sealed class MainViewModel : ObservableObject
             Raise(nameof(HasLibrary));
             Raise(nameof(HasMissingTracks));
             ApplyCurrentView(true);
+            RaiseLibraryState();
         });
     }
 
@@ -2823,6 +3085,22 @@ public sealed class MainViewModel : ObservableObject
         using var scope = _diagnostics.Measure("view", "tab-application",
             _diagnostics.Enabled ? new Dictionary<string, object?> { ["view"] = CurrentView, ["resetSelection"] = resetSelection } : null);
         if (resetSelection && IsCollectionDetailOpen) IsCollectionDetailOpen = false;
+        if (ShouldPreserveCollectionDetail(
+                CurrentView,
+                IsCollectionDetailOpen,
+                resetSelection,
+                SelectedCard)
+            && TryGetCardTracks(SelectedCard!) is { } selectedTracks)
+        {
+            SetBrowseTracks(
+                selectedTracks,
+                SelectedCard!.Title,
+                FormatCollectionSubtitle(SelectedCard, selectedTracks));
+            RestartActiveArtworkResolution();
+            return;
+        }
+        if (IsCollectionDetailOpen)
+            IsCollectionDetailOpen = false;
         switch (CurrentView)
         {
             case "Albums": ViewSubtitle = $"{Albums.Count:N0} albums in your library"; SetActiveGroups(Albums); RestoreGallerySelection(ActiveGroups); break;
@@ -2879,6 +3157,16 @@ public sealed class MainViewModel : ObservableObject
         }
         RestartActiveArtworkResolution();
     }
+
+    internal static bool ShouldPreserveCollectionDetail(
+        string currentView,
+        bool isCollectionDetailOpen,
+        bool resetSelection,
+        LibraryCardViewModel? selectedCard) =>
+        !resetSelection
+        && isCollectionDetailOpen
+        && selectedCard is not null
+        && currentView is "Albums" or "Artists" or "Genres";
 
     private void SelectDefault(IReadOnlyList<LibraryCardViewModel> cards, bool reset, bool selectFirst)
     {
@@ -3157,6 +3445,7 @@ public sealed class MainViewModel : ObservableObject
         var rows = GalleryRowLayout.Pack(GalleryGroups, _galleryColumnCount);
         if (GalleryRowLayout.IsEquivalent(_galleryRows, rows)) return;
         _galleryRows.ReplaceRange(rows);
+        RaiseLibraryState();
     }
 
     public void LoadMoreGalleryGroups()
@@ -3241,6 +3530,7 @@ public sealed class MainViewModel : ObservableObject
         BrowseTracks = _activeTrackPresentation.Items;
         SetSelectedTrackForView(null);
         Raise(nameof(HasBrowseTracks));
+        RaiseLibraryState();
     }
 
     private void SetBrowseTracks(IEnumerable<Track> tracks, string title, string subtitle) =>
@@ -3283,6 +3573,7 @@ public sealed class MainViewModel : ObservableObject
                 ? BrowseTracks.FirstOrDefault()
                 : BrowseTracks.FirstOrDefault(x => x.Path.Equals(selectedPath, StringComparison.OrdinalIgnoreCase)) ?? BrowseTracks.FirstOrDefault());
         Raise(nameof(HasBrowseTracks));
+        RaiseLibraryState();
     }
 
     internal static IReadOnlyList<Track> ApplyTrackViewSettings(
@@ -3487,6 +3778,11 @@ public sealed class MainViewModel : ObservableObject
                 _lifetime.Token);
             await _activeScanTask;
             await RefreshLibraryAsync(SearchText, _lifetime.Token);
+            ShowNotice(
+                ScanFailed == 0
+                    ? $"Library scan complete · {ScanProcessed:N0} files processed"
+                    : $"Library scan complete · {ScanProcessed:N0} processed · {ScanFailed:N0} skipped",
+                ScanFailed == 0 ? ToastSeverity.Success : ToastSeverity.Warning);
         }
         catch (OperationCanceledException)
         {
@@ -3497,7 +3793,9 @@ public sealed class MainViewModel : ObservableObject
         {
             var message = exception.GetBaseException().Message;
             StatusText = "Library scan failed: " + message;
-            ShowNotice("Library scan failed: " + message);
+            ShowNotice(
+                "Library scan failed: " + message,
+                ToastSeverity.Error);
             _applicationLog.Write(
                 ApplicationLogLevel.Error,
                 "scanner",
@@ -3752,7 +4050,9 @@ public sealed class MainViewModel : ObservableObject
         _queue.ReplaceTrack(entry.Track.Path, replacement);
         _playbackFailures.TryRemove(entry.Track.Path, out _);
         await RefreshLibraryAsync(SearchText, _lifetime.Token);
-        ShowNotice($"Located replacement for {entry.Track.Title}");
+        ShowNotice(
+            $"Located replacement for {entry.Track.Title}",
+            ToastSeverity.Success);
         await ChangeTrackAsync(_queue.Select(entry.Entry.Id));
     }
 
@@ -3826,8 +4126,11 @@ public sealed class MainViewModel : ObservableObject
         _volume = _settings.Current.Volume;
         _queueVisible =
             !IsSafeMode && _settings.Current.QueuePanelVisible;
+        _queuePanelCompact = _settings.Current.QueuePanelCompact;
+        _queuePanelDockSide = _settings.Current.QueuePanelDockSide;
         _albumTileSize = _settings.Current.AlbumTileSize;
         _dashboardModules = NormalizeDashboardModules(_settings.Current.DashboardModules);
+        NormalizeInspectorSelection();
         LoadViewSettings();
         _animationsEnabled =
             !IsSafeMode && _settings.Current.AnimationsEnabled;
@@ -3850,9 +4153,10 @@ public sealed class MainViewModel : ObservableObject
         _stopAfterQueue = _settings.Current.StopAfterQueue;
         ApplyLyricsSettings();
         Raise(nameof(Volume));
-        Raise(nameof(QueueVisible));
+        RaiseQueuePanelState();
         Raise(nameof(AlbumTileSize));
         Raise(nameof(DashboardModules));
+        RaiseInspectorState();
         Raise(nameof(GalleryItemWidth));
         Raise(nameof(GalleryItemHeight));
         Raise(nameof(AnimationsEnabled));
@@ -4164,7 +4468,9 @@ public sealed class MainViewModel : ObservableObject
                 StringComparer.OrdinalIgnoreCase);
             failedPaths.Add(track.Path);
             _playbackFailures[track.Path] = TrackFailurePolicy.FriendlyMessage(exception);
-            ShowNotice($"Could not play {track.Title}: {TrackFailurePolicy.FriendlyMessage(exception)}");
+            ShowNotice(
+                $"Could not play {track.Title}: {TrackFailurePolicy.FriendlyMessage(exception)}",
+                ToastSeverity.Error);
             QueueOnChanged(this, EventArgs.Empty);
             StatusText =
                 $"Skipped {track.Title} · {TrackFailurePolicy.FriendlyMessage(exception)}";
@@ -4190,7 +4496,9 @@ public sealed class MainViewModel : ObservableObject
         catch (Exception exception)
         {
             _playbackFailures[track.Path] = exception.GetBaseException().Message;
-            ShowNotice($"Playback failed: {exception.GetBaseException().Message}");
+            ShowNotice(
+                $"Playback failed: {exception.GetBaseException().Message}",
+                ToastSeverity.Error);
             QueueOnChanged(this, EventArgs.Empty);
             StatusText = exception.Message;
             _applicationLog.Write(
@@ -4258,7 +4566,11 @@ public sealed class MainViewModel : ObservableObject
     public void MoveQueueEntries(IReadOnlyCollection<Guid> sourceIds, int targetIndex)
     {
         _queue.MoveInPlaybackOrder(sourceIds, targetIndex);
-        ShowNotice(sourceIds.Count == 1 ? "Queue item moved" : $"Moved {sourceIds.Count} queue items");
+        ShowNotice(
+            sourceIds.Count == 1
+                ? "Queue item moved"
+                : $"Moved {sourceIds.Count} queue items",
+            ToastSeverity.Success);
     }
 
     public async Task PlayHistoryTrackAsync(Track track)
@@ -4288,7 +4600,9 @@ public sealed class MainViewModel : ObservableObject
             ? Math.Max(1, ordered[0].PlaybackIndex - 1)
             : Math.Min(QueuePlaybackCount(), ordered[^1].PlaybackIndex + 2);
         _queue.MoveInPlaybackOrder(ordered.Select(entry => entry.Entry.Id).ToArray(), target);
-        ShowNotice(delta < 0 ? "Moved selection up" : "Moved selection down");
+        ShowNotice(
+            delta < 0 ? "Moved selection up" : "Moved selection down",
+            ToastSeverity.Success);
     }
 
     private int QueuePlaybackCount() =>
@@ -4731,7 +5045,9 @@ public sealed class MainViewModel : ObservableObject
                 settings.StopAfterQueue = false;
             }, _lifetime.Token);
             await _audio.StopAsync(_lifetime.Token);
-            ShowNotice($"{completedMode} completed");
+            ShowNotice(
+                $"{completedMode} completed",
+                ToastSeverity.Success);
             return;
         }
         var next = _queue.Advance();
@@ -5024,6 +5340,7 @@ public sealed class MainViewModel : ObservableObject
                 return new LibrarySourceViewModel(source, status);
             }).ToArray();
             Replace(LibrarySources, sources);
+            RaiseLibraryState();
             foreach (var source in statuses.Where(source => !source.IsOnline || source.Error is not null))
                 _applicationLog.Write(
                     ApplicationLogLevel.Warning,
@@ -5045,6 +5362,7 @@ public sealed class MainViewModel : ObservableObject
             ScanFailures.Insert(0, failure);
             while (ScanFailures.Count > 200) ScanFailures.RemoveAt(ScanFailures.Count - 1);
             Raise(nameof(HasScanFailures));
+            RaiseLibraryState();
         });
 
     private void UpdateScanState()
@@ -5127,7 +5445,7 @@ public sealed class MainViewModel : ObservableObject
     private static string FormatTime(TimeSpan time) => time.ToString(time.TotalHours >= 1 ? @"h\:mm\:ss" : @"m\:ss");
     private static IReadOnlyList<string> NormalizeDashboardModules(IEnumerable<string>? modules)
     {
-        var options = new[] { "Artwork", "Lyrics", "Queue" };
+        var options = new[] { "Artwork", "Lyrics", "Metadata" };
         var normalized = (modules ?? []).Where(item => options.Contains(item, StringComparer.OrdinalIgnoreCase))
             .Select(item => options.First(option => option.Equals(item, StringComparison.OrdinalIgnoreCase)))
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -5198,6 +5516,8 @@ public sealed class MainViewModel : ObservableObject
             {
                 settings.Volume = Volume;
                 settings.QueuePanelVisible = QueueVisible;
+                settings.QueuePanelCompact = QueuePanelCompact;
+                settings.QueuePanelDockSide = QueuePanelDockSide;
             },
             CancellationToken.None);
         await _settings.SaveAsync(CancellationToken.None);

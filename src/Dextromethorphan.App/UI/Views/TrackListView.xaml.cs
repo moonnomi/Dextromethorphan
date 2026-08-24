@@ -121,6 +121,14 @@ public partial class TrackListView : UserControl
             if (DataContext is MainViewModel viewModel) viewModel.SetSelectedTracks(TrackList.SelectedItems.OfType<Track>());
             e.Handled = true;
         }
+        else if (Keyboard.Modifiers == ModifierKeys.None
+                 && e.Key == Key.Enter
+                 && DataContext is MainViewModel viewModel
+                 && viewModel.PlaySelectedCommand.CanExecute(null))
+        {
+            viewModel.PlaySelectedCommand.Execute(null);
+            e.Handled = true;
+        }
     }
 
     private void TrackList_PreviewMouseMove(object sender, MouseEventArgs e)

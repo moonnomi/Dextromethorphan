@@ -1,3 +1,4 @@
+using Dextromethorphan.App.UI;
 using Dextromethorphan.App.ViewModels;
 using Dextromethorphan.Core.Models;
 
@@ -105,6 +106,77 @@ public sealed class LibraryGroupingIndexTests
         Assert.Equal(moved.Path, relinked.Tracks[0].Path);
         Assert.Single(index.Snapshot().Albums);
         Assert.Equal([0], index.Snapshot().Albums[0].TrackIndexes);
+    }
+
+    [Fact]
+    public void ArtistProjectionKeepsSongsAfterIncrementalRefresh()
+    {
+        var index = new LibraryGroupingIndex();
+        var first = Track(
+            11,
+            @"C:\Music\Artist\one.flac",
+            "One",
+            "Artist",
+            "First");
+        var second = Track(
+            12,
+            @"C:\Music\Artist\two.flac",
+            "Two",
+            "Artist",
+            "Second");
+        index.Reset([first]);
+
+        var update = index.Apply(
+        [
+            new LibraryTrackUpdate(
+                new LibraryFileChange(
+                    LibraryFileChangeKind.AddedOrUpdated,
+                    second.Path),
+                second)
+        ]);
+        var artist = Assert.Single(index.Snapshot().Artists);
+        var tracks = new IndexedReadOnlyList<Track>(
+            update.Tracks,
+            artist.TrackIndexes);
+
+        Assert.Equal(2, tracks.Count);
+        Assert.Equal(["One", "Two"], tracks.Select(track => track.Title));
+    }
+
+    [Theory]
+    [InlineData("Artists", true, false, true)]
+    [InlineData("Albums", true, false, true)]
+    [InlineData("Genres", true, false, true)]
+    [InlineData("Artists", true, true, false)]
+    [InlineData("Songs", true, false, false)]
+    [InlineData("Artists", false, false, false)]
+    public void CollectionDetailRefreshPolicyPreservesOnlyOpenCollectionViews(
+        string view,
+        bool isOpen,
+        bool resetSelection,
+        bool expected)
+    {
+        var card = new LibraryCardViewModel
+        {
+            Kind = "Artist",
+            Key = "Artist",
+            Title = "Artist",
+            TrackCount = 1,
+            TrackIndexes = [0]
+        };
+
+        Assert.Equal(
+            expected,
+            MainViewModel.ShouldPreserveCollectionDetail(
+                view,
+                isOpen,
+                resetSelection,
+                card));
+        Assert.False(MainViewModel.ShouldPreserveCollectionDetail(
+            view,
+            isOpen,
+            resetSelection,
+            selectedCard: null));
     }
 
     private static Track Track(

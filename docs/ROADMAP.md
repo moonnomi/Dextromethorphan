@@ -24,7 +24,7 @@ This is the master backlog for turning Dextromethorphan from a capable personal 
 - [x] BASE-009 JSON settings with migrations and atomic persistence.
 - [x] BASE-010 Themed track and queue context menus.
 - [x] BASE-011 Release script, x64/ARM64 targets, Inno Setup project, and self-contained publish support.
-- [x] BASE-012 Automated unit/integration foundation with 317 passing tests.
+- [x] BASE-012 Automated unit/integration foundation with 467 passing tests.
 
 ---
 
@@ -298,17 +298,17 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 
 ### Visual and interaction system
 
-- [ ] **P1 UX-001** Create shared design tokens for spacing, radii, type scale, elevations, states, and motion durations.
+- [x] **P1 UX-001** Create shared design tokens for spacing, radii, type scale, elevations, states, and motion durations.
 - [ ] **P1 UX-002** Break the main shell and settings into reusable themed controls; remove one-off inline styles.
-- [ ] **P1 UX-003** Theme every popup, context menu, tooltip, dialog, combo box, checkbox, radio button, progress indicator, and scrollbar.
-- [ ] **P1 UX-004** Add consistent loading, empty, offline, error, disabled, and success states.
-- [ ] **P1 UX-005** Add nonintrusive themed toasts for queue, playlist, scan, settings, and playback actions.
-- [ ] **P1 UX-006** Add rich metadata tooltips with full title/path/codec/rate/bit depth/bitrate where useful.
+- [x] **P1 UX-003** Theme every popup, context menu, tooltip, dialog, combo box, checkbox, radio button, progress indicator, and scrollbar.
+- [x] **P1 UX-004** Add consistent loading, empty, offline, error, disabled, and success states.
+- [x] **P1 UX-005** Add nonintrusive themed toasts for queue, playlist, scan, settings, and playback actions.
+- [x] **P1 UX-006** Add rich metadata tooltips with full title/path/codec/rate/bit depth/bitrate where useful.
 - [ ] **P1 UX-007** Validate the layout at 800×600, common laptop sizes, ultrawide, and queue-visible/hidden combinations.
 - [ ] **P1 UX-008** Validate PerMonitorV2 DPI behavior at 100%, 125%, 150%, 200%, mixed-DPI monitors, and monitor changes.
-- [ ] **P1 UX-009** Restore window placement safely when monitors are removed or resolution changes.
-- [ ] **P1 UX-010** Integrate Windows 11 snap-layout behavior or document the custom-titlebar limitation and provide an equivalent.
-- [ ] **P2 UX-011** Add configurable dock/collapse behavior for queue, lyrics, and metadata panels.
+- [x] **P1 UX-009** Restore window placement safely when monitors are removed or resolution changes.
+- [x] **P1 UX-010** Integrate Windows 11 snap-layout behavior or document the custom-titlebar limitation and provide an equivalent.
+- [x] **P2 UX-011** Add configurable dock/collapse behavior for queue, lyrics, and metadata panels.
 - [ ] **P3 UX-012** Add detachable/floating panels only after state, focus, and multi-window ownership are reliable.
 
 ### Accessibility and input
@@ -317,9 +317,9 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 - [ ] **P1 A11Y-002** Add visible focus states and meaningful AutomationProperties names/help text.
 - [ ] **P1 A11Y-003** Test Narrator for navigation, track metadata, transport state, sliders, queue state, and dialogs.
 - [ ] **P1 A11Y-004** Meet WCAG AA contrast for text and state indicators; never encode state by color alone.
-- [ ] **P1 A11Y-005** Support Windows High Contrast and reduced-motion settings.
-- [ ] **P1 A11Y-006** Support keyboard context-menu invocation, access keys, and full list multi-selection.
-- [ ] **P1 A11Y-007** Make seek/volume sliders announce values and support fine/coarse keyboard increments.
+- [x] **P1 A11Y-005** Support Windows High Contrast and reduced-motion settings.
+- [x] **P1 A11Y-006** Support keyboard context-menu invocation, access keys, and full list multi-selection.
+- [x] **P1 A11Y-007** Make seek/volume sliders announce values and support fine/coarse keyboard increments.
 - [ ] **P1 A11Y-008** Audit touch, pen, mouse, precision touchpad, Mouse4/Mouse5, media keys, and remote-control input.
 - [ ] **P2 A11Y-009** Prepare all user-facing strings for localization and verify RTL layout.
 

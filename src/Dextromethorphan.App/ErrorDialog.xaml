@@ -10,7 +10,9 @@
         WindowStyle="None"
         ResizeMode="NoResize"
         ShowInTaskbar="False"
-        Background="{DynamicResource AppBackgroundBrush}">
+        Background="{DynamicResource AppBackgroundBrush}"
+        KeyboardNavigation.TabNavigation="Cycle"
+        AutomationProperties.Name="Dextromethorphan error dialog">
     <shell:WindowChrome.WindowChrome>
         <shell:WindowChrome CaptionHeight="46" ResizeBorderThickness="0" GlassFrameThickness="0" CornerRadius="12"/>
     </shell:WindowChrome.WindowChrome>
@@ -31,13 +33,13 @@
                     <TextBlock Text="Dextromethorphan encountered a problem" FontSize="20" FontWeight="SemiBold"/>
                     <TextBlock Text="{Binding ContextText}" Foreground="{DynamicResource TextMutedBrush}" FontSize="11" Margin="0,4,0,0"/>
                 </StackPanel>
-                <Button Grid.Column="1" Style="{StaticResource IconButton}" Content="&#xE711;" Click="Exit_Click" ToolTip="Close"/>
+                <Button Grid.Column="1" Style="{StaticResource IconButton}" Content="&#xE711;" Click="Exit_Click" ToolTip="Close" AutomationProperties.Name="Close error dialog"/>
             </Grid>
             <TextBlock Grid.Row="1" Text="{Binding MessageText}" TextWrapping="Wrap" FontSize="14" Margin="0,22,0,0"/>
             <Expander Grid.Row="2" Header="Technical details" Margin="0,18,0,0">
                 <Border Background="{DynamicResource SurfaceRaisedBrush}" CornerRadius="8" Padding="12" Margin="0,8,0,0" MaxHeight="320">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <TextBox Text="{Binding DetailsText, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0" Background="Transparent" FontFamily="Cascadia Mono" FontSize="10"/>
+                        <TextBox Text="{Binding DetailsText, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0" Background="Transparent" FontFamily="Cascadia Mono" FontSize="10" AutomationProperties.Name="Technical error details" AutomationProperties.HelpText="Read-only diagnostic information."/>
                     </ScrollViewer>
                 </Border>
             </Expander>
@@ -50,11 +52,11 @@
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <Button Content="Copy details" Click="Copy_Click" Margin="0,0,8,0"/>
-                <Button Grid.Column="1" Content="Open log folder" Click="OpenLogs_Click"/>
-                <Button Grid.Column="3" Content="Continue" Click="Continue_Click" Visibility="{Binding ContinueVisibility}" Margin="8,0,0,0"/>
-                <Button Grid.Column="4" Content="Restart" Click="Restart_Click" Margin="8,0,0,0"/>
-                <Button Grid.Column="5" Content="Exit" Click="Exit_Click" Margin="8,0,0,0"/>
+                <Button Content="_Copy details" AutomationProperties.Name="Copy error details" Click="Copy_Click" Margin="0,0,8,0"/>
+                <Button Grid.Column="1" Content="Open _log folder" AutomationProperties.Name="Open log folder" Click="OpenLogs_Click"/>
+                <Button Grid.Column="3" Content="C_ontinue" AutomationProperties.Name="Continue using the application" Click="Continue_Click" Visibility="{Binding ContinueVisibility}" Margin="8,0,0,0"/>
+                <Button Grid.Column="4" Content="_Restart" AutomationProperties.Name="Restart Dextromethorphan" Click="Restart_Click" Margin="8,0,0,0"/>
+                <Button Grid.Column="5" Content="E_xit" IsCancel="True" AutomationProperties.Name="Exit Dextromethorphan" Click="Exit_Click" Margin="8,0,0,0"/>
             </Grid>
         </Grid>
     </Border>

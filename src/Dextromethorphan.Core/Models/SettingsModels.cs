@@ -2,7 +2,7 @@ namespace Dextromethorphan.Core.Models;
 
 public sealed class AppSettings
 {
-    public const int CurrentSchemaVersion = 9;
+    public const int CurrentSchemaVersion = 10;
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public string Theme { get; set; } = "Dark";
     public string AccentColor { get; set; } = "#8290FF";
@@ -34,11 +34,13 @@ public sealed class AppSettings
     /// this as a small ordered list makes the layout portable and lets the UI
     /// add modules without another settings schema migration.
     /// </summary>
-    public List<string> DashboardModules { get; set; } = ["Artwork", "Lyrics", "Queue"];
+    public List<string> DashboardModules { get; set; } = ["Artwork", "Lyrics", "Metadata"];
     public List<string> SearchHistory { get; set; } = [];
     public int ArtworkCacheMegabytes { get; set; } = 512;
     public bool QueuePanelVisible { get; set; } = true;
     public int QueuePanelWidth { get; set; } = 320;
+    public bool QueuePanelCompact { get; set; }
+    public PanelDockSide QueuePanelDockSide { get; set; } = PanelDockSide.Right;
     public bool FullscreenHideNavigation { get; set; } = true;
     public List<string> LibraryFolders { get; set; } = [];
     public List<string> ExcludedFolders { get; set; } = [];
@@ -111,6 +113,12 @@ public enum LibraryDensity
     Comfortable,
     Compact,
     Grid
+}
+
+public enum PanelDockSide
+{
+    Left,
+    Right
 }
 
 public sealed class ViewSettings

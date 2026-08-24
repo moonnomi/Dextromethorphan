@@ -10,7 +10,9 @@
         ResizeMode="NoResize"
         ShowInTaskbar="False"
         Background="Transparent"
-        AllowsTransparency="True">
+        AllowsTransparency="True"
+        KeyboardNavigation.TabNavigation="Cycle"
+        AutomationProperties.Name="Library recovery dialog">
     <Border Background="{DynamicResource SurfaceBrush}"
             BorderBrush="{DynamicResource BorderBrush}"
             BorderThickness="1"
@@ -35,7 +37,9 @@
                                TextWrapping="Wrap"/>
                     <Button x:Name="RestoreButton"
                             Style="{StaticResource PrimaryButton}"
-                            Content="Restore backup"
+                            Content="_Restore backup"
+                            AutomationProperties.Name="Restore latest automatic backup"
+                            AutomationProperties.HelpText="Restores app data from the newest available automatic backup without modifying music files."
                             HorizontalAlignment="Left"
                             Click="Restore_Click"/>
                 </StackPanel>
@@ -51,12 +55,16 @@
                                Foreground="{DynamicResource TextMutedBrush}"
                                FontSize="11"
                                TextWrapping="Wrap"/>
-                    <Button Content="Rebuild library"
+                    <Button Content="Re_build library"
+                            AutomationProperties.Name="Rebuild library"
+                            AutomationProperties.HelpText="Quarantines the damaged database and rebuilds the library by reading configured music folders."
                             HorizontalAlignment="Left"
                             Click="Rebuild_Click"/>
                 </StackPanel>
             </Border>
-            <Button Content="Exit without changing data"
+            <Button Content="E_xit without changing data"
+                    IsCancel="True"
+                    AutomationProperties.Name="Exit without changing data"
                     HorizontalAlignment="Right"
                     Margin="0,18,0,0"
                     Click="Exit_Click"/>

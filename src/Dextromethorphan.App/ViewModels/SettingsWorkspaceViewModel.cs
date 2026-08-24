@@ -35,6 +35,8 @@ public sealed class SettingsWorkspaceViewModel : ObservableObject
     private double _interfaceFontSize = 14;
     private double _backgroundOpacity = 1;
     private int _queuePanelWidth = 320;
+    private bool _queuePanelCompact;
+    private PanelDockSide _queuePanelDockSide = PanelDockSide.Right;
     private bool _fullscreenHideNavigation = true;
     private string _appearanceStatus = "Visual changes apply immediately.";
     private PlaybackDraft _playbackBaseline = PlaybackDraft.Default;
@@ -175,6 +177,34 @@ public sealed class SettingsWorkspaceViewModel : ObservableObject
 
     public string QueuePanelWidthText => $"{QueuePanelWidth} px";
 
+    public bool QueuePanelCompact
+    {
+        get => _queuePanelCompact;
+        set
+        {
+            if (!Set(ref _queuePanelCompact, value)) return;
+            _main.QueuePanelCompact = value;
+            ApplyLiveAppearance();
+        }
+    }
+
+    public PanelDockSide QueuePanelDockSide
+    {
+        get => _queuePanelDockSide;
+        set
+        {
+            var normalized = Enum.IsDefined(value)
+                ? value
+                : PanelDockSide.Right;
+            if (!Set(ref _queuePanelDockSide, normalized)) return;
+            _main.QueuePanelDockSide = normalized;
+            ApplyLiveAppearance();
+        }
+    }
+
+    public IReadOnlyList<PanelDockSide> PanelDockSides { get; } =
+        Enum.GetValues<PanelDockSide>();
+
     public bool FullscreenHideNavigation
     {
         get => _fullscreenHideNavigation;
@@ -293,6 +323,8 @@ public sealed class SettingsWorkspaceViewModel : ObservableObject
             _interfaceFontSize = settings.FontSize;
             _backgroundOpacity = settings.BackgroundOpacity;
             _queuePanelWidth = settings.QueuePanelWidth;
+            _queuePanelCompact = settings.QueuePanelCompact;
+            _queuePanelDockSide = settings.QueuePanelDockSide;
             _fullscreenHideNavigation = settings.FullscreenHideNavigation;
             RaiseAppearance();
             LoadPlayback(settings);
@@ -511,6 +543,8 @@ public sealed class SettingsWorkspaceViewModel : ObservableObject
             settings.FontSize = InterfaceFontSize;
             settings.BackgroundOpacity = BackgroundOpacity;
             settings.QueuePanelWidth = QueuePanelWidth;
+            settings.QueuePanelCompact = QueuePanelCompact;
+            settings.QueuePanelDockSide = QueuePanelDockSide;
             settings.FullscreenHideNavigation = FullscreenHideNavigation;
         }, cancellationToken);
 
@@ -704,6 +738,8 @@ public sealed class SettingsWorkspaceViewModel : ObservableObject
         Raise(nameof(BackgroundOpacity));
         Raise(nameof(QueuePanelWidth));
         Raise(nameof(QueuePanelWidthText));
+        Raise(nameof(QueuePanelCompact));
+        Raise(nameof(QueuePanelDockSide));
         Raise(nameof(FullscreenHideNavigation));
     }
 

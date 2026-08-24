@@ -29,6 +29,7 @@ public partial class App : Application
     private readonly ConcurrentQueue<IReadOnlyList<string>> _pendingLaunchArguments = new();
     private SingleInstanceCoordinator? _singleInstance;
     private StartupRecoveryGuard? _startupRecoveryGuard;
+    private HighContrastThemeCoordinator? _highContrastThemeCoordinator;
     private bool _restartRequested;
     private readonly IHost _host = Host.CreateDefaultBuilder()
         .ConfigureServices(services =>
@@ -38,6 +39,7 @@ public partial class App : Application
             services.AddSingleton<PersistentArtworkThumbnailStore>();
             services.AddSingleton<ArtworkImageService>();
             services.AddSingleton<PerformanceOverlayViewModel>();
+            services.AddSingleton<WindowPlacementService>();
             services.AddSingleton<DiagnosticsBundleExporter>();
             services.AddSingleton<UserDataBackupService>();
             services.AddSingleton<DatabaseRecoveryService>();
@@ -83,7 +85,10 @@ public partial class App : Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        _highContrastThemeCoordinator = new HighContrastThemeCoordinator(this);
+        _highContrastThemeCoordinator.Start();
         var benchmark = PerformanceBenchmarkOptions.Parse(e.Args);
+        var windowingSmokeOutput = WindowingSmokeOptions.ParseOutputDirectory(e.Args);
         var openSettings = e.Args.Any(argument => argument.Equals(
             "--open-settings",
             StringComparison.OrdinalIgnoreCase));
@@ -214,6 +219,40 @@ public partial class App : Application
         var processStartedAt = new DateTimeOffset(Process.GetCurrentProcess().StartTime.ToUniversalTime(), TimeSpan.Zero);
         var libraryInitialization = window.ViewModel.InitializeLibraryAsync();
         await window.CompleteStartupPresentationAsync();
+        if (windowingSmokeOutput is not null)
+        {
+            Directory.CreateDirectory(windowingSmokeOutput);
+            var reportPath = Path.Combine(windowingSmokeOutput, "windowing-smoke.json");
+            try
+            {
+                await libraryInitialization;
+                var report = await window.CaptureWindowingSmokeAsync(
+                    windowingSmokeOutput,
+                    CancellationToken.None);
+                await File.WriteAllTextAsync(
+                    reportPath,
+                    JsonSerializer.Serialize(
+                        report,
+                        new JsonSerializerOptions { WriteIndented = true }));
+            }
+            catch (Exception exception)
+            {
+                await File.WriteAllTextAsync(
+                    reportPath,
+                    JsonSerializer.Serialize(new
+                    {
+                        schemaVersion = 1,
+                        passed = false,
+                        error = exception.GetBaseException().Message,
+                        exception = exception.ToString()
+                    }, new JsonSerializerOptions { WriteIndented = true }));
+            }
+            finally
+            {
+                await window.CloseAfterBenchmarkAsync();
+            }
+            return;
+        }
         if (openSettings)
             window.OpenSettingsWindow();
         await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Render);
@@ -412,6 +451,7 @@ public partial class App : Application
         }
         finally
         {
+            _highContrastThemeCoordinator?.Dispose();
             _host.Dispose();
             base.OnExit(e);
         }

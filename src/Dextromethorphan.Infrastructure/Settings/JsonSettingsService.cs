@@ -262,6 +262,8 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
             1);
         settings.AlbumTileSize = Math.Clamp(settings.AlbumTileSize, 80, 400);
         settings.QueuePanelWidth = Math.Clamp(settings.QueuePanelWidth, 280, 520);
+        if (!Enum.IsDefined(settings.QueuePanelDockSide))
+            settings.QueuePanelDockSide = PanelDockSide.Right;
         settings.ViewSettings ??= new Dictionary<string, ViewSettings>(StringComparer.OrdinalIgnoreCase);
         var normalizedViews = new Dictionary<string, ViewSettings>(StringComparer.OrdinalIgnoreCase);
         foreach (var pair in settings.ViewSettings.Take(32))
@@ -281,14 +283,14 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
             normalizedViews[pair.Key.Trim()] = view;
         }
         settings.ViewSettings = normalizedViews;
-        var dashboardOptions = new[] { "Artwork", "Lyrics", "Queue" };
+        var dashboardOptions = new[] { "Artwork", "Lyrics", "Metadata" };
         settings.DashboardModules = (settings.DashboardModules ?? [])
             .Where(item => dashboardOptions.Contains(item, StringComparer.OrdinalIgnoreCase))
             .Select(item => dashboardOptions.First(option => option.Equals(item, StringComparison.OrdinalIgnoreCase)))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
         if (settings.DashboardModules.Count == 0)
-            settings.DashboardModules = ["Artwork", "Lyrics", "Queue"];
+            settings.DashboardModules = ["Artwork", "Lyrics", "Metadata"];
         settings.SearchHistory = (settings.SearchHistory ?? [])
             .Where(item => !string.IsNullOrWhiteSpace(item))
             .Select(item => item.Trim())
@@ -466,6 +468,8 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
                 target.DashboardModules = defaults.DashboardModules;
                 target.QueuePanelVisible = defaults.QueuePanelVisible;
                 target.QueuePanelWidth = defaults.QueuePanelWidth;
+                target.QueuePanelCompact = defaults.QueuePanelCompact;
+                target.QueuePanelDockSide = defaults.QueuePanelDockSide;
                 target.FullscreenHideNavigation =
                     defaults.FullscreenHideNavigation;
                 target.ArtworkCacheMegabytes =

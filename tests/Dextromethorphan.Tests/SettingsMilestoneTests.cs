@@ -18,12 +18,14 @@ public sealed class SettingsMilestoneTests : IDisposable
     {
         var settings = new AppSettings();
 
-        Assert.Equal(9, AppSettings.CurrentSchemaVersion);
+        Assert.Equal(10, AppSettings.CurrentSchemaVersion);
         Assert.Equal(AppSettings.CurrentSchemaVersion, settings.SchemaVersion);
         Assert.Equal("Dark", settings.Theme);
         Assert.Equal("#8290FF", settings.AccentColor);
         Assert.Equal(1, settings.BackgroundOpacity);
         Assert.Equal(320, settings.QueuePanelWidth);
+        Assert.False(settings.QueuePanelCompact);
+        Assert.Equal(PanelDockSide.Right, settings.QueuePanelDockSide);
         Assert.True(settings.FullscreenHideNavigation);
         Assert.Equal(
             MetadataWriteMode.DatabaseOnly,
@@ -40,6 +42,7 @@ public sealed class SettingsMilestoneTests : IDisposable
             AccentColor = "#FF8A3D",
             BackgroundOpacity = double.NaN,
             QueuePanelWidth = int.MaxValue,
+            QueuePanelDockSide = (PanelDockSide)999,
             DefaultMetadataWriteMode = (MetadataWriteMode)999
         };
 
@@ -49,6 +52,7 @@ public sealed class SettingsMilestoneTests : IDisposable
         Assert.Equal("#8290FF", settings.AccentColor);
         Assert.Equal(1, settings.BackgroundOpacity);
         Assert.Equal(520, settings.QueuePanelWidth);
+        Assert.Equal(PanelDockSide.Right, settings.QueuePanelDockSide);
         Assert.Equal(
             MetadataWriteMode.DatabaseOnly,
             settings.DefaultMetadataWriteMode);
@@ -91,6 +95,8 @@ public sealed class SettingsMilestoneTests : IDisposable
                 settings.AccentColor = "#ABCDEF";
                 settings.BackgroundOpacity = 0.84;
                 settings.QueuePanelWidth = 444;
+                settings.QueuePanelCompact = true;
+                settings.QueuePanelDockSide = PanelDockSide.Left;
                 settings.FullscreenHideNavigation = false;
                 settings.DefaultMetadataWriteMode =
                     MetadataWriteMode.WriteToFile;
@@ -104,6 +110,8 @@ public sealed class SettingsMilestoneTests : IDisposable
         Assert.Equal("#ABCDEF", reloaded.Current.AccentColor);
         Assert.Equal(0.84, reloaded.Current.BackgroundOpacity);
         Assert.Equal(444, reloaded.Current.QueuePanelWidth);
+        Assert.True(reloaded.Current.QueuePanelCompact);
+        Assert.Equal(PanelDockSide.Left, reloaded.Current.QueuePanelDockSide);
         Assert.False(reloaded.Current.FullscreenHideNavigation);
         Assert.Equal(
             MetadataWriteMode.WriteToFile,
@@ -130,6 +138,8 @@ public sealed class SettingsMilestoneTests : IDisposable
                 settings.DashboardModules = ["Lyrics"];
                 settings.QueuePanelVisible = false;
                 settings.QueuePanelWidth = 480;
+                settings.QueuePanelCompact = true;
+                settings.QueuePanelDockSide = PanelDockSide.Left;
                 settings.FullscreenHideNavigation = false;
                 settings.Volume = 0.33;
                 settings.DefaultMetadataWriteMode =
@@ -161,6 +171,12 @@ public sealed class SettingsMilestoneTests : IDisposable
             defaults.QueuePanelVisible,
             service.Current.QueuePanelVisible);
         Assert.Equal(defaults.QueuePanelWidth, service.Current.QueuePanelWidth);
+        Assert.Equal(
+            defaults.QueuePanelCompact,
+            service.Current.QueuePanelCompact);
+        Assert.Equal(
+            defaults.QueuePanelDockSide,
+            service.Current.QueuePanelDockSide);
         Assert.Equal(
             defaults.FullscreenHideNavigation,
             service.Current.FullscreenHideNavigation);
@@ -302,6 +318,8 @@ public sealed class SettingsMilestoneTests : IDisposable
             nameof(AppSettings.ArtworkCacheMegabytes),
             nameof(AppSettings.QueuePanelVisible),
             nameof(AppSettings.QueuePanelWidth),
+            nameof(AppSettings.QueuePanelCompact),
+            nameof(AppSettings.QueuePanelDockSide),
             nameof(AppSettings.FullscreenHideNavigation),
             nameof(AppSettings.ExcludedFolders),
             nameof(AppSettings.LibrarySources),
