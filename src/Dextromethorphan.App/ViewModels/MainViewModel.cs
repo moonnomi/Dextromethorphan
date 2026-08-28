@@ -272,9 +272,18 @@ public sealed class MainViewModel : ObservableObject
         TogglePlaybackCommand = new AsyncRelayCommand(_ => TogglePlaybackAsync());
         NextCommand = new AsyncRelayCommand(_ => ChangeTrackAsync(_queue.Advance()));
         PreviousCommand = new AsyncRelayCommand(_ => HandlePreviousAsync());
-        AddToQueueCommand = new RelayCommand(p => { if (p is Track track) _queue.Add([track]); });
-        AddSelectedToQueueCommand = new RelayCommand(_ => { if (SelectedTracks.Count > 0) _queue.Add(SelectedTracks); });
-        PlayNextCommand = new RelayCommand(p => { if (p is Track track) _queue.PlayNext([track]); });
+        AddToQueueCommand = new RelayCommand(p =>
+        {
+            if (p is Track track) AddTracksToQueue([track]);
+        });
+        AddSelectedToQueueCommand = new RelayCommand(_ =>
+        {
+            if (SelectedTracks.Count > 0) AddTracksToQueue(SelectedTracks);
+        });
+        PlayNextCommand = new RelayCommand(p =>
+        {
+            if (p is Track track) AddTracksToQueue([track], playNext: true);
+        });
         ToggleQueueCommand = new RelayCommand(_ => ToggleQueueVisibility());
         ToggleQueueCompactCommand = new RelayCommand(_ =>
             QueuePanelCompact = !QueuePanelCompact);
@@ -1818,7 +1827,8 @@ public sealed class MainViewModel : ObservableObject
         IEnumerable<string> paths,
         int? targetPlaybackIndex = null)
     {
-        var tracks = MatchUniqueQueueTracks(_allTracks, paths);
+        var tracks = FilterTracksAlreadyQueued(
+            MatchUniqueQueueTracks(_allTracks, paths));
         if (tracks.Length == 0) return;
         if (targetPlaybackIndex is > 0)
         {
@@ -1826,6 +1836,75 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
         _queue.Add(tracks);
+    }
+
+    private int AddTracksToQueue(
+        IEnumerable<Track> tracks,
+        bool playNext = false)
+    {
+        var additions = FilterTracksAlreadyQueued(tracks);
+        if (additions.Length == 0) return 0;
+        if (playNext) _queue.PlayNext(additions);
+        else _queue.Add(additions);
+        return additions.Length;
+    }
+
+    /// <summary>
+    /// Treats a physical path as the queue identity. A track can belong to
+    /// several album/artist/genre cards, but adding those cards must not create
+    /// another queue entry for a path that is already present.
+    /// </summary>
+    internal Track[] FilterTracksAlreadyQueued(IEnumerable<Track> tracks) =>
+        FilterQueueTrackDuplicates(
+            tracks,
+            _queue.Items.Select(item => item.Track));
+
+    internal static Track[] FilterQueueTrackDuplicates(
+        IEnumerable<Track> tracks,
+        IEnumerable<Track> queuedTracks)
+    {
+        var queued = queuedTracks.ToArray();
+        var seenPaths = queued
+            .Select(track => track.Path)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var seenFingerprints = queued
+            .Select(QueueTrackFingerprint)
+            .Where(fingerprint => fingerprint is not null)
+            .Cast<string>()
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return tracks
+            .Where(track =>
+                !track.IsMissing
+                && !string.IsNullOrWhiteSpace(track.Path)
+                && seenPaths.Add(track.Path)
+                && (QueueTrackFingerprint(track) is not { } fingerprint
+                    || seenFingerprints.Add(fingerprint)))
+            .ToArray();
+    }
+
+    private static string? QueueTrackFingerprint(Track track)
+    {
+        // A full content hash is intentionally not calculated on the UI path.
+        // These stable fields identify byte-identical copies in normal library
+        // scans while avoiding a multi-megabyte read for every queue action.
+        // Album is intentionally excluded because duplicate copies often have
+        // different album tags after being organized into separate collections.
+        if (track.FileSize <= 0 || track.Duration <= TimeSpan.Zero) return null;
+        return string.Join(
+            '\u001F',
+            track.Title.Trim(),
+            track.DisplayArtist.Trim(),
+            track.Duration.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            track.FileSize.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            track.Codec.Trim(),
+            track.SampleRate.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            track.BitsPerSample.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            track.Channels.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            track.TrackNumber.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            track.DiscNumber.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            track.SegmentStart.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            track.SegmentEnd?.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "");
     }
 
     internal static Track[] MatchUniqueQueueTracks(
@@ -1845,7 +1924,16 @@ public sealed class MainViewModel : ObservableObject
             .ToArray();
     }
 
-    public IReadOnlyList<string> GetCardPaths(LibraryCardViewModel? card) => card is null ? [] : card.PlaylistId is null ? card.TrackIndexes.Where(index => index >= 0 && index < _allTracks.Count).Select(index => _allTracks[index].Path).ToArray() : [];
+    public IReadOnlyList<string> GetCardPaths(LibraryCardViewModel? card) =>
+        card is null
+            ? []
+            : card.PlaylistId is null
+                ? card.TrackIndexes
+                    .Where(index => index >= 0 && index < _allTracks.Count)
+                    .Select(index => _allTracks[index].Path)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray()
+                : [];
 
     public string? GetTrackArtworkPath(Track track)
     {
@@ -3803,12 +3891,13 @@ public sealed class MainViewModel : ObservableObject
     {
         if (card is null || card.TrackCount == 0) return;
         var tracks = await GetCardTracksAsync(card);
-        if (tracks.Count == 0) return;
-        _queue.PlayNext(tracks);
+        var additions = FilterTracksAlreadyQueued(tracks);
+        if (additions.Length == 0) return;
+        _queue.PlayNext(additions);
         ShowNotice(
-            tracks.Count == 1
-                ? $"{tracks[0].Title} will play next"
-                : $"{tracks.Count:N0} tracks will play next",
+            additions.Length == 1
+                ? $"{additions[0].Title} will play next"
+                : $"{additions.Length:N0} tracks will play next",
             ToastSeverity.Success);
     }
 
@@ -3816,12 +3905,13 @@ public sealed class MainViewModel : ObservableObject
     {
         if (card is null || card.TrackCount == 0) return;
         var tracks = await GetCardTracksAsync(card);
-        if (tracks.Count == 0) return;
-        _queue.Add(tracks);
+        var additions = FilterTracksAlreadyQueued(tracks);
+        if (additions.Length == 0) return;
+        _queue.Add(additions);
         ShowNotice(
-            tracks.Count == 1
-                ? $"Added {tracks[0].Title} to queue"
-                : $"Added {tracks.Count:N0} tracks to queue",
+            additions.Length == 1
+                ? $"Added {additions[0].Title} to queue"
+                : $"Added {additions.Length:N0} tracks to queue",
             ToastSeverity.Success);
     }
 

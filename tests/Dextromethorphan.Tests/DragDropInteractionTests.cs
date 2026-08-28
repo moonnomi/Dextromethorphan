@@ -49,6 +49,46 @@ public sealed class DragDropInteractionTests
     }
 
     [Fact]
+    public void QueueAddFilterSkipsPathsAlreadyPresentAndDuplicatePayloadEntries()
+    {
+        var existing = NewQueueTrack(
+            @"C:\Music\existing.flac",
+            "Existing",
+            100);
+        var duplicate = existing with
+        {
+            Path = @"C:\Music\duplicate-copy.flac",
+            Album = "A differently tagged album"
+        };
+        var newTrack = NewQueueTrack(
+            @"C:\Music\new.flac",
+            "New",
+            101);
+
+        var result = MainViewModel.FilterQueueTrackDuplicates(
+            [duplicate, newTrack, newTrack],
+            [existing]);
+
+        var only = Assert.Single(result);
+        Assert.Same(newTrack, only);
+    }
+
+    private static Track NewQueueTrack(string path, string title, long fileSize) =>
+        new()
+        {
+            Path = path,
+            Title = title,
+            Artist = "Artist",
+            Album = "Album",
+            Duration = TimeSpan.FromMinutes(2),
+            FileSize = fileSize,
+            Codec = "FLAC",
+            SampleRate = 48_000,
+            BitsPerSample = 24,
+            Channels = 2
+        };
+
+    [Fact]
     public void SongDragsHaveGuardedCardPreviewLifecycle()
     {
         var document = XDocument.Load(Path.Combine(
