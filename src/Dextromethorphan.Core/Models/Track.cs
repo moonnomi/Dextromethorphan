@@ -65,12 +65,17 @@ public sealed record Track
         get
         {
             if (SampleRate <= 0) return Codec.ToUpperInvariant();
-            var quality = $"{Codec.ToUpperInvariant()} · {SampleRate / 1000d:0.#} kHz";
+            var sampleRate = (SampleRate / 1000d).ToString(
+                "0.#",
+                System.Globalization.CultureInfo.InvariantCulture);
+            var quality = $"{Codec.ToUpperInvariant()} · {sampleRate} kHz";
             return BitsPerSample > 0 ? $"{quality} · {BitsPerSample}-bit" : quality;
         }
     }
 
-    public string BitrateText => Bitrate > 0 ? $"{Bitrate:N0} kbps" : "Unknown";
+    public string BitrateText => Bitrate > 0
+        ? $"{Bitrate.ToString("N0", System.Globalization.CultureInfo.InvariantCulture)} kbps"
+        : "Unknown";
     public string ChannelText => Channels switch
     {
         1 => "Mono",

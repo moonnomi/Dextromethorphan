@@ -48,6 +48,9 @@ public partial class MainWindow : Window
     private Guid? _lastQueueFollowedEntryId;
     private CancellationTokenSource? _queueScrollCancellation;
     private Point _groupCardDragStart;
+    private FrameworkElement? _groupCardDragSource;
+    private bool _groupCardDragStarted;
+    private bool _trackDragPreviewActive;
     private DateTime _startupStartedAt;
     private DateTimeOffset? _firstGalleryArtworkRenderedAt;
     private readonly IShortcutService _shortcuts;
@@ -562,20 +565,55 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    private void GroupCard_PreviewMouseLeftButtonDown(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement element) return;
+        _groupCardDragStart = e.GetPosition(element);
+        _groupCardDragSource = element;
+        _groupCardDragStarted = false;
+    }
+
     private void GroupCard_PreviewMouseMove(object sender, MouseEventArgs e)
     {
         if (sender is not FrameworkElement element || element.DataContext is not LibraryCardViewModel card)
             return;
-        if (e.LeftButton != MouseButtonState.Pressed)
-        {
-            _groupCardDragStart = e.GetPosition(element);
-            return;
-        }
+        if (e.LeftButton != MouseButtonState.Pressed
+            || _groupCardDragStarted
+            || !ReferenceEquals(_groupCardDragSource, element)) return;
         var point = e.GetPosition(element);
         if (Math.Abs(point.X - _groupCardDragStart.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(point.Y - _groupCardDragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
         var paths = ViewModel.GetCardPaths(card).ToArray();
         if (paths.Length == 0) return;
-        DragDrop.DoDragDrop(element, new DataObject("Dextromethorphan.TrackPaths", paths), DragDropEffects.Copy);
+        _groupCardDragStarted = true;
+        BeginTrackDragPreview(
+            card.Title,
+            card.Subtitle,
+            card.ArtworkPath,
+            card.Initial,
+            paths.Length);
+        try
+        {
+            DragDrop.DoDragDrop(
+                element,
+                new DataObject("Dextromethorphan.TrackPaths", paths),
+                DragDropEffects.Copy);
+        }
+        finally
+        {
+            EndTrackDragPreview();
+            _groupCardDragStarted = false;
+            _groupCardDragSource = null;
+        }
+    }
+
+    private void GroupCard_PreviewMouseLeftButtonUp(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        _groupCardDragSource = null;
+        if (!_groupCardDragStarted) EndTrackDragPreview();
     }
 
     private void FolderTreeView_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
@@ -1207,7 +1245,7 @@ public partial class MainWindow : Window
         }
 
         var pointer = e.GetPosition(QueueList);
-        _queueDragAdorner?.MoveTo(pointer, _queueDragGrip);
+        _queueDragAdorner?.MoveTo(e.GetPosition(ShellRoot), _queueDragGrip);
         UpdateQueueEdgeScroll(pointer);
         var hit = QueueList.InputHitTest(pointer) as DependencyObject;
         var targetContainer = FindVisualParent<ListBoxItem>(hit);
@@ -1241,7 +1279,9 @@ public partial class MainWindow : Window
         ClearQueueInsertionMarker();
         if (e.Data.GetData("Dextromethorphan.TrackPaths") is string[] paths)
         {
-            ViewModel.AddPathsToQueue(paths);
+            ViewModel.AddPathsToQueue(
+                paths,
+                targetIndex > 0 ? targetIndex : null);
             e.Handled = true;
             return;
         }
@@ -1264,7 +1304,7 @@ public partial class MainWindow : Window
 
         if (QueueList.ItemContainerGenerator.ContainerFromItem(primaryEntry) is ListBoxItem source)
         {
-            _queueDragAdornerLayer = AdornerLayer.GetAdornerLayer(QueueList);
+            _queueDragAdornerLayer = AdornerLayer.GetAdornerLayer(ShellRoot);
             if (_queueDragAdornerLayer is not null)
             {
                 FrameworkElement previewSource =
@@ -1272,17 +1312,57 @@ public partial class MainWindow : Window
                         ? content
                         : source;
                 _queueDragAdorner = new QueueDragAdorner(
-                    QueueList,
+                    ShellRoot,
                     previewSource,
                     entries.Count);
                 _queueDragAdornerLayer.Add(_queueDragAdorner);
-                _queueDragAdorner.MoveTo(_queueDragStart, _queueDragGrip);
+                _queueDragAdorner.MoveTo(
+                    Mouse.GetPosition(ShellRoot),
+                    _queueDragGrip);
                 _queueDragAdorner.Show(MotionPolicy.IsEnabled(ViewModel.AnimationsEnabled));
             }
         }
 
         foreach (var container in _queueDragSourceContainers)
             AnimateQueueSourceOpacity(container, 0.28, 90);
+    }
+
+    internal void BeginTrackDragPreview(
+        string title,
+        string subtitle,
+        string? artworkPath,
+        string initial,
+        int itemCount)
+    {
+        EndTrackDragPreview();
+        _queueDragAdornerLayer = AdornerLayer.GetAdornerLayer(ShellRoot);
+        if (_queueDragAdornerLayer is null) return;
+
+        _queueDragGrip = new Point(24, 24);
+        _queueDragAdorner = new QueueDragAdorner(
+            ShellRoot,
+            title,
+            subtitle,
+            artworkPath,
+            initial,
+            Math.Max(1, itemCount));
+        _queueDragAdornerLayer.Add(_queueDragAdorner);
+        _queueDragAdorner.MoveTo(
+            Mouse.GetPosition(ShellRoot),
+            _queueDragGrip);
+        _queueDragAdorner.Show(MotionPolicy.IsEnabled(ViewModel.AnimationsEnabled));
+        _trackDragPreviewActive = true;
+    }
+
+    internal void EndTrackDragPreview()
+    {
+        if (!_trackDragPreviewActive) return;
+        ClearQueueInsertionMarker();
+        if (_queueDragAdorner is not null && _queueDragAdornerLayer is not null)
+            _queueDragAdornerLayer.Remove(_queueDragAdorner);
+        _queueDragAdorner = null;
+        _queueDragAdornerLayer = null;
+        _trackDragPreviewActive = false;
     }
 
     private void EndQueueDragVisuals()
@@ -2503,9 +2583,23 @@ public partial class MainWindow : Window
         }
     }
 
-    private void Window_PreviewDragEnter(object sender, DragEventArgs e) => UpdateFileDropFeedback(e);
+    private void Window_PreviewDragEnter(object sender, DragEventArgs e)
+    {
+        UpdateActiveDragPreview(e);
+        UpdateFileDropFeedback(e);
+    }
 
-    private void Window_PreviewDragOver(object sender, DragEventArgs e) => UpdateFileDropFeedback(e);
+    private void Window_PreviewDragOver(object sender, DragEventArgs e)
+    {
+        UpdateActiveDragPreview(e);
+        UpdateFileDropFeedback(e);
+    }
+
+    private void UpdateActiveDragPreview(DragEventArgs e)
+    {
+        if (_queueDragAdorner is null) return;
+        _queueDragAdorner.MoveTo(e.GetPosition(ShellRoot), _queueDragGrip);
+    }
 
     private void Window_PreviewDragLeave(object sender, DragEventArgs e)
     {

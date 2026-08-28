@@ -12,6 +12,8 @@ namespace Dextromethorphan.App.UI.Views;
 public partial class TrackListView : UserControl
 {
     private Point _dragStart;
+    private ListBoxItem? _dragSource;
+    private bool _dragStarted;
     public TrackListView()
     {
         InitializeComponent();
@@ -131,14 +133,62 @@ public partial class TrackListView : UserControl
         }
     }
 
+    private void TrackList_PreviewMouseLeftButtonDown(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        _dragStart = e.GetPosition(TrackList);
+        _dragSource = FindVisualParent<ListBoxItem>(e.OriginalSource as DependencyObject);
+        _dragStarted = false;
+    }
+
     private void TrackList_PreviewMouseMove(object sender, MouseEventArgs e)
     {
-        if (e.LeftButton != MouseButtonState.Pressed) { _dragStart = e.GetPosition(TrackList); return; }
+        if (e.LeftButton != MouseButtonState.Pressed
+            || _dragStarted
+            || _dragSource is null) return;
         var point = e.GetPosition(TrackList);
         if (Math.Abs(point.X - _dragStart.X) < SystemParameters.MinimumHorizontalDragDistance && Math.Abs(point.Y - _dragStart.Y) < SystemParameters.MinimumVerticalDragDistance) return;
         var tracks = TrackList.SelectedItems.OfType<Track>().ToArray();
+        if (tracks.Length == 0 && _dragSource.DataContext is Track primary)
+            tracks = [primary];
         if (tracks.Length == 0) return;
-        DragDrop.DoDragDrop(TrackList, new DataObject("Dextromethorphan.TrackPaths", tracks.Select(track => track.Path).ToArray()), DragDropEffects.Copy);
+
+        _dragStarted = true;
+        var window = Window.GetWindow(this) as MainWindow;
+        var primaryTrack = _dragSource.DataContext as Track ?? tracks[0];
+        var artworkPath = (DataContext as MainViewModel)?.GetTrackArtworkPath(primaryTrack)
+            ?? primaryTrack.ArtworkPath;
+        window?.BeginTrackDragPreview(
+            primaryTrack.Title,
+            primaryTrack.DisplayArtist,
+            artworkPath,
+            "♪",
+            tracks.Length);
+        try
+        {
+            DragDrop.DoDragDrop(
+                TrackList,
+                new DataObject(
+                    "Dextromethorphan.TrackPaths",
+                    tracks.Select(track => track.Path).ToArray()),
+                DragDropEffects.Copy);
+        }
+        finally
+        {
+            window?.EndTrackDragPreview();
+            _dragStarted = false;
+            _dragSource = null;
+        }
+    }
+
+    private void TrackList_PreviewMouseLeftButtonUp(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        _dragSource = null;
+        if (!_dragStarted)
+            (Window.GetWindow(this) as MainWindow)?.EndTrackDragPreview();
     }
 
     private void TrackList_DragOver(object sender, DragEventArgs e)

@@ -266,6 +266,8 @@ public sealed class MainViewModel : ObservableObject
         SelectGroupCommand = new RelayCommand(p => SelectGroup(p as LibraryCardViewModel));
         CloseCollectionCommand = new RelayCommand(_ => CloseCollectionDetail());
         PlayGroupCommand = new AsyncRelayCommand(p => PlayGroupAsync(p as LibraryCardViewModel), p => p is LibraryCardViewModel card && card.TrackCount > 0);
+        PlayGroupNextCommand = new AsyncRelayCommand(p => PlayGroupNextAsync(p as LibraryCardViewModel), p => p is LibraryCardViewModel card && card.TrackCount > 0);
+        AddGroupToQueueCommand = new AsyncRelayCommand(p => AddGroupToQueueAsync(p as LibraryCardViewModel), p => p is LibraryCardViewModel card && card.TrackCount > 0);
         PlaySelectedCommand = new AsyncRelayCommand(_ => PlaySelectedAsync(), _ => SelectedTrack is not null);
         TogglePlaybackCommand = new AsyncRelayCommand(_ => TogglePlaybackAsync());
         NextCommand = new AsyncRelayCommand(_ => ChangeTrackAsync(_queue.Advance()));
@@ -1185,6 +1187,8 @@ public sealed class MainViewModel : ObservableObject
     public RelayCommand SelectGroupCommand { get; }
     public RelayCommand CloseCollectionCommand { get; }
     public AsyncRelayCommand PlayGroupCommand { get; }
+    public AsyncRelayCommand PlayGroupNextCommand { get; }
+    public AsyncRelayCommand AddGroupToQueueCommand { get; }
     public AsyncRelayCommand PlaySelectedCommand { get; }
     public AsyncRelayCommand TogglePlaybackCommand { get; }
     public AsyncRelayCommand NextCommand { get; }
@@ -1810,14 +1814,47 @@ public sealed class MainViewModel : ObservableObject
         StatusText = $"Moved {selectedIds.Length:N0} playlist track{(selectedIds.Length == 1 ? "" : "s")}";
     }
 
-    public void AddPathsToQueue(IEnumerable<string> paths)
+    public void AddPathsToQueue(
+        IEnumerable<string> paths,
+        int? targetPlaybackIndex = null)
     {
-        var set = paths.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var tracks = _allTracks.Where(track => set.Contains(track.Path) && !track.IsMissing).ToArray();
-        if (tracks.Length > 0) _queue.Add(tracks);
+        var tracks = MatchUniqueQueueTracks(_allTracks, paths);
+        if (tracks.Length == 0) return;
+        if (targetPlaybackIndex is > 0)
+        {
+            _queue.InsertAtPlaybackIndex(tracks, targetPlaybackIndex.Value);
+            return;
+        }
+        _queue.Add(tracks);
+    }
+
+    internal static Track[] MatchUniqueQueueTracks(
+        IEnumerable<Track> library,
+        IEnumerable<string> paths)
+    {
+        var byPath = library
+            .Where(track => !track.IsMissing && !string.IsNullOrWhiteSpace(track.Path))
+            .GroupBy(track => track.Path, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        return paths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(path => byPath.GetValueOrDefault(path))
+            .Where(track => track is not null)
+            .Cast<Track>()
+            .ToArray();
     }
 
     public IReadOnlyList<string> GetCardPaths(LibraryCardViewModel? card) => card is null ? [] : card.PlaylistId is null ? card.TrackIndexes.Where(index => index >= 0 && index < _allTracks.Count).Select(index => _allTracks[index].Path).ToArray() : [];
+
+    public string? GetTrackArtworkPath(Track track)
+    {
+        var artwork = ExistingArtwork(track);
+        return artwork is null
+               && _resolvedArtwork.TryGet(track.Path, out var cached)
+            ? cached
+            : artwork;
+    }
 
     public async Task<long> ImportPlaylistFileAsync(string path)
     {
@@ -3760,6 +3797,32 @@ public sealed class MainViewModel : ObservableObject
         SelectGroup(card);
         _queue.Replace(tracks, 0);
         await ChangeTrackAsync(tracks[0]);
+    }
+
+    private async Task PlayGroupNextAsync(LibraryCardViewModel? card)
+    {
+        if (card is null || card.TrackCount == 0) return;
+        var tracks = await GetCardTracksAsync(card);
+        if (tracks.Count == 0) return;
+        _queue.PlayNext(tracks);
+        ShowNotice(
+            tracks.Count == 1
+                ? $"{tracks[0].Title} will play next"
+                : $"{tracks.Count:N0} tracks will play next",
+            ToastSeverity.Success);
+    }
+
+    private async Task AddGroupToQueueAsync(LibraryCardViewModel? card)
+    {
+        if (card is null || card.TrackCount == 0) return;
+        var tracks = await GetCardTracksAsync(card);
+        if (tracks.Count == 0) return;
+        _queue.Add(tracks);
+        ShowNotice(
+            tracks.Count == 1
+                ? $"Added {tracks[0].Title} to queue"
+                : $"Added {tracks.Count:N0} tracks to queue",
+            ToastSeverity.Success);
     }
 
     private async Task ScanAsync(IReadOnlyList<string>? selectedRoots = null)

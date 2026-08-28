@@ -193,6 +193,7 @@ public interface IPlaybackQueue
     event EventHandler? Changed;
     void Replace(IEnumerable<Track> tracks, int startIndex = 0);
     void Add(IEnumerable<Track> tracks);
+    void InsertAtPlaybackIndex(IEnumerable<Track> tracks, int playbackIndex);
     void PlayNext(IEnumerable<Track> tracks);
     void Move(int fromIndex, int toIndex);
     void MoveMany(IReadOnlyCollection<Guid> ids, int toIndex);

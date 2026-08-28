@@ -115,6 +115,46 @@ public sealed class PlaybackQueue : IPlaybackQueue
         OnChanged();
     }
 
+    public void InsertAtPlaybackIndex(IEnumerable<Track> tracks, int playbackIndex)
+    {
+        var additions = tracks.Select(CreateEntry).ToList();
+        if (additions.Count == 0) return;
+
+        // A queue without a current item needs the first inserted track to
+        // become the current item, just like Add does.
+        if (_items.Count == 0)
+        {
+            SaveUndo();
+            _items.AddRange(additions);
+            _currentIndex = 0;
+            if (Shuffle) _shuffleDeck.AddRange(additions.Skip(1).Select(item => item.Id));
+            NormalizePlayingFlag();
+            OnChanged();
+            return;
+        }
+
+        SaveUndo();
+        var currentId = CurrentId();
+        if (_currentIndex < 0) _currentIndex = 0;
+
+        if (Shuffle)
+        {
+            _items.AddRange(additions);
+            var insertion = Math.Clamp(playbackIndex - 1, 0, _shuffleDeck.Count);
+            _shuffleDeck.InsertRange(insertion, additions.Select(item => item.Id));
+        }
+        else
+        {
+            var prefixLength = Math.Clamp(_currentIndex + 1, 0, _items.Count);
+            var futureCount = _items.Count - prefixLength;
+            var insertion = Math.Clamp(playbackIndex - 1, 0, futureCount);
+            _items.InsertRange(prefixLength + insertion, additions);
+        }
+
+        RestoreCurrent(currentId);
+        OnChanged();
+    }
+
     public void PlayNext(IEnumerable<Track> tracks)
     {
         var additions = tracks.Select(CreateEntry).ToList();

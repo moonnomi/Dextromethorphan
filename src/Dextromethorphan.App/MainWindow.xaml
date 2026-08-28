@@ -31,8 +31,33 @@
         </DataTemplate>
 
         <DataTemplate x:Key="GroupCardTemplate">
-            <Grid Width="{Binding DataContext.AlbumTileSize, RelativeSource={RelativeSource AncestorType=Window}}" Margin="0,0,14,18">
-                <Button Style="{StaticResource CardButton}" Command="{Binding DataContext.SelectGroupCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" AutomationProperties.Name="{Binding Title, StringFormat=Open {0}}" PreviewMouseMove="GroupCard_PreviewMouseMove">
+            <Grid Width="{Binding DataContext.AlbumTileSize, RelativeSource={RelativeSource AncestorType=Window}}"
+                  Margin="0,0,14,18"
+                  Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}">
+                <Grid.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="_Open collection"
+                                  Command="{Binding PlacementTarget.Tag.SelectGroupCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                  CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                        <MenuItem Header="_Play collection"
+                                  Command="{Binding PlacementTarget.Tag.PlayGroupCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                  CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                        <Separator/>
+                        <MenuItem Header="Play _next"
+                                  Command="{Binding PlacementTarget.Tag.PlayGroupNextCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                  CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                        <MenuItem Header="Add to _queue"
+                                  Command="{Binding PlacementTarget.Tag.AddGroupToQueueCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                  CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                    </ContextMenu>
+                </Grid.ContextMenu>
+                <Button Style="{StaticResource CardButton}"
+                        Command="{Binding DataContext.SelectGroupCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                        CommandParameter="{Binding}"
+                        AutomationProperties.Name="{Binding Title, StringFormat=Open {0}}"
+                        PreviewMouseLeftButtonDown="GroupCard_PreviewMouseLeftButtonDown"
+                        PreviewMouseMove="GroupCard_PreviewMouseMove"
+                        PreviewMouseLeftButtonUp="GroupCard_PreviewMouseLeftButtonUp">
                     <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="{Binding DataContext.GalleryMetadataHeight, RelativeSource={RelativeSource AncestorType=Window}}"/></Grid.RowDefinitions>
                         <Border Width="{Binding DataContext.AlbumTileSize, RelativeSource={RelativeSource AncestorType=Window}}" Height="{Binding DataContext.AlbumTileSize, RelativeSource={RelativeSource AncestorType=Window}}" CornerRadius="10,10,0,0" ClipToBounds="True" Background="{DynamicResource SurfaceRaisedBrush}">
                             <Grid><TextBlock Text="{Binding Initial}" FontSize="42" FontWeight="Light" Foreground="#45FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center"/><Image ui:AsyncArtwork.Path="{Binding ArtworkPath}" ui:AsyncArtwork.DecodePixelWidth="192" ui:AsyncArtwork.Priority="Visible" ui:AsyncArtwork.ArtworkLoaded="GalleryArtwork_Loaded" Stretch="UniformToFill"/></Grid>

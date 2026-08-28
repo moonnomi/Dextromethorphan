@@ -237,6 +237,40 @@ public sealed class PlaybackQueueTests
     }
 
     [Fact]
+    public void InsertingTracksAtPlaybackIndexPlacesThemBeforeTheRequestedSlot()
+    {
+        var tracks = Enumerable.Range(1, 5).Select(NewTrack).ToArray();
+        var additions = new[] { NewTrack(8), NewTrack(9) };
+        var queue = new PlaybackQueue();
+        queue.Replace(tracks, 1);
+
+        queue.InsertAtPlaybackIndex(additions, 2);
+
+        Assert.Equal(tracks[1], queue.Current);
+        Assert.Equal(
+            new long[] { 1, 2, 3, 8, 9, 4, 5 },
+            queue.Items.Select(item => item.Track.Id));
+        Assert.Equal(
+            new long[] { 2, 3, 8, 9, 4, 5 },
+            queue.PlaybackOrder.Select(item => item.Track.Id));
+    }
+
+    [Fact]
+    public void InsertingTracksAtPlaybackIndexUpdatesShuffleDeckOrder()
+    {
+        var tracks = Enumerable.Range(1, 4).Select(NewTrack).ToArray();
+        var addition = NewTrack(8);
+        var queue = new PlaybackQueue { Shuffle = true };
+        queue.Replace(tracks, 0);
+        var firstUpcoming = queue.PlaybackOrder[1];
+
+        queue.InsertAtPlaybackIndex([addition], 1);
+
+        Assert.Equal(addition.Id, queue.PlaybackOrder[1].Track.Id);
+        Assert.Equal(firstUpcoming.Track.Id, queue.PlaybackOrder[2].Track.Id);
+    }
+
+    [Fact]
     public void AdvancingShiftsPlaybackOrderToTheNewCurrentTrack()
     {
         var queue = new PlaybackQueue { Shuffle = true };
