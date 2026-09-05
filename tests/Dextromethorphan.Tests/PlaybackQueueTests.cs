@@ -106,6 +106,30 @@ public sealed class PlaybackQueueTests
     }
 
     [Fact]
+    public void RemovingCurrentShuffleEntryDoesNotDuplicatePromotedTrack()
+    {
+        var queue = new PlaybackQueue { Shuffle = true };
+        queue.Replace(Enumerable.Range(1, 5).Select(NewTrack), 0);
+        var removed = Assert.Single(queue.Items, item => item.IsPlaying);
+
+        Assert.True(queue.Remove(removed.Id));
+
+        Assert.NotNull(queue.Current);
+        Assert.Equal(
+            queue.PlaybackOrder.Count,
+            queue.PlaybackOrder.Select(item => item.Id).Distinct().Count());
+        Assert.DoesNotContain(
+            queue.Items.Single(item => item.IsPlaying).Id,
+            queue.PlaybackOrder.Skip(1).Select(item => item.Id));
+
+        queue.Previous();
+
+        Assert.Equal(
+            queue.PlaybackOrder.Count,
+            queue.PlaybackOrder.Select(item => item.Id).Distinct().Count());
+    }
+
+    [Fact]
     public void BatchQueueChangesAreAtomicAndUndoable()
     {
         var queue = new PlaybackQueue();

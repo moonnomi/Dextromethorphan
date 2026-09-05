@@ -722,7 +722,6 @@ public partial class MainWindow : Window
             bookmarkMenu.Items.Add(item);
         }
         menu.Items.Add(bookmarkMenu);
-        menu.Items.Add(new MenuItem { Header = "Resume tracks from last position", IsCheckable = true, IsChecked = ViewModel.ResumeTrackBookmarks, Command = ViewModel.ToggleBookmarkResumeCommand });
         var historyMenu = new MenuItem { Header = "Recently played", IsEnabled = ViewModel.QueueHistory.Count > 0 };
         foreach (var history in ViewModel.QueueHistory.Take(20))
         {
@@ -1017,14 +1016,7 @@ public partial class MainWindow : Window
     }
 
     private static T? FindVisualParent<T>(DependencyObject? child) where T : DependencyObject
-    {
-        while (child is not null)
-        {
-            if (child is T result) return result;
-            child = VisualTreeHelper.GetParent(child);
-        }
-        return null;
-    }
+        => DependencyObjectTree.FindAncestor<T>(child);
 
     private void AnimateViewTransition()
     {
@@ -2054,6 +2046,7 @@ public partial class MainWindow : Window
         var originalState = WindowState;
         var originalQueue = ViewModel.QueueVisible;
         var originalQueueCompact = ViewModel.QueuePanelCompact;
+        var originalQueueDockSide = ViewModel.QueuePanelDockSide;
         var results = new List<WindowingSmokeCase>();
         var snapAvailable = WindowMaximizeHelper.IsNativeSnapLayoutAvailable;
         var snapHitTest = default(SnapLayoutProbe);
@@ -2063,6 +2056,7 @@ public partial class MainWindow : Window
         {
             (Name: "minimum-queue-hidden", Width: 800d, Height: 600d, Queue: false),
             (Name: "minimum-queue-visible", Width: 800d, Height: 600d, Queue: true),
+            (Name: "minimum-queue-left", Width: 800d, Height: 600d, Queue: true),
             (Name: "laptop-1366x768", Width: 1366d, Height: 768d, Queue: true),
             (Name: "laptop-1536x864", Width: 1536d, Height: 864d, Queue: false),
             (Name: "desktop-1920x1080", Width: 1920d, Height: 1080d, Queue: true),
@@ -2082,6 +2076,9 @@ public partial class MainWindow : Window
                 Height = scenario.Height;
                 ViewModel.QueueVisible = scenario.Queue;
                 ViewModel.QueuePanelCompact = false;
+                ViewModel.QueuePanelDockSide = scenario.Name.EndsWith("-left", StringComparison.Ordinal)
+                    ? PanelDockSide.Left
+                    : PanelDockSide.Right;
                 ApplyResponsiveShellLayout();
                 UpdateLayout();
                 await Dispatcher.InvokeAsync(
@@ -2180,6 +2177,7 @@ public partial class MainWindow : Window
             if (_isFullScreen) ExitFullScreen();
             ViewModel.QueueVisible = originalQueue;
             ViewModel.QueuePanelCompact = originalQueueCompact;
+            ViewModel.QueuePanelDockSide = originalQueueDockSide;
             Width = originalWidth;
             Height = originalHeight;
             Left = originalLeft;
@@ -2876,7 +2874,7 @@ public partial class MainWindow : Window
         while (element is not null)
         {
             if (element is ButtonBase or TextBox) return true;
-            element = VisualTreeHelper.GetParent(element);
+            element = DependencyObjectTree.GetParent(element);
         }
         return false;
     }

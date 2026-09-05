@@ -24,7 +24,7 @@ This is the master backlog for turning Dextromethorphan from a capable personal 
 - [x] BASE-009 JSON settings with migrations and atomic persistence.
 - [x] BASE-010 Themed track and queue context menus.
 - [x] BASE-011 Release script, x64/ARM64 targets, Inno Setup project, and self-contained publish support.
-- [x] BASE-012 Automated unit/integration foundation with 467 passing tests.
+- [x] BASE-012 Automated unit/integration foundation with 486 passing tests (2026-09-05).
 
 ---
 
@@ -295,6 +295,8 @@ This is the next milestone. Do not mask stalls with longer animations; remove th
 ---
 
 ## Milestone 7 — UI polish, accessibility, and interaction consistency
+
+**Status (2026-09-05): open.** Shared Settings navigation and diagnostic views are extracted; short-window category scrolling and the left-docked queue smoke case are verified. See the [follow-up report](MILESTONE-7-STATUS-2026-09-05.md) for evidence and remaining qualification gaps.
 
 ### Visual and interaction system
 

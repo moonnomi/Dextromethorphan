@@ -5,26 +5,35 @@ namespace Dextromethorphan.Tests;
 public sealed class PlaybackResumePolicyTests
 {
     [Fact]
-    public void ExplicitLibrarySelectionCanResumeSavedPosition()
+    public void SessionPositionIsSavedOnlyForTheActiveQueueTrack()
     {
-        Assert.True(MainViewModel.ShouldResumeTrackBookmark(
-            resumeEnabled: true,
-            PlaybackStartReason.ExplicitSelection));
+        Assert.Equal(
+            42.5,
+            MainViewModel.CurrentSessionPositionSeconds(
+                @"C:\music\current.flac",
+                @"c:\MUSIC\CURRENT.flac",
+                TimeSpan.FromSeconds(42.5)));
     }
 
     [Fact]
-    public void QueueNavigationAlwaysStartsTrackFresh()
+    public void PositionFromAnotherTrackIsNeverSavedIntoTheSession()
     {
-        Assert.False(MainViewModel.ShouldResumeTrackBookmark(
-            resumeEnabled: true,
-            PlaybackStartReason.QueueNavigation));
+        Assert.Equal(
+            0,
+            MainViewModel.CurrentSessionPositionSeconds(
+                @"C:\music\selected.flac",
+                @"C:\music\previous.flac",
+                TimeSpan.FromMinutes(2)));
     }
 
     [Fact]
-    public void DisabledResumeNeverAppliesSavedPosition()
+    public void SessionWithoutAnActivePlaybackTrackStartsAtTheBeginning()
     {
-        Assert.False(MainViewModel.ShouldResumeTrackBookmark(
-            resumeEnabled: false,
-            PlaybackStartReason.ExplicitSelection));
+        Assert.Equal(
+            0,
+            MainViewModel.CurrentSessionPositionSeconds(
+                @"C:\music\selected.flac",
+                null,
+                TimeSpan.FromMinutes(2)));
     }
 }

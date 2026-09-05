@@ -217,14 +217,7 @@ public partial class TrackListView : UserControl
     }
 
     private static T? FindVisualParent<T>(DependencyObject? child) where T : DependencyObject
-    {
-        while (child is not null)
-        {
-            if (child is T match) return match;
-            child = VisualTreeHelper.GetParent(child);
-        }
-        return null;
-    }
+        => DependencyObjectTree.FindAncestor<T>(child);
 
     private void SelectAll_Click(object sender, RoutedEventArgs e)
     {

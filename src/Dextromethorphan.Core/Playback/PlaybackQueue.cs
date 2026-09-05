@@ -24,9 +24,16 @@ public sealed class PlaybackQueue : IPlaybackQueue
 
             var byId = _items.ToDictionary(item => item.Id);
             var ordered = new List<QueueEntry>(_shuffleDeck.Count + 1);
-            if (CurrentId() is { } currentId && byId.TryGetValue(currentId, out var current)) ordered.Add(current);
+            var seen = new HashSet<Guid>();
+            if (CurrentId() is { } currentId
+                && byId.TryGetValue(currentId, out var current))
+            {
+                ordered.Add(current);
+                seen.Add(currentId);
+            }
             foreach (var id in _shuffleDeck)
-                if (byId.TryGetValue(id, out var item)) ordered.Add(item);
+                if (seen.Add(id) && byId.TryGetValue(id, out var item))
+                    ordered.Add(item);
             return ordered;
         }
     }
@@ -422,6 +429,27 @@ public sealed class PlaybackQueue : IPlaybackQueue
         }
     }
 
-    private void OnChanged(bool mutation = true) => Changed?.Invoke(this, EventArgs.Empty);
+    private void NormalizeShuffleDeck()
+    {
+        if (!Shuffle)
+        {
+            _shuffleDeck.Clear();
+            return;
+        }
+
+        var currentId = CurrentId();
+        var validIds = _items.Select(item => item.Id).ToHashSet();
+        var seen = new HashSet<Guid>();
+        _shuffleDeck.RemoveAll(id =>
+            id == currentId
+            || !validIds.Contains(id)
+            || !seen.Add(id));
+    }
+
+    private void OnChanged(bool mutation = true)
+    {
+        NormalizeShuffleDeck();
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
     private sealed record QueueState(List<QueueEntry> Items, Guid? CurrentId, List<Guid> ShuffleDeck, List<Guid> PlayHistory);
 }

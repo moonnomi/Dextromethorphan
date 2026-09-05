@@ -360,7 +360,6 @@ public sealed class MainViewModel : ObservableObject
         ClearTrackPlaybackOverrideCommand = new AsyncRelayCommand(_ => ClearTrackPlaybackOverrideAsync(), _ => CurrentTrackHasPlaybackOverride);
         SetCurrentRatingCommand = new AsyncRelayCommand(p => SetCurrentRatingAsync(p), _ => CurrentTrack is not null);
         AddBookmarkCommand = new AsyncRelayCommand(p => AddBookmarkAsync(p?.ToString()), _ => CurrentTrack is not null);
-        ToggleBookmarkResumeCommand = new AsyncRelayCommand(_ => ToggleBookmarkResumeAsync());
         SeekBookmarkCommand = new AsyncRelayCommand(p => SeekBookmarkAsync(p as PlaybackBookmark), p => p is PlaybackBookmark);
         RenameBookmarkCommand = new AsyncRelayCommand(p => RenameBookmarkAsync(p), p => p is BookmarkRenameRequest);
         DeleteBookmarkCommand = new AsyncRelayCommand(p => DeleteBookmarkAsync(p as PlaybackBookmark), p => p is PlaybackBookmark);
@@ -636,7 +635,6 @@ public sealed class MainViewModel : ObservableObject
     public bool HasQueue => Queue.Count > 0;
     public bool HasQueueHistory => QueueHistory.Count > 0;
     public bool HasBookmarks => Bookmarks.Count > 0;
-    public bool ResumeTrackBookmarks => _settings.Current.ResumeTrackBookmarks;
     public bool IsGroupView => !IsCollectionDetailOpen && CurrentView is "Albums" or "Artists" or "Genres";
     public bool IsCollectionDetailView => IsCollectionDetailOpen && CurrentView is "Albums" or "Artists" or "Genres";
     public bool IsTrackView => !IsCollectionDetailOpen && CurrentView is "Songs" or "Favorites" or "Missing" or "Recently Added" or "Recently Played" or "Most Played" or "Never Played" or "History";
@@ -1239,7 +1237,6 @@ public sealed class MainViewModel : ObservableObject
     public AsyncRelayCommand ClearTrackPlaybackOverrideCommand { get; }
     public AsyncRelayCommand SetCurrentRatingCommand { get; }
     public AsyncRelayCommand AddBookmarkCommand { get; }
-    public AsyncRelayCommand ToggleBookmarkResumeCommand { get; }
     public AsyncRelayCommand SeekBookmarkCommand { get; }
     public AsyncRelayCommand RenameBookmarkCommand { get; }
     public AsyncRelayCommand DeleteBookmarkCommand { get; }
@@ -1517,13 +1514,6 @@ public sealed class MainViewModel : ObservableObject
         await _repository.CreateBookmarkAsync(track.Id, name, _audio.Snapshot.Position, _lifetime.Token);
         await LoadBookmarksAsync(track);
         ShowNotice($"Bookmark added at {FormatTime(_audio.Snapshot.Position)}");
-    }
-
-    private async Task ToggleBookmarkResumeAsync()
-    {
-        await _settings.UpdateAsync(settings => settings.ResumeTrackBookmarks = !settings.ResumeTrackBookmarks, _lifetime.Token);
-        Raise(nameof(ResumeTrackBookmarks));
-        ShowNotice(ResumeTrackBookmarks ? "Automatic track resume enabled" : "Automatic track resume disabled");
     }
 
     private async Task SeekBookmarkAsync(PlaybackBookmark? bookmark)
@@ -2556,9 +2546,7 @@ public sealed class MainViewModel : ObservableObject
                 tracks.Add(await _repository.GetByPathAsync(file, _lifetime.Token)
                     ?? await _metadataReader.ReadAsync(file, _lifetime.Token));
             _queue.Replace(tracks);
-            await ChangeTrackAsync(
-                tracks[0],
-                startReason: PlaybackStartReason.ExplicitSelection);
+            await ChangeTrackAsync(tracks[0]);
             StatusText = files.Length == 1
                 ? $"Opened {Path.GetFileName(files[0])}"
                 : $"Opened {files.Length:N0} dropped tracks";
@@ -4392,7 +4380,6 @@ public sealed class MainViewModel : ObservableObject
         Raise(nameof(StopAfterQueue));
         Raise(nameof(HasStopMode));
         Raise(nameof(StopModeText));
-        Raise(nameof(ResumeTrackBookmarks));
         await _audio.SetPlaybackOptionsAsync(CurrentPlaybackOptions(), _lifetime.Token);
     }
 
@@ -4566,33 +4553,21 @@ public sealed class MainViewModel : ObservableObject
             .FirstOrDefault(index => ReferenceEquals(source[index], SelectedTrack)
                 || source[index].Path.Equals(SelectedTrack.Path, StringComparison.OrdinalIgnoreCase));
         _queue.Replace(source, selectedIndex);
-        await ChangeTrackAsync(
-            SelectedTrack,
-            startReason: PlaybackStartReason.ExplicitSelection);
+        await ChangeTrackAsync(SelectedTrack);
     }
 
     private async Task ChangeTrackAsync(
         Track? track,
-        HashSet<string>? failedPaths = null,
-        PlaybackStartReason startReason = PlaybackStartReason.QueueNavigation)
+        HashSet<string>? failedPaths = null)
     {
         if (track is null) return;
         try
         {
-            if (_audio.Snapshot.Track is { Id: > 0 } previous && _audio.Snapshot.Position > TimeSpan.FromSeconds(10))
-                await _repository.SaveBookmarkAsync(previous.Id, _audio.Snapshot.Position, _lifetime.Token);
             var artwork = await ResolveArtworkAsync(track, _lifetime.Token);
             if (artwork is not null) track = track with { ArtworkPath = artwork };
             ApplyTrackPlaybackSettings(track);
             await _audio.SetPlaybackOptionsAsync(CurrentPlaybackOptions(track), _lifetime.Token);
             await _audio.LoadAsync(track, _lifetime.Token);
-            var bookmark = track.Id > 0
-                           && ShouldResumeTrackBookmark(
-                               ResumeTrackBookmarks,
-                               startReason)
-                ? await _repository.GetBookmarkAsync(track.Id, _lifetime.Token)
-                : null;
-            if (bookmark.HasValue && bookmark.Value > TimeSpan.Zero && bookmark.Value < track.Duration - TimeSpan.FromSeconds(10)) await _audio.SeekAsync(bookmark.Value, _lifetime.Token);
             try
             {
                 await _audio.QueueNextAsync(
@@ -4730,16 +4705,8 @@ public sealed class MainViewModel : ObservableObject
     {
         _queue.PlayNext([track]);
         var entry = _queue.Items.Last(item => item.Track.Path.Equals(track.Path, StringComparison.OrdinalIgnoreCase));
-        await ChangeTrackAsync(
-            _queue.Select(entry.Id),
-            startReason: PlaybackStartReason.ExplicitSelection);
+        await ChangeTrackAsync(_queue.Select(entry.Id));
     }
-
-    internal static bool ShouldResumeTrackBookmark(
-        bool resumeEnabled,
-        PlaybackStartReason startReason) =>
-        resumeEnabled
-        && startReason == PlaybackStartReason.ExplicitSelection;
 
     public void MoveSelectedQueueBy(int delta)
     {
@@ -5243,7 +5210,8 @@ public sealed class MainViewModel : ObservableObject
         var playbackOrder = _queue.PlaybackOrder;
         var playbackIndexes = playbackOrder
             .Select((item, index) => (item.Id, index))
-            .ToDictionary(pair => pair.Id, pair => pair.index);
+            .GroupBy(pair => pair.Id)
+            .ToDictionary(group => group.Key, group => group.Min(pair => pair.index));
         var timeline = _queue.TimelineOrder;
         Replace(Queue, timeline.Select((item, index) =>
         {
@@ -5326,7 +5294,10 @@ public sealed class MainViewModel : ObservableObject
         var paths = _queue.Items.Select(x => x.Track.Path).ToList();
         var index = Math.Max(0, _queue.CurrentIndex);
         var snapshot = _audio.Snapshot;
-        var position = snapshot.Position.TotalSeconds;
+        var position = CurrentSessionPositionSeconds(
+            _queue.Current?.Path,
+            snapshot.Track?.Path,
+            snapshot.Position);
         var playing = snapshot.State == PlaybackState.Playing;
         var shuffle = _queue.Shuffle;
         var repeat = _queue.RepeatMode;
@@ -5345,6 +5316,21 @@ public sealed class MainViewModel : ObservableObject
             settings.PlaybackSession.QueueHistoryPaths = historyPaths;
             settings.PlaybackSession.LastView = view;
         }, cancellationToken);
+    }
+
+    internal static double CurrentSessionPositionSeconds(
+        string? queueTrackPath,
+        string? playbackTrackPath,
+        TimeSpan playbackPosition)
+    {
+        if (string.IsNullOrWhiteSpace(queueTrackPath)
+            || string.IsNullOrWhiteSpace(playbackTrackPath)
+            || !queueTrackPath.Equals(
+                playbackTrackPath,
+                StringComparison.OrdinalIgnoreCase))
+            return 0;
+
+        return Math.Max(0, playbackPosition.TotalSeconds);
     }
 
     private void RecordQueueHistory(Track track)
@@ -5657,12 +5643,6 @@ public sealed class MainViewModel : ObservableObject
                 "artwork-repair-cancel-timeout",
                 exception: exception);
         }
-        if (_audio.Snapshot.Track is { Id: > 0 } current
-            && _audio.Snapshot.Position > TimeSpan.Zero)
-            await _repository.SaveBookmarkAsync(
-                current.Id,
-                _audio.Snapshot.Position,
-                CancellationToken.None);
         await SaveSessionAsync(CancellationToken.None);
         await _settings.UpdateAsync(
             settings =>
@@ -5700,9 +5680,3 @@ public sealed class MainViewModel : ObservableObject
 public sealed record PlaylistEditContext(Playlist? Existing, IReadOnlyList<Track>? InitialTracks = null);
 public sealed record BookmarkRenameRequest(PlaybackBookmark Bookmark, string Name);
 internal sealed record PlaylistHistoryEntry(Func<Task> Undo, Func<Task> Redo);
-
-internal enum PlaybackStartReason
-{
-    QueueNavigation,
-    ExplicitSelection
-}

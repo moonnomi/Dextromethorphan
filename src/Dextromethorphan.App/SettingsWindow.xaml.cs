@@ -23,7 +23,7 @@ public partial class SettingsWindow : Window
     [
         new("Output device", "WASAPI endpoint, mode, format, buffer, DSD, and recovery", "Audio"),
         new("Bit-perfect playback", "Exclusive mode, direct path, and reported endpoint formats", "Audio"),
-        new("Resume playback", "Startup session and per-track bookmark behavior", "Playback"),
+        new("Resume playback", "Restore the current song and position when reopening the app", "Playback"),
         new("Crossfade and fades", "Gapless, crossfade, fade-in, and fade-out", "Playback"),
         new("ReplayGain", "Track or album normalization, preamp, and clipping guard", "Playback"),
         new("Speed and pitch", "Tempo, pitch preservation, seek, and volume steps", "Playback"),
@@ -597,14 +597,7 @@ public partial class SettingsWindow : Window
 
     private static T? FindAncestor<T>(DependencyObject? current)
         where T : DependencyObject
-    {
-        while (current is not null)
-        {
-            if (current is T match) return match;
-            current = VisualTreeHelper.GetParent(current);
-        }
-        return null;
-    }
+        => DependencyObjectTree.FindAncestor<T>(current);
 
     private async Task RunAsync(Func<Task> operation, string? successMessage = null)
     {

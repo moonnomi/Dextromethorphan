@@ -59,6 +59,16 @@ public sealed class SettingsWindowSmokeTests
                     tabs.Template.FindName(
                         "PART_SelectedContentHost",
                         tabs));
+                // Large text and a short viewport must still expose all categories.
+                tabs.Height = 320;
+                window.UpdateLayout();
+                var categoryScroll = Assert.IsType<System.Windows.Controls.ScrollViewer>(
+                    tabs.Template.FindName("PART_CategoryScrollViewer", tabs));
+                Assert.True(categoryScroll.ScrollableHeight > 0);
+                categoryScroll.ScrollToEnd();
+                window.UpdateLayout();
+                Assert.True(categoryScroll.VerticalOffset > 0);
+                tabs.ClearValue(System.Windows.FrameworkElement.HeightProperty);
                 foreach (var tab in tabs.Items.OfType<System.Windows.Controls.TabItem>())
                 {
                     Assert.NotNull(tab.Content);

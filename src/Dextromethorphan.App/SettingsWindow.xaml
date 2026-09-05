@@ -16,41 +16,8 @@
                  before the main window has materialized its resource scope. -->
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="UI/Styles/Theme.xaml"/>
+                <ResourceDictionary Source="UI/Styles/SettingsControls.xaml"/>
             </ResourceDictionary.MergedDictionaries>
-            <Style TargetType="TabItem">
-            <Setter Property="Foreground" Value="{DynamicResource TextMutedBrush}"/>
-            <Setter Property="FontSize" Value="13"/>
-            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="TabItem">
-                        <Border x:Name="Item" Margin="8,2" Padding="14,11" CornerRadius="8" Background="Transparent" BorderBrush="Transparent" BorderThickness="1">
-                            <ContentPresenter ContentSource="Header" RecognizesAccessKey="True"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Item" Property="Background" Value="{DynamicResource SurfaceHoverBrush}"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/></Trigger>
-                            <Trigger Property="IsSelected" Value="True"><Setter TargetName="Item" Property="Background" Value="{DynamicResource AccentSoftBrush}"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/><Setter Property="FontWeight" Value="SemiBold"/></Trigger>
-                            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Item" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-            </Style>
-            <Style TargetType="TabControl">
-            <Setter Property="Background" Value="{DynamicResource BackgroundBrush}"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="TabControl">
-                        <Grid Background="{TemplateBinding Background}"><Grid.ColumnDefinitions><ColumnDefinition Width="190"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                            <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0">
-                                <StackPanel><TextBlock Text="SETTINGS" FontSize="11" Foreground="{DynamicResource TextMutedBrush}" Margin="22,22,0,12"/><StackPanel IsItemsHost="True"/></StackPanel>
-                            </Border>
-                            <ContentPresenter x:Name="PART_SelectedContentHost" Grid.Column="1" ContentSource="SelectedContent"/>
-                        </Grid>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-            </Style>
         </ResourceDictionary>
     </Window.Resources>
 
@@ -108,7 +75,7 @@
                 </Grid>
             </Border>
 
-    <TabControl x:Name="SettingsTabs" Grid.Row="1" KeyboardNavigation.DirectionalNavigation="Cycle" AutomationProperties.Name="Settings categories">
+    <TabControl x:Name="SettingsTabs" Style="{StaticResource SettingsCategories}" Grid.Row="1" KeyboardNavigation.DirectionalNavigation="Cycle" AutomationProperties.Name="Settings categories">
         <TabItem Header="_Audio" AutomationProperties.Name="Audio settings">
             <ScrollViewer VerticalScrollBarVisibility="Auto" ui:SmoothScrollBehavior.Enabled="True">
                 <StackPanel Margin="34,28">
@@ -203,7 +170,6 @@
                         <StackPanel>
                             <TextBlock Text="Session and queue" FontWeight="SemiBold"/>
                             <CheckBox Content="Resume the previous session at startup" IsChecked="{Binding SettingsWorkspace.ResumeOnStartup}" Margin="0,12,0,0"/>
-                            <CheckBox Content="Resume saved per-track bookmarks" IsChecked="{Binding SettingsWorkspace.ResumeTrackBookmarks}" Margin="0,9,0,0"/>
                             <CheckBox Content="Stop after the current track" IsChecked="{Binding SettingsWorkspace.StopAfterCurrent}" Margin="0,9,0,0"/>
                             <CheckBox Content="Stop at the end of the queue" IsChecked="{Binding SettingsWorkspace.StopAfterQueue}" Margin="0,9,0,0"/>
                         </StackPanel>
