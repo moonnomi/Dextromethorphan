@@ -97,6 +97,7 @@ public sealed record PlaybackBookmark(
 
 public sealed class AudioPlaybackOptions
 {
+    public CrossfadeShape CrossfadeShape { get; set; } = new();
     public ReplayGainMode ReplayGainMode { get; set; } = ReplayGainMode.Track;
     public double ReplayGainPreampDb { get; set; }
     public bool PreventClipping { get; set; } = true;

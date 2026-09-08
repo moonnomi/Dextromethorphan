@@ -623,7 +623,11 @@ public sealed class WasapiAudioEngine : IAudioEngine
 
     private void UpdateDspParameters()
     {
-        if (_transition is not null) _transition.CrossfadeSeconds = _options.TransitionMode == TransitionMode.Crossfade ? _options.CrossfadeSeconds : 0;
+        if (_transition is not null)
+        {
+            _transition.CrossfadeSeconds = _options.TransitionMode == TransitionMode.Crossfade ? _options.CrossfadeSeconds : 0;
+            _transition.Shape = _options.CrossfadeShape;
+        }
         if (_gain is not null) { _gain.PreventClipping = _options.PreventClipping; UpdateGain(); }
         if (_fade is not null) { _fade.FadeInSeconds = Math.Clamp(_options.FadeInSeconds, 0, 10); _fade.FadeOutSeconds = Math.Clamp(_options.FadeOutSeconds, 0, 10); }
     }

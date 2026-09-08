@@ -78,6 +78,30 @@ public sealed class DspQualificationTests
         Assert.Equal(0.5f, fade[^1]);
     }
 
+    [Theory]
+    [InlineData(CrossfadeCurve.Linear)]
+    [InlineData(CrossfadeCurve.Smoothstep)]
+    [InlineData(CrossfadeCurve.Custom)]
+    public void CrossfadeUsesSelectedShapeAndKeepsItDuringAnActiveOverlap(CrossfadeCurve curve)
+    {
+        var shape = new CrossfadeShape { Curve = curve, IncomingPower = 2, OutgoingPower = .5 };
+        using var transition = new TransitionSampleProvider(
+            new ChunkedSampleProvider(Enumerable.Repeat(1f, 16).ToArray(), 4, 2, 4), 16, 1)
+        { Shape = shape };
+        transition.QueueNext(new ChunkedSampleProvider(Enumerable.Repeat(.5f, 16).ToArray(), 4, 2, 4), 16);
+        var first = new float[10];
+        Assert.Equal(10, transition.Read(first, 0, 10));
+        transition.Shape = new CrossfadeShape();
+        transition.CrossfadeSeconds = 0;
+        var output = first.Concat(Drain(transition, [2, 4, 8])).ToArray();
+        Assert.Equal(24, output.Length);
+        for (var i = 0; i < 8; i++)
+        {
+            var gains = shape.Gains((i / 2) / 3d);
+            Assert.Equal(gains.Outgoing + .5 * gains.Incoming, output[8 + i], 6);
+        }
+    }
+
     [Fact]
     public void CrossfadeClampsToVeryShortIncomingTrackWithoutDroppingTail()
     {

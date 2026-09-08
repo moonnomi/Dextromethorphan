@@ -897,6 +897,8 @@ public partial class MainWindow : Window
 
     private void ViewModelOnPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(MainViewModel.CurrentArtworkPath))
+            ViewModel.RefreshAmbience();
         // The seek thumb is intentionally previewed locally while the user
         // drags it. Once the drag has ended, force the OneWay binding to
         // refresh from the authoritative audio snapshot. WPF can otherwise

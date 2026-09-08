@@ -655,6 +655,46 @@ public sealed class MainViewModel : ObservableObject
     public string CurrentTitle => CurrentTrack?.Title ?? "Nothing playing";
     public string CurrentArtist => CurrentTrack is null ? "Choose something from your library" : $"{CurrentTrack.DisplayArtist} — {CurrentTrack.DisplayAlbum}";
     public string? CurrentArtworkPath => CurrentTrack?.ArtworkPath;
+    private string? _ambienceColor;
+    public bool PlayerArtworkGlow
+    {
+        get => _settings.Current.PlayerArtworkGlow;
+        set { _settings.Current.PlayerArtworkGlow = value; Raise(); _ = _settings.UpdateAsync(x => x.PlayerArtworkGlow = value); }
+    }
+    public bool NowPlayingArtworkGlow
+    {
+        get => _settings.Current.NowPlayingArtworkGlow;
+        set { _settings.Current.NowPlayingArtworkGlow = value; Raise(); _ = _settings.UpdateAsync(x => x.NowPlayingArtworkGlow = value); }
+    }
+    private int _ambienceGeneration;
+    public bool AmbienceEnabled
+    {
+        get => _settings.Current.AmbienceEnabled;
+        set
+        {
+            if (value == AmbienceEnabled) return;
+            _settings.Current.AmbienceEnabled = value;
+            Raise();
+            _ = _settings.UpdateAsync(settings => settings.AmbienceEnabled = value);
+            RefreshAmbience();
+        }
+    }
+
+    public async void RefreshAmbience()
+    {
+        var generation = ++_ambienceGeneration;
+        if (!AmbienceEnabled || IsSafeMode)
+        {
+            _ambienceColor = null;
+            ApplyWorkspaceTheme(animateAmbience: true);
+            return;
+        }
+        var path = CurrentArtworkPath;
+        var color = await Task.Run(() => ArtworkAmbience.ReadColor(path));
+        if (generation != _ambienceGeneration || !AmbienceEnabled) return;
+        _ambienceColor = color;
+        ApplyWorkspaceTheme(animateAmbience: true);
+    }
     public string LoveGlyph => CurrentTrack?.IsLoved == true ? "♥" : "♡";
     public string LoveText => CurrentTrack?.IsLoved == true
         ? "Remove love from current track"
@@ -1134,7 +1174,7 @@ public sealed class MainViewModel : ObservableObject
         get => _lyricsOffsetMilliseconds;
         set
         {
-            var normalized = Math.Clamp(value, -30_000, 30_000);
+            var normalized = Math.Clamp(value, -600_000, 600_000);
             if (!Set(ref _lyricsOffsetMilliseconds, normalized)) return;
             Raise(nameof(LyricsOffsetText));
             if (CurrentTrack is { } track)
@@ -2013,6 +2053,8 @@ public sealed class MainViewModel : ObservableObject
         _audio.SetVisualizationEnabled(false);
         _queueVisible = false;
         Raise(nameof(AnimationsEnabled));
+        Raise(nameof(PlayerArtworkGlow));
+        Raise(nameof(NowPlayingArtworkGlow));
         RaiseQueuePanelState();
     }
 
@@ -2258,6 +2300,7 @@ public sealed class MainViewModel : ObservableObject
             CrossfadeSeconds = profile.CrossfadeSeconds > 0
                 ? profile.CrossfadeSeconds
                 : _settings.Current.CrossfadeSeconds,
+            CrossfadeShape = _settings.Current.CrossfadeShape,
             FadeInSeconds = _settings.Current.FadeInSeconds,
             FadeOutSeconds = _settings.Current.FadeOutSeconds,
             Speed = PlaybackSpeed,
@@ -4301,6 +4344,9 @@ public sealed class MainViewModel : ObservableObject
         Raise(nameof(GalleryItemWidth));
         Raise(nameof(GalleryItemHeight));
         Raise(nameof(AnimationsEnabled));
+        Raise(nameof(PlayerArtworkGlow));
+        Raise(nameof(NowPlayingArtworkGlow));
+        Raise(nameof(AmbienceEnabled));
         Raise(nameof(VisualizerEnabled));
         Raise(nameof(VisualizerText));
         Raise(nameof(ArtworkCacheMegabytes));
@@ -4397,7 +4443,7 @@ public sealed class MainViewModel : ObservableObject
             ApplyViewPresentationSettings();
     }
 
-    private void ApplyWorkspaceTheme()
+    private void ApplyWorkspaceTheme(bool animateAmbience = false)
     {
         if (Application.Current is null) return;
         var configuration = IsSafeMode
@@ -4412,6 +4458,9 @@ public sealed class MainViewModel : ObservableObject
                 SettingsWorkspace.FontFamily,
                 SettingsWorkspace.InterfaceFontSize,
                 SettingsWorkspace.BackgroundOpacity);
+        if (AmbienceEnabled && !IsSafeMode && _ambienceColor is not null)
+            configuration = configuration with { AccentColor = _ambienceColor, AmbienceColor = _ambienceColor };
+        configuration = configuration with { AnimateTransition = animateAmbience && AnimationsEnabled && !IsSafeMode };
         ThemeManager.ApplyToCurrentApplication(configuration);
     }
 

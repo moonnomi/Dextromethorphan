@@ -11,6 +11,9 @@ public sealed class AppSettings
     public double BackgroundOpacity { get; set; } = 1;
     public bool AnimationsEnabled { get; set; } = true;
     public bool VisualizerEnabled { get; set; }
+    public bool AmbienceEnabled { get; set; }
+    public bool PlayerArtworkGlow { get; set; }
+    public bool NowPlayingArtworkGlow { get; set; }
     public bool ResumeOnStartup { get; set; } = true;
     public bool ResumeTrackBookmarks { get; set; } = true;
     public bool StopAfterCurrent { get; set; }
@@ -20,6 +23,7 @@ public sealed class AppSettings
     public bool PreventClipping { get; set; } = true;
     public TransitionMode TransitionMode { get; set; } = TransitionMode.Gapless;
     public double CrossfadeSeconds { get; set; }
+    public CrossfadeShape CrossfadeShape { get; set; } = new();
     public double FadeInSeconds { get; set; }
     public double FadeOutSeconds { get; set; }
     public double PlaybackSpeed { get; set; } = 1;

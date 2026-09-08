@@ -1,4 +1,5 @@
 using NAudio.Wave;
+using Dextromethorphan.Core.Models;
 
 namespace Dextromethorphan.Infrastructure.Audio.Dsp;
 
@@ -11,6 +12,13 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
     private long _crossfadeSamples;
     private long _activeCrossfadeSamples;
     private long _crossfadeConsumed;
+    private CrossfadeShape _shape = new();
+    private CrossfadeShape _activeShape = new();
+    public CrossfadeShape Shape
+    {
+        get { lock (_sync) return _shape; }
+        set { lock (_sync) _shape = (value ?? new()).Normalize(); }
+    }
     private bool _completedRaised;
     private float[] _currentBuffer = [];
     private float[] _nextBuffer = [];
@@ -69,8 +77,8 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
             {
                 var fadeTarget = CrossfadeTargetSamples();
                 if (_next is not null
-                    && fadeTarget > 0
-                    && Remaining(_current) <= fadeTarget)
+                    && (_activeCrossfadeSamples > 0 || (fadeTarget > 0
+                    && Remaining(_current) <= fadeTarget)))
                 {
                     var mixed = ReadCrossfade(buffer, offset + written, count - written);
                     written += mixed;
@@ -112,11 +120,14 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
         if (_next is null) return 0;
         var channels = WaveFormat.Channels;
         if (_activeCrossfadeSamples == 0)
+        {
+            _activeShape = _shape;
             _activeCrossfadeSamples = Align(
                 Math.Min(
                     CrossfadeTargetSamples(),
                     Math.Min(Remaining(_current), Remaining(_next))),
                 channels);
+        }
         var remainingFade =
             _activeCrossfadeSamples - _crossfadeConsumed;
         var requested = Align((int)Math.Min(count, remainingFade), channels);
@@ -141,10 +152,10 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
             var frameProgress = fadeFrames <= 1
                 ? 1
                 : frame / (double)(fadeFrames - 1);
-            var angle = Math.Clamp(frameProgress, 0, 1) * Math.PI / 2;
+            var gains = _activeShape.Gains(frameProgress);
             var outgoing = sample < currentRead ? _currentBuffer[sample] : 0;
             var incoming = sample < nextRead ? _nextBuffer[sample] : 0;
-            destination[offset + sample] = (float)((outgoing * Math.Cos(angle)) + (incoming * Math.Sin(angle)));
+            destination[offset + sample] = (float)((outgoing * gains.Outgoing) + (incoming * gains.Incoming));
         }
         _crossfadeConsumed += produced;
         if (_crossfadeConsumed >= _activeCrossfadeSamples

@@ -8,6 +8,23 @@ namespace Dextromethorphan.Tests;
 public sealed class ThemeManagerTests
 {
     [Theory]
+    [InlineData("Dark")]
+    [InlineData("Light")]
+    [InlineData("Amoled")]
+    public void AmbienceKeepsTextReadableAndMissingColorRestoresTheme(string theme)
+    {
+        var configuration = new ThemeConfiguration(theme, "#8290FF", "Segoe UI", 14);
+        var normal = ThemeManager.CreatePalette(configuration);
+        foreach (var color in new[] { "#FF2200", "#00FF00", "#0000FF", "#FFFFFF", "#000000" })
+        {
+            var palette = ThemeManager.CreatePalette(configuration with { AmbienceColor = color });
+            Assert.True(ThemeManager.ContrastRatio(palette.Text, palette.Background) >= 4.5);
+            Assert.True(ThemeManager.ContrastRatio(palette.TextMuted, palette.SurfaceRaised) >= 4.5);
+        }
+        Assert.Equal(normal, ThemeManager.CreatePalette(configuration with { AmbienceColor = null }));
+    }
+
+    [Theory]
     [InlineData("dark", "Dark")]
     [InlineData(" LIGHT ", "Light")]
     [InlineData("AMOLED", "Amoled")]

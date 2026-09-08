@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using Dextromethorphan.Core.Models;
 
 namespace Dextromethorphan.App.UI;
@@ -13,7 +14,9 @@ public sealed record ThemeConfiguration(
     string AccentColor,
     string FontFamily,
     double FontSize,
-    double BackgroundOpacity = 1)
+    double BackgroundOpacity = 1,
+    string? AmbienceColor = null,
+    bool AnimateTransition = false)
 {
     public static ThemeConfiguration FromSettings(AppSettings settings)
     {
@@ -188,6 +191,20 @@ public static class ThemeManager
                 Color.FromRgb(244, 246, 250),
                 Color.FromRgb(146, 153, 168))
         };
+
+        if (TryParseAccent(configuration.AmbienceColor, out var ambience))
+        {
+            var hsl = ToHsl(ambience);
+            Color Tint(double lightness) => FromHsl(hsl.Hue, Math.Min(hsl.Saturation, 0.45), lightness);
+            var light = theme == "Light";
+            baseColors = baseColors with
+            {
+                Background = Tint(light ? 0.96 : 0.055),
+                Surface = Tint(light ? 0.99 : 0.08),
+                SurfaceRaised = Tint(light ? 0.94 : 0.115),
+                SurfaceHover = Tint(light ? 0.90 : 0.15)
+            };
+        }
 
         TryParseAccent(
             NormalizeAccent(configuration.AccentColor),
@@ -449,19 +466,68 @@ public static class ThemeManager
         Application application,
         ThemeConfiguration configuration)
     {
+        var animate = configuration.AnimateTransition && SystemParameters.ClientAreaAnimation
+            && !SystemParameters.HighContrast;
+        var snapshots = new List<(ResourceDictionary Resources, object Key, Brush Previous)>();
+        var visited = new HashSet<ResourceDictionary>(ReferenceEqualityComparer.Instance);
+        void Capture(ResourceDictionary resources)
+        {
+            if (!visited.Add(resources)) return;
+            foreach (var merged in resources.MergedDictionaries) Capture(merged);
+            foreach (var key in resources.Keys)
+                if (resources[key] is Brush brush)
+                    snapshots.Add((resources, key, brush.CloneCurrentValue()));
+        }
+        if (animate)
+        {
+            Capture(application.Resources);
+            foreach (Window window in application.Windows) Capture(window.Resources);
+        }
         var palette = Apply(application.Resources, configuration);
         var font = new FontFamily(NormalizeFontFamily(configuration.FontFamily));
         var size = NormalizeFontSize(configuration.FontSize);
         foreach (Window window in application.Windows)
         {
+            var previousBackground = animate ? window.Background?.CloneCurrentValue() : null;
             Apply(window.Resources, palette, font.Source, size);
             window.Background = NewBrush(palette.Background);
+            if (previousBackground is not null) TransitionBrush(window.Background, previousBackground);
             window.Foreground = NewBrush(palette.Text);
             window.FontFamily = font;
             window.FontSize = size;
             window.InvalidateVisual();
         }
+        foreach (var snapshot in snapshots)
+            if (snapshot.Resources[snapshot.Key] is Brush target)
+                TransitionBrush(target, snapshot.Previous);
         return palette;
+    }
+
+    private static void TransitionBrush(Brush target, Brush previous)
+    {
+        if (target.IsFrozen) return;
+        static ColorAnimation Animation(Color from, Color to) => new(from, to,
+            new Duration(TimeSpan.FromMilliseconds(1600)))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut },
+            FillBehavior = FillBehavior.Stop
+        };
+        if (target is SolidColorBrush solid && previous is SolidColorBrush oldSolid)
+        {
+            var destination = (Color)solid.GetAnimationBaseValue(SolidColorBrush.ColorProperty);
+            solid.BeginAnimation(SolidColorBrush.ColorProperty,
+                Animation(oldSolid.Color, destination), HandoffBehavior.SnapshotAndReplace);
+        }
+        else if (target is GradientBrush gradient && previous is GradientBrush oldGradient
+            && gradient.GradientStops.Count == oldGradient.GradientStops.Count)
+        {
+            for (var i = 0; i < gradient.GradientStops.Count; i++)
+            {
+                var stop = gradient.GradientStops[i];
+                stop.BeginAnimation(GradientStop.ColorProperty,
+                    Animation(oldGradient.GradientStops[i].Color, (Color)stop.GetAnimationBaseValue(GradientStop.ColorProperty)), HandoffBehavior.SnapshotAndReplace);
+            }
+        }
     }
 
     private static void ApplyHighContrastToApplication(
@@ -674,6 +740,7 @@ public static class ThemeManager
     {
         if (resources[key] is SolidColorBrush { IsFrozen: false } brush)
         {
+            brush.BeginAnimation(SolidColorBrush.ColorProperty, null);
             brush.Color = color;
             brush.Opacity = 1;
             return;

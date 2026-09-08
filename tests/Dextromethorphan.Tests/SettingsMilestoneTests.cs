@@ -34,6 +34,25 @@ public sealed class SettingsMilestoneTests : IDisposable
     }
 
     [Fact]
+    public async Task CrossfadeAndGlowOptionsSurviveReloadAndReset()
+    {
+        var service = new JsonSettingsService(new AppPaths(_root));
+        await service.InitializeAsync(TestContext.Current.CancellationToken);
+        var shape = new CrossfadeShape { Curve = CrossfadeCurve.Custom, IncomingPower = 2.5, OutgoingPower = .5 };
+        await service.UpdateAsync(x => { x.CrossfadeShape = shape; x.PlayerArtworkGlow = true; x.NowPlayingArtworkGlow = true; }, TestContext.Current.CancellationToken);
+        var reloaded = new JsonSettingsService(new AppPaths(_root));
+        await reloaded.InitializeAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(shape, reloaded.Current.CrossfadeShape);
+        Assert.True(reloaded.Current.PlayerArtworkGlow);
+        Assert.True(reloaded.Current.NowPlayingArtworkGlow);
+        await reloaded.ResetAsync(SettingsResetScope.Playback, TestContext.Current.CancellationToken);
+        Assert.Equal(new CrossfadeShape(), reloaded.Current.CrossfadeShape);
+        await reloaded.ResetAsync(SettingsResetScope.Appearance, TestContext.Current.CancellationToken);
+        Assert.False(reloaded.Current.PlayerArtworkGlow);
+        Assert.False(reloaded.Current.NowPlayingArtworkGlow);
+    }
+
+    [Fact]
     public void NormalizeMigratesLegacyDefaultsAndRepairsNewFields()
     {
         var settings = new AppSettings
@@ -297,6 +316,10 @@ public sealed class SettingsMilestoneTests : IDisposable
             nameof(AppSettings.BackgroundOpacity),
             nameof(AppSettings.AnimationsEnabled),
             nameof(AppSettings.VisualizerEnabled),
+            nameof(AppSettings.AmbienceEnabled),
+            nameof(AppSettings.PlayerArtworkGlow),
+            nameof(AppSettings.NowPlayingArtworkGlow),
+            nameof(AppSettings.CrossfadeShape),
             nameof(AppSettings.ResumeOnStartup),
             nameof(AppSettings.ResumeTrackBookmarks),
             nameof(AppSettings.StopAfterCurrent),

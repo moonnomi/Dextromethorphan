@@ -301,6 +301,7 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
         settings.ArtworkCacheMegabytes = Math.Clamp(settings.ArtworkCacheMegabytes, 64, 4096);
         settings.ReplayGainPreampDb = FiniteClamp(settings.ReplayGainPreampDb, -20, 20, 0);
         settings.CrossfadeSeconds = FiniteClamp(settings.CrossfadeSeconds, 0, 10, 0);
+        settings.CrossfadeShape = (settings.CrossfadeShape ?? new()).Normalize();
         settings.FadeInSeconds = FiniteClamp(settings.FadeInSeconds, 0, 10, 0);
         settings.FadeOutSeconds = FiniteClamp(settings.FadeOutSeconds, 0, 10, 0);
         settings.PlaybackSpeed = FiniteClamp(settings.PlaybackSpeed, 0.5, 1.5, 1);
@@ -463,6 +464,9 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
                 target.BackgroundOpacity = defaults.BackgroundOpacity;
                 target.AnimationsEnabled = defaults.AnimationsEnabled;
                 target.VisualizerEnabled = defaults.VisualizerEnabled;
+                target.AmbienceEnabled = defaults.AmbienceEnabled;
+                target.PlayerArtworkGlow = defaults.PlayerArtworkGlow;
+                target.NowPlayingArtworkGlow = defaults.NowPlayingArtworkGlow;
                 target.AlbumTileSize = defaults.AlbumTileSize;
                 target.ViewSettings = defaults.ViewSettings;
                 target.DashboardModules = defaults.DashboardModules;
@@ -485,6 +489,7 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
                 target.PreventClipping = defaults.PreventClipping;
                 target.TransitionMode = defaults.TransitionMode;
                 target.CrossfadeSeconds = defaults.CrossfadeSeconds;
+                target.CrossfadeShape = defaults.CrossfadeShape;
                 target.FadeInSeconds = defaults.FadeInSeconds;
                 target.FadeOutSeconds = defaults.FadeOutSeconds;
                 target.PlaybackSpeed = defaults.PlaybackSpeed;
@@ -557,7 +562,7 @@ public sealed class JsonSettingsService(AppPaths paths) : ISettingsService
             string path;
             try { path = Path.GetFullPath(pair.Key); }
             catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException) { continue; }
-            result[path] = Math.Clamp(pair.Value, -30_000, 30_000);
+            result[path] = Math.Clamp(pair.Value, -600_000, 600_000);
         }
         return result;
     }

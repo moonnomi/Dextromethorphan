@@ -65,6 +65,11 @@ Compress-Archive -Path (Join-Path $publish '*') -DestinationPath $archive -Compr
 Write-Host "Release archive: $archive"
 
 if (Test-Path -LiteralPath $latest) {
+    $runningLatest = Get-Process -Name Dextromethorphan -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -and $_.Path.StartsWith($latest + '\', [StringComparison]::OrdinalIgnoreCase) }
+    if ($runningLatest) {
+        throw "Close Dextromethorphan before replacing bin/latest. The completed build is available at $publish."
+    }
     Remove-Item -LiteralPath $latest -Recurse -Force
 }
 New-Item -ItemType Directory -Path $latest -Force | Out-Null

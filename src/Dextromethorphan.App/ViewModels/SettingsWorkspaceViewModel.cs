@@ -45,6 +45,31 @@ public sealed class SettingsWorkspaceViewModel : ObservableObject
     private bool _stopAfterCurrent;
     private bool _stopAfterQueue;
     private TransitionMode _transitionMode = TransitionMode.Gapless;
+    private CrossfadeShape _crossfadeShape = new();
+    public IReadOnlyList<CrossfadeCurve> CrossfadeCurves { get; } = Enum.GetValues<CrossfadeCurve>();
+    public CrossfadeShape CrossfadeShape => _crossfadeShape;
+    public CrossfadeCurve CrossfadeCurve
+    {
+        get => _crossfadeShape.Curve;
+        set => SetCrossfadeShape(_crossfadeShape with { Curve = value });
+    }
+    public double CrossfadeIncomingPower
+    {
+        get => _crossfadeShape.IncomingPower;
+        set => SetCrossfadeShape(_crossfadeShape with { IncomingPower = value, Curve = CrossfadeCurve.Custom });
+    }
+    public double CrossfadeOutgoingPower
+    {
+        get => _crossfadeShape.OutgoingPower;
+        set => SetCrossfadeShape(_crossfadeShape with { OutgoingPower = value, Curve = CrossfadeCurve.Custom });
+    }
+    private void SetCrossfadeShape(CrossfadeShape shape)
+    {
+        if (!SetPlayback(ref _crossfadeShape, shape.Normalize(), nameof(CrossfadeShape))) return;
+        Raise(nameof(CrossfadeCurve));
+        Raise(nameof(CrossfadeIncomingPower));
+        Raise(nameof(CrossfadeOutgoingPower));
+    }
     private double _crossfadeSeconds;
     private double _fadeInSeconds;
     private double _fadeOutSeconds;
@@ -556,6 +581,7 @@ public sealed class SettingsWorkspaceViewModel : ObservableObject
         _stopAfterQueue = settings.StopAfterQueue;
         _transitionMode = settings.TransitionMode;
         _crossfadeSeconds = settings.CrossfadeSeconds;
+        _crossfadeShape = settings.CrossfadeShape;
         _fadeInSeconds = settings.FadeInSeconds;
         _fadeOutSeconds = settings.FadeOutSeconds;
         _replayGainMode = settings.ReplayGainMode;
@@ -685,6 +711,7 @@ public sealed class SettingsWorkspaceViewModel : ObservableObject
         StopAfterQueue,
         TransitionMode,
         CrossfadeSeconds,
+        CrossfadeShape,
         FadeInSeconds,
         FadeOutSeconds,
         ReplayGainMode,
@@ -761,6 +788,7 @@ public sealed class SettingsWorkspaceViewModel : ObservableObject
     [
         nameof(ResumeOnStartup), nameof(ResumeTrackBookmarks), nameof(StopAfterCurrent),
         nameof(StopAfterQueue), nameof(TransitionMode), nameof(CrossfadeSeconds),
+        nameof(CrossfadeShape), nameof(CrossfadeCurve), nameof(CrossfadeIncomingPower), nameof(CrossfadeOutgoingPower),
         nameof(FadeInSeconds), nameof(FadeOutSeconds), nameof(ReplayGainMode),
         nameof(ReplayGainPreampDb), nameof(PreventClipping), nameof(PlaybackSpeed),
         nameof(PitchSemitones), nameof(PreservePitch), nameof(SeekStepSeconds),
@@ -782,6 +810,7 @@ public sealed class SettingsWorkspaceViewModel : ObservableObject
         bool StopAfterQueue,
         TransitionMode TransitionMode,
         double CrossfadeSeconds,
+        CrossfadeShape CrossfadeShape,
         double FadeInSeconds,
         double FadeOutSeconds,
         ReplayGainMode ReplayGainMode,
@@ -794,7 +823,7 @@ public sealed class SettingsWorkspaceViewModel : ObservableObject
         double VolumeStep)
     {
         internal static PlaybackDraft Default { get; } = new(
-            true, true, false, false, TransitionMode.Gapless, 0, 0, 0,
+            true, true, false, false, TransitionMode.Gapless, 0, new(), 0, 0,
             ReplayGainMode.Track, 0, true, 1, 0, true, 5, .05);
 
         internal void Apply(AppSettings settings)
@@ -805,6 +834,7 @@ public sealed class SettingsWorkspaceViewModel : ObservableObject
             settings.StopAfterQueue = StopAfterQueue;
             settings.TransitionMode = TransitionMode;
             settings.CrossfadeSeconds = CrossfadeSeconds;
+            settings.CrossfadeShape = CrossfadeShape;
             settings.FadeInSeconds = FadeInSeconds;
             settings.FadeOutSeconds = FadeOutSeconds;
             settings.ReplayGainMode = ReplayGainMode;
