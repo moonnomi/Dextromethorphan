@@ -426,7 +426,8 @@ public sealed class WasapiAudioEngine : IAudioEngine
                     ? _options.CrossfadeSeconds
                     : 0,
                 decoded,
-                initialPositionSamples);
+                initialPositionSamples,
+                ReplayGainCalculator.LinearGain(track, _options));
             _transition.SourceChanged += OnPipelineSourceChanged;
             _transition.Trace += OnTransitionTrace;
             _transition.Completed += OnPipelineCompleted;
@@ -506,7 +507,14 @@ public sealed class WasapiAudioEngine : IAudioEngine
             _transition.QueueNext(
                 processed,
                 totalSamples,
-                decoded);
+                decoded,
+                ReplayGainCalculator.LinearGain(track, _options),
+                seconds =>
+                {
+                    if (!decoded.Reader.CanSeek) return false;
+                    decoded.Reader.CurrentTime = TimeSpan.FromSeconds(seconds);
+                    return Math.Abs(decoded.Reader.CurrentTime.TotalSeconds - seconds) <= .05;
+                });
             StartBoundaryAnalysis(track);
         }
         else decoded.Dispose();
@@ -527,9 +535,11 @@ public sealed class WasapiAudioEngine : IAudioEngine
     {
         CancelBoundaryAnalysis();
         if (_transition is { } existing)
+        {
             existing.CrossfadeSeconds = _options.TransitionMode == TransitionMode.Crossfade ? _options.CrossfadeSeconds : 0;
+            existing.RestoreFullEnding();
+        }
         var trim = _options.CrossfadeShape.SkipTrailingSilence;
-        if (!trim) _transition?.RestoreFullEnding();
         var adaptive = _options.CrossfadeShape.DynamicEnabled && _options.TransitionMode == TransitionMode.Crossfade && _options.CrossfadeSeconds > 0;
         if (!adaptive && !trim) { _dynamicStatus = "Boundary analysis: off"; return; }
         if (_transition is not { } pipeline || _track is not { } outgoing
@@ -557,10 +567,13 @@ public sealed class WasapiAudioEngine : IAudioEngine
                 token.ThrowIfCancellationRequested();
                 if (!ReferenceEquals(_transition, pipeline) || !ReferenceEquals(_track, outgoing)
                     || !ReferenceEquals(_nextTrack, incoming)) return;
-                if (pipeline.TrySetPlannedCrossfade(plan.Seconds, plan.TrimTrailingSeconds))
+                if (pipeline.TrySetPlannedCrossfade(
+                        plan.Seconds,
+                        plan.TrimTrailingSeconds,
+                        plan.SkipLeadingSeconds))
                 {
                     _dynamicOverlap = plan.Seconds;
-                    _dynamicStatus = $"Boundary plan: {plan.Seconds:0.##}s overlap · {plan.TrimTrailingSeconds:0.##}s trailing silence skipped · {plan.Reason}";
+                    _dynamicStatus = $"Boundary plan: {plan.Seconds:0.##}s overlap | {plan.TrimTrailingSeconds:0.##}s outgoing tail advanced | {plan.SkipLeadingSeconds:0.##}s incoming silence skipped | {plan.Reason}";
                 }
                 else _dynamicStatus = "Dynamic demo: plan arrived after transition deadline; regular crossfade retained";
                 LogTransition("boundary-plan", new Dictionary<string, object?> { ["result"] = _dynamicStatus });
@@ -719,9 +732,15 @@ public sealed class WasapiAudioEngine : IAudioEngine
 
     private void UpdateGain()
     {
-        if (_gain is null || _track is null) return;
-        var replayGain = ReplayGainCalculator.LinearGain(_track, _options);
-        _gain.Gain = replayGain * EffectiveSoftwareVolume();
+        if (_gain is null) return;
+        // Track normalization belongs before the transition mixer so each side of
+        // an overlap retains its own ReplayGain. The final stage is only the user's
+        // software volume plus clipping protection.
+        _gain.Gain = EffectiveSoftwareVolume();
+        if (_transition is not null && _track is not null)
+            _transition.SetSourceGains(
+                ReplayGainCalculator.LinearGain(_track, _options),
+                _nextTrack is null ? null : ReplayGainCalculator.LinearGain(_nextTrack, _options));
     }
 
     private void LogTransition(string operation, IReadOnlyDictionary<string, object?>? extra = null)

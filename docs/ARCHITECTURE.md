@@ -12,10 +12,10 @@
 ```text
 Decoder/DoP packer -> output-mode decision -> endpoint format probe
                     |-> Direct: byte stream -> gapless join -> event-driven WASAPI
-                    `-> DSP: normalize -> transition -> rate/pitch -> fades -> gain/guard -> WASAPI
+                    `-> DSP: normalize -> rate/pitch -> per-track gain -> transition -> fades -> volume/guard -> WASAPI
 ```
 
-The engine chooses the path from observable settings. Direct mode has same-format two-track preloading, exclusive-format probing, DSF/DoP framing, and device-loss recovery. DSP mode normalizes the next decoder to a stable float format, joins or equal-power crossfades inside one callback stream, performs variable-rate/pitch correction, then applies fades and ReplayGain/software volume with double-precision gain arithmetic and a final clipping guard.
+The engine chooses the path from observable settings. Direct mode has same-format two-track preloading, exclusive-format probing, DSF/DoP framing, and device-loss recovery. DSP mode normalizes each decoder to a stable float format and performs variable-rate/pitch correction. Track-specific ReplayGain is applied before the transition mixer, which performs gapless joins or fixed/waveform-planned crossfades inside one callback stream. Session fades, software volume, double-precision accumulation, and the final clipping guard follow the mix.
 
 ## Next production increments
 

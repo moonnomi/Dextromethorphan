@@ -90,6 +90,82 @@ public sealed class DspQualificationTests
     }
 
     [Fact]
+    public void CrossfadeAppliesEachTracksReplayGainBeforeMixing()
+    {
+        using var transition = new TransitionSampleProvider(
+            new ChunkedSampleProvider(Enumerable.Repeat(1f, 8).ToArray(), 4, 1, 3),
+            8,
+            crossfadeSeconds: 1,
+            initialGain: .5)
+        { Shape = new CrossfadeShape { Curve = CrossfadeCurve.Linear } };
+        transition.QueueNext(
+            new ChunkedSampleProvider(Enumerable.Repeat(1f, 8).ToArray(), 4, 1, 3),
+            8,
+            gain: .25);
+
+        var output = Drain(transition, [3, 5, 2]);
+        var overlap = output.Skip(4).Take(4).ToArray();
+
+        Assert.Equal(12, output.Length);
+        Assert.Equal(.5f, output[0]);
+        Assert.Equal(.25f, output[^1]);
+        for (var frame = 0; frame < overlap.Length; frame++)
+        {
+            var progress = frame / 3d;
+            Assert.Equal(.5 * (1 - progress) + .25 * progress, overlap[frame], 6);
+        }
+    }
+
+    [Fact]
+    public void DynamicPlanUsesOutgoingAndIncomingCuePointsWithoutEditingSources()
+    {
+        var incoming = new SeekableSampleProvider(
+            Enumerable.Repeat(0f, 4).Concat(Enumerable.Repeat(.8f, 8)).ToArray(),
+            4,
+            1);
+        using var transition = new TransitionSampleProvider(
+            new ChunkedSampleProvider(Enumerable.Repeat(.4f, 16).ToArray(), 4, 1, 3),
+            16,
+            crossfadeSeconds: 1)
+        { Shape = new CrossfadeShape { Curve = CrossfadeCurve.Linear } };
+        transition.QueueNext(
+            incoming,
+            12,
+            trySeek: seconds => incoming.TrySeek(seconds));
+
+        Assert.True(transition.TrySetPlannedCrossfade(1, trimTrailingSeconds: 2, skipLeadingSeconds: 1));
+        var output = Drain(transition, [3, 5, 2]);
+
+        Assert.Equal(12, output.Length);
+        Assert.Equal(4, incoming.InitialSeekSamples);
+        Assert.Equal(.4f, output[0]);
+        Assert.Equal(.8f, output[^1]);
+        Assert.DoesNotContain(output, sample => sample == 0);
+        Assert.Equal(1, transition.LastTransitionOverlapSeconds);
+    }
+
+    [Fact]
+    public void DisablingDynamicPlanRestoresIncomingFileStart()
+    {
+        var incoming = new SeekableSampleProvider(
+            Enumerable.Repeat(0f, 4).Concat(Enumerable.Repeat(.8f, 8)).ToArray(),
+            4,
+            1);
+        using var transition = new TransitionSampleProvider(
+            new ChunkedSampleProvider(Enumerable.Repeat(.4f, 16).ToArray(), 4, 1, 3),
+            16,
+            crossfadeSeconds: 1);
+        transition.QueueNext(incoming, 12, trySeek: incoming.TrySeek);
+        Assert.True(transition.TrySetPlannedCrossfade(1, trimTrailingSeconds: 1, skipLeadingSeconds: 1));
+
+        transition.RestoreFullEnding();
+        var output = Drain(transition, [3, 5, 2]);
+
+        Assert.Equal(0, incoming.InitialSeekSamples);
+        Assert.Equal(24, output.Length);
+    }
+
+    [Fact]
     public void PlannedEndingSkipsSilenceAndJoinsNextTrackInSameRead()
     {
         var first = Enumerable.Repeat(.4f, 8).Concat(Enumerable.Repeat(0f, 8)).ToArray();
@@ -332,6 +408,36 @@ public sealed class DspQualificationTests
                 buffer,
                 offset,
                 available);
+            _position += available;
+            return available;
+        }
+    }
+
+    private sealed class SeekableSampleProvider(
+        float[] samples,
+        int sampleRate,
+        int channels) : ISampleProvider
+    {
+        private int _position;
+        public int InitialSeekSamples { get; private set; }
+        public WaveFormat WaveFormat { get; } =
+            WaveFormat.CreateIeeeFloatWaveFormat(sampleRate, channels);
+
+        public bool TrySeek(double seconds)
+        {
+            var target = (int)Math.Round(seconds * sampleRate * channels);
+            if (target < 0 || target >= samples.Length) return false;
+            _position = target;
+            InitialSeekSamples = target;
+            return true;
+        }
+
+        public int Read(float[] buffer, int offset, int count)
+        {
+            var available = Math.Min(count, samples.Length - _position);
+            available -= available % channels;
+            if (available <= 0) return 0;
+            Array.Copy(samples, _position, buffer, offset, available);
             _position += available;
             return available;
         }

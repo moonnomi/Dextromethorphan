@@ -30,12 +30,18 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
     private CrossfadeMeasurement _measurement = new(0, 0, 0, false);
     public CrossfadeMeasurement Measurement => Volatile.Read(ref _measurement);
 
-    public TransitionSampleProvider(ISampleProvider initial, long totalSamples, double crossfadeSeconds = 0, IDisposable? owner = null, long initialPositionSamples = 0)
+    public TransitionSampleProvider(
+        ISampleProvider initial,
+        long totalSamples,
+        double crossfadeSeconds = 0,
+        IDisposable? owner = null,
+        long initialPositionSamples = 0,
+        double initialGain = 1)
     {
         ArgumentNullException.ThrowIfNull(initial);
         var alignedTotal = Align(totalSamples, initial.WaveFormat.Channels);
         var alignedPosition = Align(Math.Clamp(initialPositionSamples, 0, alignedTotal), initial.WaveFormat.Channels);
-        _current = new Source(initial, alignedTotal, owner) { SamplesRead = alignedPosition };
+        _current = new Source(initial, alignedTotal, owner, NormalizeGain(initialGain), null) { SamplesRead = alignedPosition };
         WaveFormat = initial.WaveFormat;
         CrossfadeSeconds = crossfadeSeconds;
     }
@@ -63,7 +69,12 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
         }
     }
 
-    public void QueueNext(ISampleProvider? provider, long totalSamples = 0, IDisposable? owner = null)
+    public void QueueNext(
+        ISampleProvider? provider,
+        long totalSamples = 0,
+        IDisposable? owner = null,
+        double gain = 1,
+        Func<double, bool>? trySeek = null)
     {
         lock (_sync)
         {
@@ -71,7 +82,12 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
                 throw new ArgumentException("The next source must be normalized to the pipeline format.", nameof(provider));
             if (_activeCrossfadeSamples > 0) EmitTrace("next-replaced-during-overlap", _crossfadeConsumed / (double)(WaveFormat.SampleRate * WaveFormat.Channels));
             Retire(_next?.Owner);
-            _next = provider is null ? null : new Source(provider, Align(totalSamples, WaveFormat.Channels), owner);
+            _next = provider is null ? null : new Source(
+                provider,
+                Align(totalSamples, WaveFormat.Channels),
+                owner,
+                NormalizeGain(gain),
+                trySeek);
             _crossfadeConsumed = 0;
             _activeCrossfadeSamples = 0;
             _completedRaised = false;
@@ -80,15 +96,42 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
         }
     }
 
-    public bool TrySetPlannedCrossfade(double seconds, double trimTrailingSeconds = 0)
+    /// <summary>
+    /// Updates track-specific normalization before the two sources are mixed. Applying
+    /// ReplayGain here avoids changing the gain of both sources at the hand-off and
+    /// keeps the overlap representative of each track's own metadata.
+    /// </summary>
+    public void SetSourceGains(double currentGain, double? nextGain = null)
+    {
+        lock (_sync)
+        {
+            _current.Gain = NormalizeGain(currentGain);
+            if (_next is not null && nextGain is { } queued)
+                _next.Gain = NormalizeGain(queued);
+        }
+    }
+
+    public bool TrySetPlannedCrossfade(
+        double seconds,
+        double trimTrailingSeconds = 0,
+        double skipLeadingSeconds = 0)
     {
         lock (_sync)
         {
             if (_next is null || _activeCrossfadeSamples > 0) return false;
             if (!double.IsFinite(trimTrailingSeconds) || trimTrailingSeconds < 0 || trimTrailingSeconds > 20) return false;
+            if (!double.IsFinite(skipLeadingSeconds) || skipLeadingSeconds < 0 || skipLeadingSeconds > 10) return false;
             var end = _current.TotalSamples - Align((long)(trimTrailingSeconds * WaveFormat.SampleRate * WaveFormat.Channels), WaveFormat.Channels);
             var needed = (Math.Max(CrossfadeSeconds, seconds) + .25) * WaveFormat.SampleRate * WaveFormat.Channels;
             if (end - _current.SamplesRead <= needed) return false;
+            if (skipLeadingSeconds > 0)
+            {
+                if (_next.SamplesRead != 0 || _next.TrySeek is null || !_next.TrySeek(skipLeadingSeconds))
+                    return false;
+                _next.SamplesRead = Align(
+                    (long)Math.Round(skipLeadingSeconds * WaveFormat.SampleRate * WaveFormat.Channels),
+                    WaveFormat.Channels);
+            }
             _current.EndSamples = end;
             CrossfadeSeconds = seconds;
             return true;
@@ -98,7 +141,12 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
     public void RestoreFullEnding()
     {
         lock (_sync)
-            if (_activeCrossfadeSamples == 0) _current.EndSamples = _current.TotalSamples;
+            if (_activeCrossfadeSamples == 0)
+            {
+                _current.EndSamples = _current.TotalSamples;
+                if (_next is { SamplesRead: > 0, TrySeek: not null } next && next.TrySeek(0))
+                    next.SamplesRead = 0;
+            }
     }
 
     public int Read(float[] buffer, int offset, int count)
@@ -131,7 +179,12 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
                 if (beforeFade > 0)
                 {
                     var read = _current.Provider.Read(buffer, offset + written, beforeFade);
-                    for (var i = 0; i < read; i++) _outgoingEnergy += (double)buffer[offset + written + i] * buffer[offset + written + i];
+                    for (var i = 0; i < read; i++)
+                    {
+                        var index = offset + written + i;
+                        buffer[index] = (float)(buffer[index] * _current.Gain);
+                        _outgoingEnergy += (double)buffer[index] * buffer[index];
+                    }
                     _current.SamplesRead += read;
                     written += read;
                     if (read > 0) continue;
@@ -144,7 +197,12 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
                 }
 
                 var tail = _current.EndSamples < _current.TotalSamples ? 0 : _current.Provider.Read(buffer, offset + written, count - written);
-                for (var i = 0; i < tail; i++) _outgoingEnergy += (double)buffer[offset + written + i] * buffer[offset + written + i];
+                for (var i = 0; i < tail; i++)
+                {
+                    var index = offset + written + i;
+                    buffer[index] = (float)(buffer[index] * _current.Gain);
+                    _outgoingEnergy += (double)buffer[index] * buffer[index];
+                }
                 _current.SamplesRead += tail;
                 written += tail;
                 if (tail == 0) RaiseCompleted();
@@ -195,8 +253,8 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
                 ? 1
                 : frame / (double)(fadeFrames - 1);
             var gains = _activeShape.Gains(frameProgress);
-            var outgoing = sample < currentRead ? _currentBuffer[sample] : 0;
-            var incoming = sample < nextRead ? _nextBuffer[sample] : 0;
+            var outgoing = sample < currentRead ? _currentBuffer[sample] * _current.Gain : 0;
+            var incoming = sample < nextRead ? _nextBuffer[sample] * _next.Gain : 0;
             _outgoingEnergy += Math.Pow(outgoing * gains.Outgoing, 2);
             _incomingEnergy += Math.Pow(incoming * gains.Incoming, 2);
             destination[offset + sample] = (float)((outgoing * gains.Outgoing) + (incoming * gains.Incoming));
@@ -242,6 +300,7 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
             WaveFormat.Channels);
     private static int Align(int value, int channels) => value - (value % channels);
     private static long Align(long value, int channels) => value - (value % channels);
+    private static double NormalizeGain(double value) => double.IsFinite(value) ? Math.Clamp(value, 0, 16) : 1;
     private static bool FormatsMatch(WaveFormat a, WaveFormat b) => a.SampleRate == b.SampleRate && a.Channels == b.Channels && a.Encoding == b.Encoding;
     private static void EnsureBuffer(ref float[] buffer, int required) { if (buffer.Length < required) buffer = new float[required]; }
     private static int ReadFully(
@@ -273,12 +332,19 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
         }
     }
 
-    private sealed class Source(ISampleProvider provider, long totalSamples, IDisposable? owner)
+    private sealed class Source(
+        ISampleProvider provider,
+        long totalSamples,
+        IDisposable? owner,
+        double gain,
+        Func<double, bool>? trySeek)
     {
         public ISampleProvider Provider { get; } = provider;
         public long TotalSamples { get; } = totalSamples;
         public long EndSamples { get; set; } = totalSamples;
         public IDisposable? Owner { get; } = owner;
         public long SamplesRead { get; set; }
+        public double Gain { get; set; } = gain;
+        public Func<double, bool>? TrySeek { get; } = trySeek;
     }
 }

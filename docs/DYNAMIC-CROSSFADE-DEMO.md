@@ -1,75 +1,141 @@
-# Dynamic crossfade demo
+# Dynamic crossfade design and qualification
 
-Research and implementation notes, 2026-09-08. Stable baseline: `bf4d907`. Demo branch: `demo/crossfade-demo`.
+Implementation and research record for branch `demo/crossfade-demo`, updated 2026-09-18.
 
-## Follow-up: recorded silence and visible times
+## What the feature means
 
-Playback settings now show editable seconds beside the fade-in, fade-out and crossfade sliders. These fields apply on focus loss; Apply saves the playback draft.
+Fixed crossfade overlaps the final configured number of seconds of one track with the beginning of the next track. Dynamic crossfade additionally analyzes both decoded waveforms and chooses:
 
-**Skip trailing silence between tracks** is a separate opt-in setting, independent of dynamic crossfade. It also works in Gapless mode. The analyzer requires at least one second of peak level below -60 dBFS at the ending and keeps 200 ms of padding. Peak detection checks every channel, so a transient cannot be hidden by low window RMS. All-silent analyzed tails are preserved because the true end of the music cannot be located confidently within the 20-second window. Leading silence and the last track in a queue are preserved. This uses PCM processing and is unavailable during DSD/DoP or tempo processing.
+1. an effective outgoing cue point when the file has a confidently low-energy ending;
+2. an incoming cue point after sustained digital silence;
+3. an overlap duration that avoids prolonged loud-on-loud collisions; and
+4. the user-selected gain curves for the actual sample mix.
 
-When enabled, the effective ending is shortened in memory, and normal or dynamic overlap is calculated against that ending. Original file duration and files remain unchanged. Removing the next track restores the full ending. Late analysis keeps ordinary playback. The original research discussion below describes the initial no-trimming version; this explicit opt-in setting is the only exception.
+It is deliberately not beat matching, source separation, vocal detection, tempo synchronization, or an attempt to reproduce a private algorithm. Symfonium's public documentation says Smart Fades use waveform analysis to calculate transition points and curves, and may use volume, silence, or beats, but does not publish its implementation. Dextromethorphan therefore uses an independent, explainable waveform heuristic with conservative fallbacks.
 
-## What is practical?
+## Source findings
 
-| Approach | What it can improve | Cost and limitations | Decision |
-| --- | --- | --- | --- |
-| Silence detection | Remove dead time at boundaries | Cannot distinguish intentional silence; trimming changes playback positions | Do not trim in this demo |
-| RMS envelope matching | Adapt overlap to quiet intros and decaying outros | Cheap, explainable; amplitude is not perceived loudness or musical structure | Implement first |
-| Onset/beat/phrase alignment | Align rhythmic transitions | Requires reliable tempo and phase estimates, usually longer context and time stretching; poor fit for rubato, ambient music and tempo changes | Later experiment |
-| Learned DJ transitions | Jointly choose faders/EQ or other effects | Models, training assumptions, dependencies and substantial qualification | Not appropriate for the first native-player demo |
+- [Symfonium's official transition documentation](https://docs.symfonium.app/wiki/settings/settings-playback-transitions/) distinguishes fixed fades from waveform-based Smart Fades. It also describes separate transition points, durations, and curves. This is the behavioral reference, not source code.
+- [FFmpeg's official `acrossfade`, `afade`, and `silencedetect` documentation](https://ffmpeg.org/ffmpeg-filters.html#acrossfade) treats overlap duration, the two fade curves, silence threshold, and minimum silence duration as separate parameters. Its default silence detector uses -60 dB and requires a duration, which supports using sustained windows rather than a single low sample.
+- [ITU-R BS.1770-5](https://www.itu.int/rec/R-REC-BS.1770) defines programme-loudness and true-peak measurement, while [EBU R 128](https://tech.ebu.ch/publications/r128) recommends loudness normalization and maximum-level descriptors. These standards do not define crossfade timing. They do support keeping each track's normalization independent and preserving a final peak guard.
 
-Symfonium documents waveform-based transition points and curves, but its exact selection algorithm is not public in the sources reviewed. This implementation is an independent heuristic, not a reproduction or a claim of parity. The support discussion reports early overlaps, obscured attacks and truncated tails as important failure cases. Its author cautions that amplitude estimates are approximate. [Official transitions documentation](https://docs.symfonium.app/wiki/settings/settings-playback-transitions/) · [Smart Fade discussion](https://support.symfonium.app/t/smart-fade-improvement-select-or-disable-fade-curves/12541)
+The practical consequence is that waveform timing, fade envelopes, ReplayGain, and clipping prevention are separate stages. A timing detector must not silently become a loudness standard, and ReplayGain must be applied to each source before the sources are mixed.
 
-FFmpeg separates silence detection (level plus minimum duration) from crossfade duration and envelope selection. That distinction matters: a single low sample or short drum gap is not a reliable outro. This demo uses sustained-window evidence, and retains its existing mixer and limiter rather than introducing FFmpeg as a runtime dependency. [FFmpeg filters](https://ffmpeg.org/ffmpeg-filters.html#silencedetect)
+## Implemented pipeline
 
-RMS can be computed directly from samples without an FFT. Beat tracking is a different analysis pipeline: onset strength, tempo estimation and consistent peak selection. An RMS dip alone is not evidence of a beat. [librosa RMS documentation](https://librosa.org/doc/0.10.2/generated/librosa.feature.rms.html) · [librosa beat tracking](https://librosa.org/doc/main/api/generated/librosa.beat.beat_track.html)
+```text
+outgoing decoder -> normalize -> per-track ReplayGain --\
+                                                     transition mixer -> user volume -> peak guard -> WASAPI
+incoming decoder -> normalize -> per-track ReplayGain --/
+                         ^
+                 waveform cue plan
+```
 
-The supplied AI-DJ project is an offline mix-generation workflow using music analysis and planning; DJtransGAN uses learned transitions with differentiable effects and supplied cue points. Neither is a drop-in timing detector for this player's live queue. DJtransGAN provides pretrained weights, while its original training dataset is unavailable for licensing reasons. [AI-DJ repository](https://github.com/kckDeepak/AI-DJ-Mixing-System) · [DJtransGAN repository and paper reference](https://github.com/ChenPaulYu/DJtransGAN)
+Applying ReplayGain after the mixer was incorrect: when the active source changed, one track's gain could affect an entire callback containing both tracks. The transition provider now stores independent current/next gains and applies them before the fade envelopes. The final gain stage only applies software volume and clipping protection.
 
-## Implemented heuristic
+### Boundary analysis
 
-1. Decode at most the first 15 seconds and last 20 seconds of each relevant track with a separate read-only decoder. Never touch the playback decoder's position.
-2. Compute nonoverlapping 50 ms windows: `20 * log10(max(channel RMS, 0.000001))`. Taking the strongest channel avoids stereo phase cancellation.
-3. For each boundary, define a strong level as its 80th-percentile RMS minus 10 dB, with a -55 dBFS lower bound. These are demo tuning constants, not a published psychoacoustic standard.
-4. Use a 250 ms local maximum to bridge brief gaps. Test candidate overlaps from the configured maximum downward in 50 ms increments. Accept the longest whose simultaneous strong windows occupy at most 10% of the overlap.
-5. If no candidate passes, blend for 250 ms. Entirely near-silent boundaries and invalid envelopes use gapless. Cap overlap at a quarter of either track and the normal 10-second maximum.
-6. Apply the chosen duration before its start deadline. Keep the selected regular curve. Finish an active fade unchanged even when settings change.
+- A read-only analysis decoder samples at most the first 15 seconds and last 20 seconds. It never seeks the playback decoder while analyzing and never writes to media or the library database.
+- Non-overlapping 50 ms windows store the loudest channel RMS and peak. Using the strongest channel avoids stereo phase cancellation hiding content.
+- Results are cached in memory for 32 track boundaries. The cache key includes path, file length, modification time, and CUE segment boundaries.
+- One worker performs analysis with cancellation and a five-second request budget. Local fixed drives and seekable PCM are supported. DSD, network/removable storage, tempo processing, failed analysis, and late plans retain fixed crossfade.
 
-This is amplitude-based timing, not LUFS normalization, beat matching, vocal detection or content classification. Existing ReplayGain and clipping prevention remain separate. The demo does not change the gain curve automatically, and it does not remove silence. Long silent boundaries can therefore remain audible gaps. Correlated signals can still require limiter action during an overlap.
+### Cue selection
 
-## Runtime constraints
+The constants below are tuning rules, not claims from ITU, EBU, FFmpeg, or Symfonium.
 
-- Off by default. Requires Crossfade mode, a positive duration and normal speed/pitch in the PCM DSP pipeline.
-- Duration is the maximum; a per-output duration override remains authoritative.
-- One analysis worker, a cooperative five-second request budget and at most 32 cached boundary envelopes. Cache keys include path, size, modification time and CUE boundaries. No persistent waveform database or library writes.
-- Cancellation is checked between decoder reads; native decoder open/seek calls cannot be forcibly interrupted. A slow call can occupy the one worker, but does not hold the audio control gate or run in the audio callback.
-- Local fixed drives only. Network/removable storage, unsupported decoders, DSD, failed/late analysis and speed/pitch processing retain regular playback behavior.
-- Queue changes cancel obsolete plans; track and pipeline identities are rechecked before installing a result. Analysis never moves the next decoder or cuts the outgoing tail.
-- Audio Diagnostics includes the selected duration and reason, or the fallback reason. The settings graph shows the maximum configured envelope, not the analyzed waveform.
+Outgoing smart cue:
 
-## Try it
+- Calculate the 80th-percentile RMS of the analyzed tail as a local reference.
+- Treat a suffix as low energy only after both RMS falls below `max(-50 dBFS, reference - 30 dB)` and peak falls below `max(-45 dBFS, reference - 25 dB)`.
+- Require at least 1.5 seconds of that suffix, preserve 500 ms after the last detected content window, and advance by at most 10 seconds.
+- If the whole analyzed tail is quiet, preserve it: there is no trustworthy content boundary inside the window.
 
-Launch `src/Dextromethorphan.App/bin/dynamic-crossfade-demo/Dextromethorphan.exe` with other copies closed. In Settings → Playback, enable **Dynamic crossfade — experimental demo**, choose **Crossfade**, set a maximum (try 6 seconds), and Apply. Queue at least two tracks. To audition quickly, seek to 15 seconds before the end: seeking rebuilds the pipeline, so leave more than the maximum overlap plus two seconds for the cached plan to be installed. Inspect Audio Diagnostics to see whether a plan was installed. Disable the checkbox and Apply for regular-crossfade comparison. Rebuild with `scripts/build-dynamic-crossfade-demo.ps1`.
+Incoming smart cue:
 
-The demo uses the usual app settings/library, but reads music files only. The stable `bin/latest` build is preserved. The new flag is inside the crossfade settings object; older builds ignore it. No automatic enabling or music-library import is performed.
+- Require at least 500 ms of consecutive peak level below -60 dBFS at the file start.
+- Keep 100 ms of preroll before the first detected attack and skip at most 10 seconds.
+- An all-silent analyzed head is preserved because no attack was found.
+- Seeking is installed only before any incoming samples have been consumed. Disabling/replanning dynamic mode restores the incoming decoder to zero.
 
-## Qualification and next experiments
+The separate **Skip trailing silence** option remains stricter: it needs at least one second below -60 dBFS and retains 200 ms. It works without adaptive duration and never changes files.
 
-### Troubleshooting an inaudible crossfade
+### Overlap selection and rendering
 
-The Audio diagnostics panel now includes a 30-second, three-lane RMS history: weighted outgoing audio, weighted incoming audio, and the actual post-DSP/post-conversion PCM bytes returned to WASAPI. Readouts include submitted frames, mixed frames, RMS, peak and non-finite samples. The history uses a -60 to 0 dBFS scale, is bounded to 300 observations and updates only while visible. Levels describe the last submitted block, not an acoustic measurement; zero can mean a silent block. DSD/DoP is deliberately not interpreted as PCM.
+- Cap the overlap by the configured maximum, ten seconds, the analyzed windows, and one quarter of either effective track duration.
+- Derive a strong-content threshold per boundary from its 80th-percentile RMS minus 10 dB, bounded at -55 dBFS.
+- Use a 250 ms local maximum so brief drum gaps do not appear to be an outro.
+- Search from the maximum duration downward in 50 ms steps. Accept the longest candidate where no more than 10% of windows contain strong content from both tracks.
+- If both boundaries remain strong, use a short 250 ms blend. Invalid or near-silent envelopes fall back to gapless/fixed behavior without throwing into playback.
+- The mixer renders both sources in the same audio callback with linear, equal-power, smoothstep, or custom curves. Active plans and curves are immutable until that overlap finishes.
 
-`output-measured` log entries retain the numeric measurements once per second, and up to ten times per second during overlap. No raw audio is recorded. Export the usual diagnostic bundle after reproducing a problem. Measurements are taken before the Windows engine/driver; they do not prove physical output or capture loopback. Fixed-mode generated-signal tests verify both source contributions and the final output bytes.
+This avoids the earlier false-positive state where samples technically overlapped but the incoming track was still silent or the outgoing music had already ended.
 
-Fixed a seek regression: rebuilding a PCM pipeline discarded the next prepared track. Seeking now restores that next source, allowing automatic overlap to happen after scrubbing near the ending.
+## Diagnostics
 
-Select **Crossfade** in Settings → Playback, choose a positive duration (for example 6 seconds), and **Apply**. A saved duration does not enable overlap while **Gapless** is selected. For a fixed-duration comparison, disable Dynamic crossfade. Queue at least two tracks and let playback advance naturally; the Next button deliberately skips immediately.
+Audio Diagnostics exposes a bounded 30-second graph and numeric measurements for:
 
-The `audio-transition` category in `%APPDATA%\Dextromethorphan\logs\app-*.jsonl` records settings, effective pipeline mode, next-track preparation, boundary analysis, overlap start and actual completion. `gapless-switch` means no samples were overlapped; `overlap-completed` includes the actual overlap duration. Preparation failures include their exception message. Diagnostic exports include these logs. Logging is event-based, not per audio buffer.
+- weighted outgoing RMS;
+- weighted incoming RMS;
+- mixed frame count and overlap state;
+- post-DSP PCM RMS/peak actually submitted to WASAPI; and
+- non-finite sample count.
 
-Optional **Skip trailing silence** is separate from adaptive overlap: it detects sustained peaks below -60 dBFS at the ending, leaves a 200 ms guard, and trims only when a next track is ready. This supersedes the initial no-trimming scope described above. Music files are never modified.
+The `audio-transition` log category records `next-ready`, boundary-plan details, `overlap-started`, `overlap-completed` or `gapless-switch`, and periodic `output-measured` events. These measurements are immediately before the Windows audio engine/driver. They prove what Dextromethorphan submitted, not what an analog DAC emitted.
 
-Automated cases cover loud-to-loud, quiet tail plus quiet intro, rhythmic dips, silent/invalid boundaries, short-track limits and normal crossfade continuity. Listening across genres remains necessary; this demo does not promise perceptually optimal transitions.
+Enable Settings > Diagnostics > Debug mode for track context actions such as opening the file location, copying the path, probing the decoder, and exporting diagnostics. No raw audio is recorded.
 
-Next: collect actual plan outcomes, audition piano sustains and hard vocal attacks, compare adaptive timing with fixed timing using identical curves, then consider separate incoming/outgoing envelope lengths, cached waveform visualization and explicit silence handling. Beat/phrase alignment should be a separate opt-in mode with a confidence threshold and no tempo change when confidence is low.
+## Reproducible qualification
+
+Run the complete deterministic suite:
+
+```powershell
+dotnet test .\Dextromethorphan.slnx -c Release --no-restore
+```
+
+Run only waveform planning and sample-rendering qualification:
+
+```powershell
+dotnet test .\tests\Dextromethorphan.Tests\Dextromethorphan.Tests.csproj -c Release --no-restore --filter "FullyQualifiedName~DynamicCrossfadeTests|FullyQualifiedName~BoundaryEnvelopeAnalyzerTests|FullyQualifiedName~DspQualificationTests"
+```
+
+Run short generated-signal probes through the default Windows endpoint:
+
+```powershell
+$env:DEXTROMETHORPHAN_RUN_CROSSFADE_TEST = '1'
+dotnet test .\tests\Dextromethorphan.Tests\Dextromethorphan.Tests.csproj -c Release --no-restore --filter "FullyQualifiedName~CrossfadeOutputHardwareTests"
+```
+
+The endpoint gate creates temporary 48 kHz stereo float WAV files and deletes them afterward. It validates:
+
+- fixed two-second overlap survives a seek and reaches WASAPI;
+- dynamic cue analysis advances a quiet outgoing suffix and incoming digital silence;
+- the source transition reports a real overlap;
+- both source contributions produce mixed frames;
+- PCM frames reach the output tap; and
+- output contains no NaN or infinity.
+
+Qualification result on 2026-09-18:
+
+| Gate | Result |
+| --- | --- |
+| Fixed WASAPI generated-signal smoke | Passed, 4 s |
+| Dynamic WASAPI generated-signal smoke | Passed, 3 s |
+| Full Release suite | Passed, 514/514 |
+| Isolated-AppData demo startup/clean close | Passed, healthy after 5 s, exit code 0 |
+| Media files or library modified | No |
+
+Build the isolated demo without replacing `bin/latest`:
+
+```powershell
+.\scripts\build-dynamic-crossfade-demo.ps1
+```
+
+Launch `src/Dextromethorphan.App/bin/dynamic-crossfade-demo/Dextromethorphan.exe`, select Crossfade, choose a maximum duration and curve, enable Dynamic crossfade, and Apply. Queue at least two tracks and let playback advance naturally. The Next button intentionally performs an immediate skip rather than a crossfade.
+
+## Known limits and next research
+
+- Waveform energy cannot identify vocals, bars, phrases, key, or artistic intent. Some quiet endings and intentional silence will remain imperfect.
+- Cue advancement is enabled only by Dynamic crossfade (or the explicit trailing-silence option). Fixed crossfade always retains file boundaries.
+- Beat alignment requires onset detection, tempo/phase confidence, and potentially time stretching. It should be a separate opt-in experiment with a no-change fallback, not folded into this amplitude heuristic.
+- Listening qualification across piano sustains, live recordings, hard vocal attacks, ambient fades, and mastered loudness extremes is still valuable even though the generated-signal and sample-level gates pass.

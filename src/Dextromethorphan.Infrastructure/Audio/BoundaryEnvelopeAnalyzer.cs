@@ -18,16 +18,32 @@ internal sealed class BoundaryEnvelopeAnalyzer
             return await Task.Run(() =>
             {
                 var boundary = Read(outgoing, token);
+                var incomingBoundary = Read(incoming, token);
                 var trim = trimSilence ? DynamicCrossfadePlanner.TrailingSilenceSeconds(boundary) : 0;
+                if (adaptive)
+                    trim = Math.Max(trim, DynamicCrossfadePlanner.DynamicTailAdvanceSeconds(boundary));
                 if (trim > 0)
                     boundary = boundary with
                     {
                         DurationSeconds = boundary.DurationSeconds - trim,
-                        TailDb = boundary.TailDb.Take(boundary.TailDb.Length - (int)Math.Round(trim / boundary.WindowSeconds)).ToArray()
+                        TailDb = TrimEnd(boundary.TailDb, trim, boundary.WindowSeconds),
+                        TailPeakDb = boundary.TailPeakDb is null
+                            ? null
+                            : TrimEnd(boundary.TailPeakDb, trim, boundary.WindowSeconds)
                     };
-                var plan = adaptive ? DynamicCrossfadePlanner.Plan(boundary, Read(incoming, token), maximum)
+                var leading = adaptive ? DynamicCrossfadePlanner.LeadingSilenceSeconds(incomingBoundary) : 0;
+                if (leading > 0)
+                    incomingBoundary = incomingBoundary with
+                    {
+                        DurationSeconds = incomingBoundary.DurationSeconds - leading,
+                        HeadDb = TrimStart(incomingBoundary.HeadDb, leading, incomingBoundary.WindowSeconds),
+                        HeadPeakDb = incomingBoundary.HeadPeakDb is null
+                            ? null
+                            : TrimStart(incomingBoundary.HeadPeakDb, leading, incomingBoundary.WindowSeconds)
+                    };
+                var plan = adaptive ? DynamicCrossfadePlanner.Plan(boundary, incomingBoundary, maximum)
                     : new DynamicCrossfadePlan(maximum, "Regular transition with trailing-silence detection");
-                return plan with { TrimTrailingSeconds = trim };
+                return plan with { TrimTrailingSeconds = trim, SkipLeadingSeconds = leading };
             }, token).ConfigureAwait(false);
         }
         finally { _worker.Release(); }
@@ -97,10 +113,27 @@ internal sealed class BoundaryEnvelopeAnalyzer
         var head = ReadWindow(0, Math.Min(15, duration));
         var tailSeconds = Math.Floor(Math.Min(20, duration) / .05) * .05;
         var tail = ReadWindow(duration - tailSeconds, tailSeconds);
-        var result = new BoundaryEnvelope(head.Rms, tail.Rms, duration, TailPeakDb: tail.Peaks);
+        var result = new BoundaryEnvelope(
+            head.Rms,
+            tail.Rms,
+            duration,
+            HeadPeakDb: head.Peaks,
+            TailPeakDb: tail.Peaks);
         token.ThrowIfCancellationRequested();
         if (_cache.Count >= 32) _cache.Remove(_keys.Dequeue());
         _cache[key] = result; _keys.Enqueue(key);
         return result;
+    }
+
+    private static double[] TrimStart(double[] values, double seconds, double step)
+    {
+        var count = Math.Min(values.Length - 1, Math.Max(0, (int)Math.Round(seconds / step)));
+        return values.Skip(count).ToArray();
+    }
+
+    private static double[] TrimEnd(double[] values, double seconds, double step)
+    {
+        var count = Math.Min(values.Length - 1, Math.Max(0, (int)Math.Round(seconds / step)));
+        return values.Take(values.Length - count).ToArray();
     }
 }

@@ -27,6 +27,34 @@ public sealed class DynamicCrossfadeTests
     }
 
     [Fact]
+    public void DynamicCueAdvancesOnlyAfterAConfidentLowEnergyTail()
+    {
+        var rms = Flat(-10, 300).Concat(Flat(-52, 100)).ToArray();
+        var peaks = Flat(-7, 300).Concat(Flat(-46, 100)).ToArray();
+        var envelope = new BoundaryEnvelope([], rms, 180, TailPeakDb: peaks);
+
+        Assert.Equal(4.5, DynamicCrossfadePlanner.DynamicTailAdvanceSeconds(envelope), 6);
+        peaks[^5] = -5;
+        Assert.Equal(0, DynamicCrossfadePlanner.DynamicTailAdvanceSeconds(envelope), 6);
+        Assert.Equal(0, DynamicCrossfadePlanner.DynamicTailAdvanceSeconds(
+            envelope with { TailDb = Flat(-70, 400), TailPeakDb = Flat(-65, 400) }));
+    }
+
+    [Fact]
+    public void IncomingCueSkipsSustainedDigitalSilenceButKeepsAttackPreroll()
+    {
+        var peaks = Flat(-100, 20).Concat(Flat(-8, 280)).ToArray();
+        var envelope = new BoundaryEnvelope(Flat(-100, 20).Concat(Flat(-12, 280)).ToArray(), [], 180,
+            HeadPeakDb: peaks);
+
+        Assert.Equal(.9, DynamicCrossfadePlanner.LeadingSilenceSeconds(envelope), 6);
+        Assert.Equal(0, DynamicCrossfadePlanner.LeadingSilenceSeconds(
+            envelope with { HeadPeakDb = Flat(-100, 300) }));
+        peaks[5] = -8;
+        Assert.Equal(0, DynamicCrossfadePlanner.LeadingSilenceSeconds(envelope), 6);
+    }
+
+    [Fact]
     public void QuietTailAndIntroAllowLongerOverlapWithinMaximum()
     {
         var tail = Flat(-8, 340).Concat(Flat(-35, 60)).ToArray();

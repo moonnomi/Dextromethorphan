@@ -20,7 +20,9 @@ public sealed class BoundaryEnvelopeAnalyzerTests
                 var buffer = new float[16000];
                 for (var second = 0; second < 40; second++)
                 {
-                    var gain = (outgoing ? second >= 37 : second < 2) ? .01 : .4;
+                    var gain = outgoing
+                        ? second >= 37 ? .01 : .4
+                        : second < 2 ? 0 : .4;
                     for (var i = 0; i < 8000; i++)
                     {
                         buffer[i * 2] = (float)(gain * Math.Sin(i * Math.PI / 10));
@@ -33,7 +35,9 @@ public sealed class BoundaryEnvelopeAnalyzerTests
             var before = File.ReadAllBytes(a);
             var analyzer = new BoundaryEnvelopeAnalyzer();
             var plan = await analyzer.AnalyzeAsync(new Track { Path = a, Title = "Outgoing" }, new Track { Path = b, Title = "Incoming" }, 8, TestContext.Current.CancellationToken);
-            Assert.InRange(plan.Seconds, 4.5, 5.6);
+            Assert.InRange(plan.Seconds, .25, .5);
+            Assert.InRange(plan.TrimTrailingSeconds, 2.4, 2.6);
+            Assert.InRange(plan.SkipLeadingSeconds, 1.8, 2.0);
             Assert.Equal(before, File.ReadAllBytes(a));
             var cached = await analyzer.AnalyzeAsync(new Track { Path = a, Title = "Outgoing" }, new Track { Path = b, Title = "Incoming" }, 8, TestContext.Current.CancellationToken);
             Assert.Equal(plan, cached);

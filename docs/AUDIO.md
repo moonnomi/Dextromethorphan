@@ -9,7 +9,7 @@
 | Bit-perfect diagnostic | Only exclusive, unprocessed direct mode | Never |
 | Same-format gapless | Byte-continuous | Sample-continuous |
 | Different-rate gapless | Reopens the endpoint | Normalized and sample-continuous |
-| Crossfade | No | Equal-power, 0-10 seconds |
+| Crossfade | No | Fixed or waveform-planned, configurable curves, 0-10 seconds |
 | ReplayGain/preamp | No | Track/album, tagged-peak clipping prevention |
 | Software volume | No | Yes |
 | Hardware endpoint volume | Yes | Yes |
@@ -20,13 +20,13 @@
 
 ## Transitions
 
-The next track is decoded before the current one ends. With crossfade disabled, one callback can read the final samples of track A and the first samples of track B, so the endpoint is not stopped between compatible tracks. Crossfade uses sine/cosine equal-power curves. A differing rate/channel count is normalized before entering the transition provider.
+The next track is decoded before the current one ends. With crossfade disabled, one callback can read the final samples of track A and the first samples of track B, so the endpoint is not stopped between compatible tracks. Fixed crossfade supports equal-power, linear, smoothstep, and custom power curves. Optional dynamic crossfade analyzes RMS and peak windows to select conservative outgoing/incoming cue points and an overlap duration; see [Dynamic crossfade design and qualification](DYNAMIC-CROSSFADE-DEMO.md). A differing rate/channel count is normalized before entering the transition provider.
 
 Direct mode performs the callback-spanning join without converting samples, but only when both decoded `WaveFormat` values are identical. A differing format requires an endpoint reopen because exclusive WASAPI cannot change format inside an active stream.
 
 ## ReplayGain and volume
 
-ReplayGain fields are read from Vorbis comments, ID3v2 TXXX frames, and APE tags. Opus `R128_TRACK_GAIN`/`R128_ALBUM_GAIN` Q7.8 values are accepted when ReplayGain tags are absent. Album mode falls back to track gain. Preamp is added in dB; with clipping prevention, `REPLAYGAIN_TRACK_PEAK` constrains gain before playback. Gain and crossfade accumulation use `double`, then emit float samples through a final `[-1, 1]` guard.
+ReplayGain fields are read from Vorbis comments, ID3v2 TXXX frames, and APE tags. Opus `R128_TRACK_GAIN`/`R128_ALBUM_GAIN` Q7.8 values are accepted when ReplayGain tags are absent. Album mode falls back to track gain. Preamp is added in dB; with clipping prevention, `REPLAYGAIN_TRACK_PEAK` constrains gain before playback. Each track's ReplayGain is applied before the transition mixer, including during overlap. Crossfade accumulation and gain math use `double`; software volume and the final `[-1, 1]` guard run after the mix.
 
 Any software gain is non-bit-perfect. To retain direct playback below full volume, endpoint/hardware volume must be enabled for that device profile.
 
