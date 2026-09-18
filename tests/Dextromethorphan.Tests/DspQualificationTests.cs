@@ -34,6 +34,8 @@ public sealed class DspQualificationTests
         using var transition = new TransitionSampleProvider(
             first,
             firstSamples.Length);
+        var traces = new List<TransitionTrace>();
+        transition.Trace += (_, trace) => traces.Add(trace);
         transition.QueueNext(second, secondSamples.Length);
 
         var output = Drain(transition, [62, 254, 18, 512]);
@@ -41,6 +43,9 @@ public sealed class DspQualificationTests
         Assert.Equal(
             firstSamples.Concat(secondSamples),
             output);
+        Assert.Equal(0, transition.LastTransitionOverlapSeconds);
+        Assert.Contains(traces, trace => trace.Operation == "gapless-switch");
+        Assert.DoesNotContain(traces, trace => trace.Operation == "overlap-started");
     }
 
     [Fact]
@@ -60,11 +65,17 @@ public sealed class DspQualificationTests
             first,
             8,
             crossfadeSeconds: 1);
+        var traces = new List<TransitionTrace>();
+        transition.Trace += (_, trace) => traces.Add(trace);
         transition.QueueNext(second, 8);
 
         var output = Drain(transition, [3, 2, 7]);
 
         Assert.Equal(12, output.Length);
+        Assert.Equal(1, transition.LastTransitionOverlapSeconds);
+        Assert.Equal(new[] { "next-ready", "overlap-started", "overlap-completed" },
+            traces.Select(trace => trace.Operation));
+        Assert.Equal(1, traces[^1].ActualOverlapSeconds);
         var fade = output.Skip(4).Take(4).ToArray();
         for (var frame = 0; frame < fade.Length; frame++)
         {
@@ -76,6 +87,29 @@ public sealed class DspQualificationTests
         Assert.All(output, sample => Assert.True(sample >= 0.5f));
         Assert.Equal(1f, fade[0]);
         Assert.Equal(0.5f, fade[^1]);
+    }
+
+    [Fact]
+    public void PlannedEndingSkipsSilenceAndJoinsNextTrackInSameRead()
+    {
+        var first = Enumerable.Repeat(.4f, 8).Concat(Enumerable.Repeat(0f, 8)).ToArray();
+        using var transition = new TransitionSampleProvider(new ChunkedSampleProvider(first, 4, 1, 3), 16);
+        transition.QueueNext(new ChunkedSampleProvider(Enumerable.Repeat(.7f, 8).ToArray(), 4, 1, 3), 8);
+        Assert.True(transition.TrySetPlannedCrossfade(0, 2));
+        var output = Drain(transition, [3, 6, 8]);
+        Assert.Equal(16, output.Length);
+        Assert.Equal(Enumerable.Repeat(.4f, 8).Concat(Enumerable.Repeat(.7f, 8)), output);
+    }
+
+    [Fact]
+    public void RemovingNextTrackRestoresTheOriginalEnding()
+    {
+        var first = Enumerable.Repeat(.4f, 8).Concat(Enumerable.Repeat(0f, 8)).ToArray();
+        using var transition = new TransitionSampleProvider(new ChunkedSampleProvider(first, 4, 1, 3), 16);
+        transition.QueueNext(new ChunkedSampleProvider(first, 4, 1, 3), 16);
+        Assert.True(transition.TrySetPlannedCrossfade(0, 2));
+        transition.QueueNext(null);
+        Assert.Equal(first, Drain(transition, [3, 6, 8]));
     }
 
     [Theory]

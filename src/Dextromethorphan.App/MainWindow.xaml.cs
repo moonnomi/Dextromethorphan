@@ -408,9 +408,17 @@ public partial class MainWindow : Window
 
     private void ContextMenu_Opening(object sender, ContextMenuEventArgs e)
     {
-        if (e.OriginalSource is FrameworkElement source && source.ContextMenu is { } menu)
+        var node = e.OriginalSource as DependencyObject;
+        FrameworkElement? source = null;
+        while (node is not null)
+        {
+            if (node is FrameworkElement element && element.ContextMenu is not null) { source = element; break; }
+            node = DependencyObjectTree.GetParent(node);
+        }
+        if (source?.ContextMenu is { } menu)
         {
             menu.DataContext = source.DataContext;
+            UpdateDebugContextMenu(source, menu, e.CursorLeft >= 0);
             if (source.DataContext is QueueEntryViewModel entry
                 && !menu.Items.OfType<MenuItem>().Any(item => Equals(item.Tag, "locate-playback")))
             {

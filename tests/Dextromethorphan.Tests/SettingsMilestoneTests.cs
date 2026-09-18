@@ -316,6 +316,7 @@ public sealed class SettingsMilestoneTests : IDisposable
             nameof(AppSettings.BackgroundOpacity),
             nameof(AppSettings.AnimationsEnabled),
             nameof(AppSettings.VisualizerEnabled),
+            nameof(AppSettings.DebugMode),
             nameof(AppSettings.AmbienceEnabled),
             nameof(AppSettings.PlayerArtworkGlow),
             nameof(AppSettings.NowPlayingArtworkGlow),

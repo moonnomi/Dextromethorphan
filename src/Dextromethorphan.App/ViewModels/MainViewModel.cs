@@ -229,7 +229,7 @@ public sealed class MainViewModel : ObservableObject
         IPlaylistFileService playlistFiles,
         IPlaylistBackupService playlistBackups)
     {
-        _settings = settings; _repository = repository; _playlists = playlists; _scanner = scanner; _artwork = artwork; _metadataReader = metadataReader;
+        _settings = settings; _debugMode = settings.Current.DebugMode; _repository = repository; _playlists = playlists; _scanner = scanner; _artwork = artwork; _metadataReader = metadataReader;
         _audio = audio; _queue = queue; _sleepTimer = sleepTimer; _shortcuts = shortcuts; _systemMedia = systemMedia;
         _applicationLog = applicationLog;
         _diagnostics = diagnostics; _artworkUpdates = artworkUpdates; _artworkImages = artworkImages;
@@ -1070,6 +1070,13 @@ public sealed class MainViewModel : ObservableObject
     }
     public string ArtworkCacheLimitText => $"{ArtworkCacheMegabytes:N0} MB maximum";
     public bool HasAudioDiagnostics => _audio.Diagnostics is not null;
+    private bool _debugMode;
+    public bool DebugMode
+    {
+        get => _debugMode;
+        set { if (Set(ref _debugMode, value)) _ = _settings.UpdateAsync(settings => settings.DebugMode = value); }
+    }
+    public AudioDiagnostics? OutputProbe => _audio.Diagnostics;
     public string DiagnosticHeadline => _audio.Diagnostics is { IsBitPerfect: true } ? "Bit-perfect signal path" : _audio.Diagnostics is null ? "No active audio pipeline" : "Processed signal path";
     public string DiagnosticMode => _audio.Diagnostics is { } d ? $"{d.EffectiveMode} WASAPI · {d.PipelineMode}" : "Play a track to inspect the signal path";
     public string DiagnosticSource => _audio.Diagnostics?.SourceFormat?.ToString() ?? "—";
@@ -5176,7 +5183,7 @@ public sealed class MainViewModel : ObservableObject
                 PositionText = FormatTime(snapshot.Position);
             }
             if (!string.IsNullOrWhiteSpace(snapshot.Error)) StatusText = snapshot.Error;
-            Raise(nameof(HasAudioDiagnostics)); Raise(nameof(DiagnosticHeadline)); Raise(nameof(DiagnosticMode)); Raise(nameof(DiagnosticSource)); Raise(nameof(DiagnosticOutput)); Raise(nameof(DiagnosticDecoder)); Raise(nameof(DiagnosticBuffer)); Raise(nameof(DiagnosticEndpoint)); Raise(nameof(DiagnosticTiming)); Raise(nameof(DiagnosticReason));
+            Raise(nameof(OutputProbe)); Raise(nameof(HasAudioDiagnostics)); Raise(nameof(DiagnosticHeadline)); Raise(nameof(DiagnosticMode)); Raise(nameof(DiagnosticSource)); Raise(nameof(DiagnosticOutput)); Raise(nameof(DiagnosticDecoder)); Raise(nameof(DiagnosticBuffer)); Raise(nameof(DiagnosticEndpoint)); Raise(nameof(DiagnosticTiming)); Raise(nameof(DiagnosticReason));
             UpdateLyricsPosition(snapshot.Position);
             _systemMedia.Update(snapshot with { Track = track }, HasPreviousTrack(), HasNextTrack());
             if (CurrentView == "Now Playing") { ViewSubtitle = CurrentArtist; Raise(nameof(ViewTitle)); }

@@ -48,6 +48,16 @@ public sealed class SettingsWorkspaceViewModel : ObservableObject
     private CrossfadeShape _crossfadeShape = new();
     public IReadOnlyList<CrossfadeCurve> CrossfadeCurves { get; } = Enum.GetValues<CrossfadeCurve>();
     public CrossfadeShape CrossfadeShape => _crossfadeShape;
+    public bool SkipTrailingSilence
+    {
+        get => _crossfadeShape.SkipTrailingSilence;
+        set => SetCrossfadeShape(_crossfadeShape with { SkipTrailingSilence = value });
+    }
+    public bool DynamicCrossfadeEnabled
+    {
+        get => _crossfadeShape.DynamicEnabled;
+        set => SetCrossfadeShape(_crossfadeShape with { DynamicEnabled = value });
+    }
     public CrossfadeCurve CrossfadeCurve
     {
         get => _crossfadeShape.Curve;
@@ -69,6 +79,8 @@ public sealed class SettingsWorkspaceViewModel : ObservableObject
         Raise(nameof(CrossfadeCurve));
         Raise(nameof(CrossfadeIncomingPower));
         Raise(nameof(CrossfadeOutgoingPower));
+        Raise(nameof(DynamicCrossfadeEnabled));
+        Raise(nameof(SkipTrailingSilence));
     }
     private double _crossfadeSeconds;
     private double _fadeInSeconds;
@@ -276,8 +288,12 @@ public sealed class SettingsWorkspaceViewModel : ObservableObject
         }
     }
 
-    public TransitionMode TransitionMode { get => _transitionMode; set => SetPlayback(ref _transitionMode, value); }
-    public double CrossfadeSeconds { get => _crossfadeSeconds; set => SetPlayback(ref _crossfadeSeconds, Clamp(value, 0, 10, 0)); }
+    public TransitionMode TransitionMode { get => _transitionMode; set { if (SetPlayback(ref _transitionMode, value)) Raise(nameof(TransitionSummary)); } }
+    public double CrossfadeSeconds { get => _crossfadeSeconds; set { if (SetPlayback(ref _crossfadeSeconds, Clamp(value, 0, 10, 0))) Raise(nameof(TransitionSummary)); } }
+    public string TransitionSummary => TransitionMode == TransitionMode.Gapless
+        ? "Gapless selected — automatic crossfade is off. The duration below is saved for Crossfade mode."
+        : CrossfadeSeconds <= 0 ? "Crossfade duration is zero — increase it to overlap queued tracks."
+        : $"Automatic crossfade: up to {CrossfadeSeconds:0.##} seconds between queued tracks. Pressing Next starts the next track immediately. Output profiles can override duration.";
     public double FadeInSeconds { get => _fadeInSeconds; set => SetPlayback(ref _fadeInSeconds, Clamp(value, 0, 10, 0)); }
     public double FadeOutSeconds { get => _fadeOutSeconds; set => SetPlayback(ref _fadeOutSeconds, Clamp(value, 0, 10, 0)); }
     public ReplayGainMode ReplayGainMode { get => _replayGainMode; set => SetPlayback(ref _replayGainMode, value); }
@@ -789,6 +805,9 @@ public sealed class SettingsWorkspaceViewModel : ObservableObject
         nameof(ResumeOnStartup), nameof(ResumeTrackBookmarks), nameof(StopAfterCurrent),
         nameof(StopAfterQueue), nameof(TransitionMode), nameof(CrossfadeSeconds),
         nameof(CrossfadeShape), nameof(CrossfadeCurve), nameof(CrossfadeIncomingPower), nameof(CrossfadeOutgoingPower),
+        nameof(DynamicCrossfadeEnabled),
+        nameof(TransitionSummary),
+        nameof(SkipTrailingSilence),
         nameof(FadeInSeconds), nameof(FadeOutSeconds), nameof(ReplayGainMode),
         nameof(ReplayGainPreampDb), nameof(PreventClipping), nameof(PlaybackSpeed),
         nameof(PitchSemitones), nameof(PreservePitch), nameof(SeekStepSeconds),

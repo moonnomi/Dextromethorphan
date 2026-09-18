@@ -53,7 +53,12 @@ public sealed record AudioDiagnostics(
     double MaximumCallbackMilliseconds = 0,
     string Processor = "None",
     double ProcessingLatencyMilliseconds = 0,
-    string TimelineClock = "Source position");
+    string TimelineClock = "Source position",
+    AudioOutputMeasurement? OutputMeasurement = null,
+    CrossfadeMeasurement? CrossfadeMeasurement = null);
+
+public sealed record AudioOutputMeasurement(long Frames, double Rms, double Peak, long NonFiniteSamples, bool Available);
+public sealed record CrossfadeMeasurement(double OutgoingRms, double IncomingRms, long MixedFrames, bool Overlapping);
 
 public sealed record PlaybackSnapshot(
     Track? Track,
@@ -111,6 +116,7 @@ public sealed class AudioPlaybackOptions
 
     public AudioPlaybackOptions Copy() => (AudioPlaybackOptions)MemberwiseClone();
     public bool RequiresDsp(double volume) =>
+        CrossfadeShape.SkipTrailingSilence ||
         ReplayGainMode != ReplayGainMode.Off || TransitionMode == TransitionMode.Crossfade ||
         FadeInSeconds > 0 || FadeOutSeconds > 0 || Math.Abs(Speed - 1) > 0.0001 ||
         Math.Abs(PitchSemitones) > 0.0001 || volume < 0.999999;

@@ -3,6 +3,8 @@ using Dextromethorphan.Core.Models;
 
 namespace Dextromethorphan.Infrastructure.Audio.Dsp;
 
+public sealed record TransitionTrace(string Operation, long PositionSamples, long EndSamples, long NextSamplesRead, double ConfiguredSeconds, double ActualOverlapSeconds);
+
 /// <summary>Joins tracks without silence and optionally performs an equal-power crossfade.</summary>
 public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
 {
@@ -22,6 +24,11 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
     private bool _completedRaised;
     private float[] _currentBuffer = [];
     private float[] _nextBuffer = [];
+    private double _outgoingEnergy, _incomingEnergy;
+    private long _mixedFrames;
+    private bool _readOverlapped;
+    private CrossfadeMeasurement _measurement = new(0, 0, 0, false);
+    public CrossfadeMeasurement Measurement => Volatile.Read(ref _measurement);
 
     public TransitionSampleProvider(ISampleProvider initial, long totalSamples, double crossfadeSeconds = 0, IDisposable? owner = null, long initialPositionSamples = 0)
     {
@@ -36,6 +43,10 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
     public WaveFormat WaveFormat { get; }
     public event EventHandler? SourceChanged;
     public event EventHandler? Completed;
+    public event EventHandler<TransitionTrace>? Trace;
+    public double LastTransitionOverlapSeconds { get; private set; }
+    private void EmitTrace(string operation, double overlap = 0) => Trace?.Invoke(this,
+        new(operation, _current.SamplesRead, _current.EndSamples, _next?.SamplesRead ?? 0, CrossfadeSeconds, overlap));
     public long PositionSamples { get { lock (_sync) return _current.SamplesRead; } }
     public long TotalSamples { get { lock (_sync) return _current.TotalSamples; } }
 
@@ -58,12 +69,36 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
         {
             if (provider is not null && !FormatsMatch(provider.WaveFormat, WaveFormat))
                 throw new ArgumentException("The next source must be normalized to the pipeline format.", nameof(provider));
+            if (_activeCrossfadeSamples > 0) EmitTrace("next-replaced-during-overlap", _crossfadeConsumed / (double)(WaveFormat.SampleRate * WaveFormat.Channels));
             Retire(_next?.Owner);
             _next = provider is null ? null : new Source(provider, Align(totalSamples, WaveFormat.Channels), owner);
             _crossfadeConsumed = 0;
             _activeCrossfadeSamples = 0;
             _completedRaised = false;
+            _current.EndSamples = _current.TotalSamples;
+            EmitTrace(provider is null ? "next-cleared" : "next-ready");
         }
+    }
+
+    public bool TrySetPlannedCrossfade(double seconds, double trimTrailingSeconds = 0)
+    {
+        lock (_sync)
+        {
+            if (_next is null || _activeCrossfadeSamples > 0) return false;
+            if (!double.IsFinite(trimTrailingSeconds) || trimTrailingSeconds < 0 || trimTrailingSeconds > 20) return false;
+            var end = _current.TotalSamples - Align((long)(trimTrailingSeconds * WaveFormat.SampleRate * WaveFormat.Channels), WaveFormat.Channels);
+            var needed = (Math.Max(CrossfadeSeconds, seconds) + .25) * WaveFormat.SampleRate * WaveFormat.Channels;
+            if (end - _current.SamplesRead <= needed) return false;
+            _current.EndSamples = end;
+            CrossfadeSeconds = seconds;
+            return true;
+        }
+    }
+
+    public void RestoreFullEnding()
+    {
+        lock (_sync)
+            if (_activeCrossfadeSamples == 0) _current.EndSamples = _current.TotalSamples;
     }
 
     public int Read(float[] buffer, int offset, int count)
@@ -73,6 +108,8 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
             var channels = WaveFormat.Channels;
             count = Align(count, channels);
             var written = 0;
+            _outgoingEnergy = _incomingEnergy = 0;
+            _readOverlapped = false;
             while (written < count)
             {
                 var fadeTarget = CrossfadeTargetSamples();
@@ -86,7 +123,7 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
                 }
 
                 var beforeFade = _next is null || _crossfadeSamples == 0
-                    ? count - written
+                    ? (int)Math.Min(count - written, Remaining(_current))
                     : (int)Math.Min(
                         count - written,
                         Math.Max(0, Remaining(_current) - fadeTarget));
@@ -94,6 +131,7 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
                 if (beforeFade > 0)
                 {
                     var read = _current.Provider.Read(buffer, offset + written, beforeFade);
+                    for (var i = 0; i < read; i++) _outgoingEnergy += (double)buffer[offset + written + i] * buffer[offset + written + i];
                     _current.SamplesRead += read;
                     written += read;
                     if (read > 0) continue;
@@ -105,12 +143,15 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
                     continue;
                 }
 
-                var tail = _current.Provider.Read(buffer, offset + written, count - written);
+                var tail = _current.EndSamples < _current.TotalSamples ? 0 : _current.Provider.Read(buffer, offset + written, count - written);
+                for (var i = 0; i < tail; i++) _outgoingEnergy += (double)buffer[offset + written + i] * buffer[offset + written + i];
                 _current.SamplesRead += tail;
                 written += tail;
                 if (tail == 0) RaiseCompleted();
                 break;
             }
+            Volatile.Write(ref _measurement, new(written > 0 ? Math.Sqrt(_outgoingEnergy / written) : 0,
+                written > 0 ? Math.Sqrt(_incomingEnergy / written) : 0, _mixedFrames, _readOverlapped));
             return written;
         }
     }
@@ -127,6 +168,7 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
                     CrossfadeTargetSamples(),
                     Math.Min(Remaining(_current), Remaining(_next))),
                 channels);
+            EmitTrace("overlap-started", _activeCrossfadeSamples / (double)(WaveFormat.SampleRate * channels));
         }
         var remainingFade =
             _activeCrossfadeSamples - _crossfadeConsumed;
@@ -155,9 +197,13 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
             var gains = _activeShape.Gains(frameProgress);
             var outgoing = sample < currentRead ? _currentBuffer[sample] : 0;
             var incoming = sample < nextRead ? _nextBuffer[sample] : 0;
+            _outgoingEnergy += Math.Pow(outgoing * gains.Outgoing, 2);
+            _incomingEnergy += Math.Pow(incoming * gains.Incoming, 2);
             destination[offset + sample] = (float)((outgoing * gains.Outgoing) + (incoming * gains.Incoming));
         }
         _crossfadeConsumed += produced;
+        _readOverlapped |= produced > 0;
+        _mixedFrames += Math.Min(currentRead, nextRead) / channels;
         if (_crossfadeConsumed >= _activeCrossfadeSamples
             || currentRead == 0)
             SwitchToNext();
@@ -167,6 +213,8 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
     private void SwitchToNext()
     {
         if (_next is null) return;
+        LastTransitionOverlapSeconds = _crossfadeConsumed / (double)(WaveFormat.SampleRate * WaveFormat.Channels);
+        EmitTrace(LastTransitionOverlapSeconds > 0 ? "overlap-completed" : "gapless-switch", LastTransitionOverlapSeconds);
         var retired = _current.Owner;
         _current = _next;
         _next = null;
@@ -184,7 +232,7 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
         Completed?.Invoke(this, EventArgs.Empty);
     }
 
-    private static long Remaining(Source source) => Math.Max(0, source.TotalSamples - source.SamplesRead);
+    private static long Remaining(Source source) => Math.Max(0, source.EndSamples - source.SamplesRead);
     private long CrossfadeTargetSamples() => _next is null
         ? 0
         : Align(
@@ -229,6 +277,7 @@ public sealed class TransitionSampleProvider : ISampleProvider, IDisposable
     {
         public ISampleProvider Provider { get; } = provider;
         public long TotalSamples { get; } = totalSamples;
+        public long EndSamples { get; set; } = totalSamples;
         public IDisposable? Owner { get; } = owner;
         public long SamplesRead { get; set; }
     }

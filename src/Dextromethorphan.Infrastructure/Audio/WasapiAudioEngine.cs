@@ -13,11 +13,17 @@ namespace Dextromethorphan.Infrastructure.Audio;
 public sealed class WasapiAudioEngine : IAudioEngine
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly IApplicationLog? _log;
     private readonly Timer _positionTimer;
     private readonly MMDeviceEnumerator _endpointEnumerator;
     private readonly AudioEndpointNotificationClient _endpointNotifications;
     private readonly CancellationTokenSource _lifetime = new();
     private readonly CallbackTimingAccumulator _callbackTiming = new();
+    private readonly BoundaryEnvelopeAnalyzer _boundaryAnalyzer = new();
+    private CancellationTokenSource? _boundaryCancellation;
+    private CancellationToken _boundaryToken;
+    private double? _dynamicOverlap;
+    private string _dynamicStatus = "Dynamic crossfade: off";
     private WasapiOut? _output;
     private MMDevice? _outputDevice;
     private DirectGaplessWaveProvider? _direct;
@@ -43,9 +49,11 @@ public sealed class WasapiAudioEngine : IAudioEngine
     private int _recoveryAttempts;
     private bool _resumePlaybackAfterSuspend;
     private volatile bool _visualizationEnabled;
+    private long _lastOutputLogTick;
 
-    public WasapiAudioEngine()
+    public WasapiAudioEngine(IApplicationLog? log = null)
     {
+        _log = log;
         _endpointEnumerator = new MMDeviceEnumerator();
         _endpointNotifications = new AudioEndpointNotificationClient(
             OnEndpointChanged);
@@ -72,12 +80,15 @@ public sealed class WasapiAudioEngine : IAudioEngine
             var timed = _timedProvider;
             return diagnostics with
             {
+                Reason = diagnostics.Reason + $" · Transition: {_options.TransitionMode}, configured {_options.CrossfadeSeconds:0.##}s, effective {_transition?.CrossfadeSeconds ?? 0:0.##}s, next {(_nextTrack is null ? "not queued" : "queued")}, last actual overlap {_transition?.LastTransitionOverlapSeconds ?? 0:0.##}s" + (_options.CrossfadeShape.DynamicEnabled || _options.CrossfadeShape.SkipTrailingSilence ? " · " + _dynamicStatus : ""),
                 RecoveryAttempts = _recoveryAttempts,
                 LastCallbackMilliseconds =
                     timed?.LastReadMilliseconds ?? 0,
                 MaximumCallbackMilliseconds =
                     _callbackTiming.MaximumMilliseconds(timed),
-                Underruns = _callbackTiming.DeadlineMisses(timed)
+                Underruns = _callbackTiming.DeadlineMisses(timed),
+                OutputMeasurement = _visualizationTap?.Measurement,
+                CrossfadeMeasurement = _transition?.Measurement
             };
         }
     }
@@ -182,6 +193,7 @@ public sealed class WasapiAudioEngine : IAudioEngine
 
     public async Task LoadAsync(Track track, CancellationToken cancellationToken = default)
     {
+        LogTransition("load-request", new Dictionary<string, object?> { ["requestedTitle"] = track.Title });
         await _gate.WaitAsync(cancellationToken);
         try { await LoadCoreAsync(track, TimeSpan.Zero, false, cancellationToken); }
         finally { _gate.Release(); Publish(); }
@@ -192,22 +204,18 @@ public sealed class WasapiAudioEngine : IAudioEngine
         await _gate.WaitAsync(cancellationToken);
         try
         {
+            CancelBoundaryAnalysis();
             _nextTrack = track;
+            LogTransition("next-request");
             _incompatibleNext?.Dispose();
             _incompatibleNext = null;
             if (track is null) { _direct?.QueueNext(null); _transition?.QueueNext(null); return; }
-            var decoded = AudioDecoderFactory.Open(track);
-            if (_direct is not null)
-            {
-                if (_direct.CanQueue(decoded.Reader.WaveFormat)) _direct.QueueNext(decoded.Reader, decoded);
-                else _incompatibleNext = decoded;
-            }
-            else if (_transition is not null)
-            {
-                var normalized = AudioDecoderFactory.Normalize(decoded, _transition.WaveFormat);
-                _transition.QueueNext(normalized, AudioDecoderFactory.TotalSamples(decoded, _transition.WaveFormat), decoded);
-            }
-            else decoded.Dispose();
+            await QueueNextCoreAsync(track, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            LogTransition("predecode-failed", new Dictionary<string, object?> { ["errorType"] = exception.GetType().Name, ["message"] = exception.Message });
+            throw;
         }
         finally { _gate.Release(); }
     }
@@ -249,7 +257,9 @@ public sealed class WasapiAudioEngine : IAudioEngine
             else if (_track is not null)
             {
                 var wasPlaying = _state == PlaybackState.Playing;
+                var next = _nextTrack;
                 await LoadCoreAsync(_track, position, wasPlaying, cancellationToken);
+                if (next is not null) await QueueNextCoreAsync(next, cancellationToken);
             }
         }
         finally { _gate.Release(); Publish(); }
@@ -296,9 +306,11 @@ public sealed class WasapiAudioEngine : IAudioEngine
                 _options.RequiresDsp(effectiveVolume)
                 != options.RequiresDsp(effectiveVolume);
             _options = options.Copy();
+            CancelBoundaryAnalysis();
             _options.Speed = Math.Clamp(_options.Speed, 0.5, 1.5);
             _options.PitchSemitones = Math.Clamp(_options.PitchSemitones, -12, 12);
             _options.CrossfadeSeconds = Math.Clamp(_options.CrossfadeSeconds, 0, 10);
+            LogTransition("settings-applied");
             if (_track is not null
                 && (requiredModeChanged
                     || tempoSettingsChanged
@@ -306,6 +318,7 @@ public sealed class WasapiAudioEngine : IAudioEngine
                     && _options.RequiresDsp(effectiveVolume)))
                 await RebuildAtCurrentPositionAsync(cancellationToken);
             else UpdateDspParameters();
+            if (_nextTrack is { } queued) StartBoundaryAnalysis(queued);
         }
         finally { _gate.Release(); Publish(); }
     }
@@ -415,10 +428,12 @@ public sealed class WasapiAudioEngine : IAudioEngine
                 decoded,
                 initialPositionSamples);
             _transition.SourceChanged += OnPipelineSourceChanged;
+            _transition.Trace += OnTransitionTrace;
             _transition.Completed += OnPipelineCompleted;
             _fade = new FadeEnvelopeSampleProvider(
                 _transition,
-                () => (Position, Duration));
+                () => (Position, Duration),
+                () => _transition?.Measurement.Overlapping == true);
             _gain = new GainLimiterSampleProvider(_fade) { PreventClipping = _options.PreventClipping };
             UpdateDspParameters();
             waveProvider =
@@ -453,6 +468,7 @@ public sealed class WasapiAudioEngine : IAudioEngine
             useDsp,
             effectiveOutput);
         _state = startPlaying ? PlaybackState.Playing : PlaybackState.Paused;
+        LogTransition("pipeline-ready");
         if (startPlaying) _output.Play();
         await Task.CompletedTask;
     }
@@ -460,6 +476,7 @@ public sealed class WasapiAudioEngine : IAudioEngine
     private async Task QueueNextCoreAsync(Track track, CancellationToken cancellationToken)
     {
         _nextTrack = track;
+        LogTransition("predecode-start");
         var decoded = AudioDecoderFactory.Open(track);
         if (_direct is not null)
         {
@@ -490,9 +507,77 @@ public sealed class WasapiAudioEngine : IAudioEngine
                 processed,
                 totalSamples,
                 decoded);
+            StartBoundaryAnalysis(track);
         }
         else decoded.Dispose();
+        LogTransition("predecode-completed");
         await Task.CompletedTask;
+    }
+
+    private void CancelBoundaryAnalysis()
+    {
+        _boundaryCancellation?.Cancel();
+        _boundaryCancellation?.Dispose();
+        _boundaryCancellation = null;
+        _boundaryToken = default;
+        _dynamicOverlap = null;
+    }
+
+    private void StartBoundaryAnalysis(Track incoming)
+    {
+        CancelBoundaryAnalysis();
+        if (_transition is { } existing)
+            existing.CrossfadeSeconds = _options.TransitionMode == TransitionMode.Crossfade ? _options.CrossfadeSeconds : 0;
+        var trim = _options.CrossfadeShape.SkipTrailingSilence;
+        if (!trim) _transition?.RestoreFullEnding();
+        var adaptive = _options.CrossfadeShape.DynamicEnabled && _options.TransitionMode == TransitionMode.Crossfade && _options.CrossfadeSeconds > 0;
+        if (!adaptive && !trim) { _dynamicStatus = "Boundary analysis: off"; return; }
+        if (_transition is not { } pipeline || _track is not { } outgoing
+            || NeedsTempoProcessing())
+        {
+            _dynamicStatus = "Boundary analysis inactive: requires PCM DSP and normal speed/pitch";
+            return;
+        }
+        _boundaryCancellation = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        _boundaryCancellation.CancelAfter(TimeSpan.FromSeconds(5));
+        var token = _boundaryCancellation.Token;
+        _boundaryToken = token;
+        _dynamicStatus = "Dynamic demo: analyzing boundaries; regular crossfade remains ready";
+        _ = ApplyBoundaryPlanAsync(outgoing, incoming, pipeline, _options.TransitionMode == TransitionMode.Crossfade ? _options.CrossfadeSeconds : 0, token, trim, adaptive);
+    }
+
+    private async Task ApplyBoundaryPlanAsync(Track outgoing, Track incoming, TransitionSampleProvider pipeline, double maximum, CancellationToken token, bool trim, bool adaptive)
+    {
+        try
+        {
+            var plan = await _boundaryAnalyzer.AnalyzeAsync(outgoing, incoming, maximum, token, trim, adaptive).ConfigureAwait(false);
+            await _gate.WaitAsync(token).ConfigureAwait(false);
+            try
+            {
+                token.ThrowIfCancellationRequested();
+                if (!ReferenceEquals(_transition, pipeline) || !ReferenceEquals(_track, outgoing)
+                    || !ReferenceEquals(_nextTrack, incoming)) return;
+                if (pipeline.TrySetPlannedCrossfade(plan.Seconds, plan.TrimTrailingSeconds))
+                {
+                    _dynamicOverlap = plan.Seconds;
+                    _dynamicStatus = $"Boundary plan: {plan.Seconds:0.##}s overlap · {plan.TrimTrailingSeconds:0.##}s trailing silence skipped · {plan.Reason}";
+                }
+                else _dynamicStatus = "Dynamic demo: plan arrived after transition deadline; regular crossfade retained";
+                LogTransition("boundary-plan", new Dictionary<string, object?> { ["result"] = _dynamicStatus });
+            }
+            finally { _gate.Release(); }
+            Publish();
+        }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            // Decoder failures or cancellation never escape into playback. A stale request must not overwrite a newer status.
+            if (ReferenceEquals(_transition, pipeline) && ReferenceEquals(_track, outgoing)
+                && ReferenceEquals(_nextTrack, incoming) && _boundaryToken == token)
+                _dynamicStatus = error is OperationCanceledException
+                    ? "Dynamic demo: analysis budget expired; regular crossfade retained"
+                    : $"Dynamic demo: regular crossfade fallback ({error.GetType().Name})";
+            LogTransition("boundary-analysis-ended", new Dictionary<string, object?> { ["errorType"] = error.GetType().Name, ["requestCancelled"] = token.IsCancellationRequested });
+        }
     }
 
     private EffectiveOutput ResolveEffectiveOutput(WaveFormat format)
@@ -625,7 +710,7 @@ public sealed class WasapiAudioEngine : IAudioEngine
     {
         if (_transition is not null)
         {
-            _transition.CrossfadeSeconds = _options.TransitionMode == TransitionMode.Crossfade ? _options.CrossfadeSeconds : 0;
+            _transition.CrossfadeSeconds = _options.TransitionMode == TransitionMode.Crossfade ? (_dynamicOverlap ?? _options.CrossfadeSeconds) : 0;
             _transition.Shape = _options.CrossfadeShape;
         }
         if (_gain is not null) { _gain.PreventClipping = _options.PreventClipping; UpdateGain(); }
@@ -639,6 +724,37 @@ public sealed class WasapiAudioEngine : IAudioEngine
         _gain.Gain = replayGain * EffectiveSoftwareVolume();
     }
 
+    private void LogTransition(string operation, IReadOnlyDictionary<string, object?>? extra = null)
+    {
+        if (_log is null) return;
+        var data = new Dictionary<string, object?>
+        {
+            ["currentTitle"] = _track?.Title,
+            ["nextTitle"] = _nextTrack?.Title,
+            ["mode"] = _options.TransitionMode.ToString(),
+            ["configuredSeconds"] = _options.CrossfadeSeconds,
+            ["effectiveSeconds"] = _transition?.CrossfadeSeconds ?? 0,
+            ["curve"] = _options.CrossfadeShape.Curve.ToString(),
+            ["dynamic"] = _options.CrossfadeShape.DynamicEnabled,
+            ["skipSilence"] = _options.CrossfadeShape.SkipTrailingSilence,
+            ["pipeline"] = _transition is not null ? "PCM DSP" : _direct is not null ? "Direct gapless" : "None",
+            ["speed"] = _options.Speed
+        };
+        if (extra is not null) foreach (var pair in extra) data[pair.Key] = pair.Value;
+        _log.Write(ApplicationLogLevel.Information, "audio-transition", operation, data);
+    }
+
+    private void OnTransitionTrace(object? sender, TransitionTrace trace) => LogTransition(trace.Operation,
+        new Dictionary<string, object?>
+        {
+            ["positionSamples"] = trace.PositionSamples,
+            ["effectiveEndSamples"] = trace.EndSamples,
+            ["incomingSamplesConsumed"] = trace.NextSamplesRead,
+            ["actualOverlapSeconds"] = trace.ActualOverlapSeconds,
+            ["sampleRate"] = _transition?.WaveFormat.SampleRate,
+            ["channels"] = _transition?.WaveFormat.Channels
+        });
+
     private void OnPipelineSourceChanged(object? sender, EventArgs e)
     {
         var previous = _track;
@@ -649,7 +765,7 @@ public sealed class WasapiAudioEngine : IAudioEngine
         _tempo = _nextTempo;
         _nextTempo = null;
         UpdateGain();
-        TrackTransitioned?.Invoke(this, new TrackTransitionedEventArgs(previous, current, _transition?.CrossfadeSeconds > 0));
+        TrackTransitioned?.Invoke(this, new TrackTransitionedEventArgs(previous, current, _transition?.LastTransitionOverlapSeconds > 0));
         Publish();
     }
 
@@ -859,20 +975,42 @@ public sealed class WasapiAudioEngine : IAudioEngine
 
     private void DisposePlayback()
     {
+        LogTransition("pipeline-disposed");
+        CancelBoundaryAnalysis();
         if (_output is not null) _output.PlaybackStopped -= OutputOnPlaybackStopped;
         _output?.Stop(); _output?.Dispose(); _output = null;
         if (_timedProvider is { } timed)
             _callbackTiming.Capture(timed);
         _outputDevice?.Dispose(); _outputDevice = null;
         if (_direct is not null) { _direct.SourceChanged -= OnPipelineSourceChanged; _direct.Completed -= OnPipelineCompleted; _direct.Dispose(); _direct = null; }
-        if (_transition is not null) { _transition.SourceChanged -= OnPipelineSourceChanged; _transition.Completed -= OnPipelineCompleted; _transition.Dispose(); _transition = null; }
+        if (_transition is not null) { _transition.Trace -= OnTransitionTrace; _transition.SourceChanged -= OnPipelineSourceChanged; _transition.Completed -= OnPipelineCompleted; _transition.Dispose(); _transition = null; }
         _incompatibleNext?.Dispose(); _incompatibleNext = null;
         _tempo = null; _nextTempo = null; _fade = null; _gain = null;
         _visualizationTap = null;
         _timedProvider = null;
     }
 
-    private void Publish() => StateChanged?.Invoke(this, Snapshot);
+    private void Publish()
+    {
+        var snapshot = Snapshot;
+        if (snapshot.Diagnostics?.OutputMeasurement is { Available: true } output && _state == PlaybackState.Playing)
+        {
+            var mixed = snapshot.Diagnostics.CrossfadeMeasurement;
+            var now = Environment.TickCount64;
+            var previous = Interlocked.Read(ref _lastOutputLogTick);
+            if (now - previous >= (mixed?.Overlapping == true ? 100 : 1000)
+                && Interlocked.CompareExchange(ref _lastOutputLogTick, now, previous) == previous)
+                LogTransition("output-measured", new Dictionary<string, object?>
+                {
+                    ["submittedFrames"] = output.Frames, ["outputRms"] = output.Rms,
+                    ["outputPeak"] = output.Peak, ["nonFiniteSamples"] = output.NonFiniteSamples,
+                    ["outgoingRms"] = mixed?.OutgoingRms, ["incomingRms"] = mixed?.IncomingRms,
+                    ["mixedFrames"] = mixed?.MixedFrames, ["overlapping"] = mixed?.Overlapping,
+                    ["sampleRate"] = snapshot.Diagnostics.OutputFormat?.SampleRate
+                });
+        }
+        StateChanged?.Invoke(this, snapshot);
+    }
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
 
     public async ValueTask DisposeAsync()

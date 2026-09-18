@@ -2,7 +2,7 @@ using NAudio.Wave;
 
 namespace Dextromethorphan.Infrastructure.Audio.Dsp;
 
-public sealed class FadeEnvelopeSampleProvider(ISampleProvider source, Func<(TimeSpan Position, TimeSpan Duration)> clock) : ISampleProvider
+public sealed class FadeEnvelopeSampleProvider(ISampleProvider source, Func<(TimeSpan Position, TimeSpan Duration)> clock, Func<bool>? blockAlreadyCrossfaded = null) : ISampleProvider
 {
     public WaveFormat WaveFormat => source.WaveFormat;
     public double FadeInSeconds { get; set; }
@@ -12,6 +12,9 @@ public sealed class FadeEnvelopeSampleProvider(ISampleProvider source, Func<(Tim
     {
         var before = clock();
         var read = source.Read(buffer, offset, count);
+        // Crossfade gains already shape both sources. Applying the outgoing
+        // track's final fade to their sum would silence the incoming track too.
+        if (blockAlreadyCrossfaded?.Invoke() == true) return read;
         var after = clock();
         var channels = WaveFormat.Channels;
         var frames = read / channels;

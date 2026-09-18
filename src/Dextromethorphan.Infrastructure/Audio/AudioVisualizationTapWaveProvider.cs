@@ -21,6 +21,9 @@ internal sealed class AudioVisualizationTapWaveProvider : IWaveProvider
     private int _writeIndex;
     private int _sampleCount;
     private volatile bool _enabled;
+    private long _outputFrames, _nonFiniteSamples;
+    private AudioOutputMeasurement _measurement = new(0, 0, 0, 0, false);
+    public AudioOutputMeasurement Measurement => Volatile.Read(ref _measurement);
     private static readonly Guid IeeeFloatSubFormat =
         new("00000003-0000-0010-8000-00AA00389B71");
 
@@ -39,6 +42,21 @@ internal sealed class AudioVisualizationTapWaveProvider : IWaveProvider
     public int Read(byte[] buffer, int offset, int count)
     {
         var read = _source.Read(buffer, offset, count);
+        if (_canAnalyze && read > 0)
+        {
+            double energy = 0, peak = 0;
+            var bytes = WaveFormat.BitsPerSample / 8;
+            var samples = read / bytes;
+            for (var i = 0; i < samples; i++)
+            {
+                var sample = ReadSample(buffer, offset + i * bytes);
+                if (!double.IsFinite(sample)) { _nonFiniteSamples++; continue; }
+                energy += sample * sample;
+                peak = Math.Max(peak, Math.Abs(sample));
+            }
+            _outputFrames += read / WaveFormat.BlockAlign;
+            Volatile.Write(ref _measurement, new(_outputFrames, Math.Sqrt(energy / Math.Max(1, samples)), peak, _nonFiniteSamples, true));
+        }
         if (_enabled && _canAnalyze && read > 0)
             Capture(buffer, offset, read);
         return read;

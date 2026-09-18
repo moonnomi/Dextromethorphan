@@ -639,7 +639,7 @@
                         Visibility="{Binding IsVisible, Converter={StaticResource BoolToVisibility}}">
                     <views:PerformanceDiagnosticsView/>
                 </Border>
-                <Border Grid.ColumnSpan="3" Width="390" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,14,14,0" Padding="20" CornerRadius="14" Background="{DynamicResource SurfaceRaisedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Panel.ZIndex="80" Effect="{StaticResource SoftShadow}" Visibility="{Binding DiagnosticsVisible, Converter={StaticResource BoolToVisibility}}">
+                <Border Grid.ColumnSpan="3" Width="390" HorizontalAlignment="Right" VerticalAlignment="Stretch" Margin="0,14,14,14" Padding="20" CornerRadius="14" Background="{DynamicResource SurfaceRaisedBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Panel.ZIndex="80" Effect="{StaticResource SoftShadow}" Visibility="{Binding DiagnosticsVisible, Converter={StaticResource BoolToVisibility}}">
                     <views:AudioDiagnosticsView/>
                 </Border>
             </Grid>

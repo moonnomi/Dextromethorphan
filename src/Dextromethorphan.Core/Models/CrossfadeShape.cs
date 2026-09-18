@@ -5,6 +5,8 @@ public enum CrossfadeCurve { EqualPower, Linear, Smoothstep, Custom }
 /// <summary>Immutable envelope settings shared by audio rendering and its preview.</summary>
 public sealed record CrossfadeShape
 {
+    public bool DynamicEnabled { get; init; }
+    public bool SkipTrailingSilence { get; init; }
     public CrossfadeCurve Curve { get; init; } = CrossfadeCurve.EqualPower;
     public double IncomingPower { get; init; } = 1;
     public double OutgoingPower { get; init; } = 1;

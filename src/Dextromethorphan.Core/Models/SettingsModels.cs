@@ -11,6 +11,7 @@ public sealed class AppSettings
     public double BackgroundOpacity { get; set; } = 1;
     public bool AnimationsEnabled { get; set; } = true;
     public bool VisualizerEnabled { get; set; }
+    public bool DebugMode { get; set; }
     public bool AmbienceEnabled { get; set; }
     public bool PlayerArtworkGlow { get; set; }
     public bool NowPlayingArtworkGlow { get; set; }
